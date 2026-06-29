@@ -43,6 +43,8 @@ describe("config", () => {
     expect(config.version).toBe(1);
     expect(existsSync(paths.configPath)).toBe(true);
     expect(existsSync(join(home, ".rig/tools"))).toBe(true);
+    expect(existsSync(join(home, ".rig/tools/tsconfig.json"))).toBe(true);
     expect(existsSync(join(home, ".rig/runtime/sdk.ts"))).toBe(true);
+    expect(existsSync(join(home, ".rig/runtime/globals.d.ts"))).toBe(true);
   });
 });

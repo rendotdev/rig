@@ -6,6 +6,8 @@ import { RigError } from "../errors/RigError";
 
 export type RegistryKind = "base" | "custom";
 
+export const RigToolEntryFiles = ["index.rig.ts", "index.rig.tsx"] as const;
+
 export type DiscoveredTool = {
   name: string;
   registryKind: RegistryKind;
@@ -59,17 +61,42 @@ export class ToolDiscoveryService {
     return children.flatMap((child) => {
       if (!child.isDirectory()) return [];
       const toolDir = join(entry.path, child.name);
-      const toolPath = join(toolDir, "tool.ts");
-      if (!existsSync(toolPath)) return [];
+      const toolPaths = RigToolEntryFiles.map((file) => join(toolDir, file)).filter((path) =>
+        existsSync(path),
+      );
+
+      if (toolPaths.length > 1) {
+        throw new RigError("TOOL_INVALID", `Tool ${child.name} has multiple Rig entry files.`, {
+          toolDir,
+          found: toolPaths,
+          expected: RigToolEntryFiles,
+        });
+      }
+
+      if (toolPaths.length === 0) {
+        this.rejectLegacyEntry(child.name, toolDir);
+        return [];
+      }
+
       return [
         {
           name: child.name,
           registryKind: entry.kind,
           registryPath: entry.path,
           toolDir,
-          toolPath,
+          toolPath: toolPaths[0]!,
         },
       ];
+    });
+  }
+
+  private rejectLegacyEntry(toolName: string, toolDir: string): void {
+    const legacyPath = join(toolDir, "tool.ts");
+    if (!existsSync(legacyPath)) return;
+    throw new RigError("TOOL_INVALID", `Tool ${toolName} must use index.rig.ts or index.rig.tsx.`, {
+      toolDir,
+      found: legacyPath,
+      expected: RigToolEntryFiles,
     });
   }
 }

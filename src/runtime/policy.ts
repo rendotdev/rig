@@ -1,5 +1,5 @@
 import { RigError } from "../errors/RigError";
-import type { SideEffectLevel } from "../tools/types";
+import { SideEffectSet, type SideEffectDeclaration, type SideEffectLevel } from "../tools/types";
 
 export type PolicyOptions = {
   allowWrite?: boolean;
@@ -12,26 +12,32 @@ export class PolicyChecker {
   check(params: {
     tool: string;
     command: string;
-    sideEffects: SideEffectLevel;
+    sideEffects: SideEffectDeclaration;
     options: PolicyOptions;
     inputSource: string;
   }): void {
-    const { sideEffects, options } = params;
-    if (sideEffects === "read") return;
-    if (this.isAllowed(sideEffects, options)) return;
+    const required = SideEffectSet.normalize(params.sideEffects).filter(
+      (level) => level !== "read",
+    );
+    const missing = required.filter((level) => !this.isAllowed(level, params.options));
+    if (missing.length === 0) return;
 
-    const flag = this.flagFor(sideEffects);
+    const flags = missing.map((level) => this.flagFor(level));
     throw new RigError(
       "POLICY_CONFIRMATION_REQUIRED",
-      `This command declares ${sideEffects} side effects and requires confirmation.`,
+      `This command declares ${SideEffectSet.label(params.sideEffects)} side effects and requires confirmation.`,
       {
-        sideEffects,
-        suggestedCommand: `rig run ${params.tool} ${params.command} ${params.inputSource} ${flag}`,
+        sideEffects: params.sideEffects,
+        missing,
+        suggestedCommand: `rig run ${params.tool} ${params.command} ${params.inputSource} ${flags.join(" ")}`,
       },
     );
   }
 
-  private isAllowed(sideEffects: SideEffectLevel, options: PolicyOptions): boolean {
+  private isAllowed(
+    sideEffects: Exclude<SideEffectLevel, "read">,
+    options: PolicyOptions,
+  ): boolean {
     return (
       (sideEffects === "write" && Boolean(options.allowWrite)) ||
       (sideEffects === "network" && Boolean(options.allowNetwork)) ||

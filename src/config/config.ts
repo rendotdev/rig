@@ -29,8 +29,9 @@ export class RigConfigStore {
     }
 
     const config = await this.read();
+    const registries = this.registryEntries(config);
     await mkdir(this.resolvedBaseRegistry(config), { recursive: true });
-    await this.runtimeSupport.ensure();
+    await this.runtimeSupport.ensure(registries.map((registry) => registry.path));
     return config;
   }
 

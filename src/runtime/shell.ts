@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { RigError } from "../errors/RigError";
 import type { RigShell, ShellOptions, ShellResult } from "../tools/types";
 
@@ -8,11 +9,10 @@ export class BunRigShell implements RigShell {
     this.validateArgs(args);
     const timeoutMs = options.timeoutMs ?? this.defaults.timeoutMs ?? 30_000;
     const maxOutputBytes = options.maxOutputBytes ?? this.defaults.maxOutputBytes ?? 1_048_576;
-    const proc = Bun.spawn(args, {
+    const proc = spawn(args[0]!, args.slice(1), {
       cwd: options.cwd ?? this.defaults.cwd ?? process.cwd(),
       env: { ...process.env, ...this.defaults.env, ...options.env },
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
     let timedOut = false;
@@ -23,9 +23,9 @@ export class BunRigShell implements RigShell {
 
     try {
       const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
+        this.readStream(proc.stdout),
+        this.readStream(proc.stderr),
+        new Promise<number>((resolve) => proc.on("close", (code) => resolve(code ?? 1))),
       ]);
 
       if (timedOut) {
@@ -55,6 +55,14 @@ export class BunRigShell implements RigShell {
     } catch (error) {
       throw new RigError("SHELL_ERROR", "Command stdout was not valid JSON.", { result, error });
     }
+  }
+
+  private async readStream(stream: NodeJS.ReadableStream): Promise<string> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    }
+    return Buffer.concat(chunks).toString("utf8");
   }
 
   private validateArgs(args: string[]): void {

@@ -2,11 +2,16 @@ import { pathToFileURL } from "node:url";
 import { ToolDiscoveryService, type DiscoveredTool } from "../registry/discover";
 import { RigError } from "../errors/RigError";
 import type { ConfigOptions } from "../config/config";
+import { createRigToolKit } from "./sdk";
 import {
   CommandIds,
+  RigSchemaRoleSymbol,
   SideEffectLevels,
+  SideEffectSet,
   type CommandDefinition,
   type LoadedTool,
+  type RigSchemaRole,
+  type SideEffectDeclaration,
   type ToolDefinition,
 } from "./types";
 
@@ -92,23 +97,14 @@ export class ToolDefinitionValidator {
       });
     }
 
-    if (!SideEffectLevels.includes(value.sideEffects as never)) {
+    if (!this.hasValidSideEffects(value.sideEffects)) {
       throw new RigError("TOOL_INVALID", `Command ${id} has an invalid side effect level.`, {
         allowed: SideEffectLevels,
       });
     }
 
-    if (!this.hasSafeParse(value.input)) {
-      throw new RigError("TOOL_INVALID", `Command ${id} needs a Zod input schema.`, {
-        expected: "Zod schema",
-      });
-    }
-
-    if (!this.hasSafeParse(value.output)) {
-      throw new RigError("TOOL_INVALID", `Command ${id} needs a Zod output schema.`, {
-        expected: "Zod schema",
-      });
-    }
+    this.validateSchema(value.input, "input", id);
+    this.validateSchema(value.output, "output", id);
 
     this.validateExamples(value.examples, `${id}.examples`);
 
@@ -142,6 +138,29 @@ export class ToolDefinitionValidator {
         });
       }
     }
+  }
+
+  private validateSchema(value: unknown, role: RigSchemaRole, id: string): void {
+    if (!this.hasSafeParse(value)) {
+      throw new RigError("TOOL_INVALID", `Command ${id} needs a Rig ${role} schema.`, {
+        expected: `schema created with rig.${role}(...)`,
+      });
+    }
+
+    const actualRole = (value as { [RigSchemaRoleSymbol]?: unknown })[RigSchemaRoleSymbol];
+    if (actualRole !== role) {
+      throw new RigError("TOOL_INVALID", `Command ${id} needs a Rig ${role} schema.`, {
+        expected: `rig.${role}(...)`,
+        actual: actualRole ?? "unbranded Zod schema",
+      });
+    }
+  }
+
+  private hasValidSideEffects(value: unknown): value is SideEffectDeclaration {
+    if (typeof value === "string") return SideEffectLevels.includes(value as never);
+    if (!Array.isArray(value) || value.length === 0) return false;
+    const normalized = SideEffectSet.normalize(value as SideEffectDeclaration);
+    return normalized.length > 0 && normalized.every((level) => SideEffectLevels.includes(level));
   }
 
   private hasSafeParse(value: unknown): boolean {
@@ -183,8 +202,23 @@ export class ToolLoader {
     }
 
     const moduleRecord = moduleValue as { default?: unknown };
-    const definition = this.validator.validateToolDefinition(moduleRecord.default, tool.name);
+    const definitionValue = await this.evaluateModuleDefault(moduleRecord.default, tool.name);
+    const definition = this.validator.validateToolDefinition(definitionValue, tool.name);
     return { name: definition.name, path: tool.toolPath, definition };
+  }
+
+  private async evaluateModuleDefault(value: unknown, toolName: string): Promise<unknown> {
+    const awaitedValue = await Promise.resolve(value);
+    if (typeof awaitedValue !== "function") return awaitedValue;
+
+    try {
+      return await awaitedValue(createRigToolKit());
+    } catch (error) {
+      throw new RigError("TOOL_INVALID", `Could not evaluate tool factory ${toolName}.`, {
+        tool: toolName,
+        error,
+      });
+    }
   }
 
   async load(name: string): Promise<LoadedTool> {

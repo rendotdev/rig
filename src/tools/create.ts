@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RigConfigStore, type ConfigOptions } from "../config/config";
 import { RigError } from "../errors/RigError";
+import { RigToolEntryFiles } from "../registry/discover";
 import { ToolLoader } from "./loader";
 
 export class ToolCreator {
@@ -19,7 +20,7 @@ export class ToolCreator {
     const config = await this.configStore.ensure();
     const baseRegistry = this.configStore.resolvedBaseRegistry(config);
     const toolDir = join(baseRegistry, name);
-    const toolPath = join(toolDir, "tool.ts");
+    const toolPath = join(toolDir, RigToolEntryFiles[0]);
 
     if (existsSync(toolDir)) {
       throw new RigError("TOOL_INVALID", `Tool already exists: ${name}`, { path: toolDir });
@@ -39,19 +40,17 @@ export class ToolCreator {
   }
 
   private generatedToolSource(name: string): string {
-    return `import { RigTool, z } from "../../runtime/sdk";
-
-export default RigTool.define({
+    return `const tool: RigToolFactory = (rig) => rig.defineTool({
   name: ${JSON.stringify(name)},
   description: "Describe what this tool does.",
   commands: {
-    example: {
+    example: rig.command({
       description: "Example command. Replace this with a real command.",
-      input: z.object({
-        text: z.string().default("example"),
+      input: rig.input({
+        text: rig.z.string().default("example"),
       }),
-      output: z.object({
-        text: z.string(),
+      output: rig.output({
+        text: rig.z.string(),
       }),
       sideEffects: "read",
       examples: [
@@ -73,9 +72,11 @@ export default RigTool.define({
           text: input.text,
         };
       },
-    },
+    }),
   },
 });
+
+export default tool;
 `;
   }
 }

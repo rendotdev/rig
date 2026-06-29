@@ -12,7 +12,10 @@ class SmokeScript {
       await this.rig(["init"], env);
       await this.rig(["tool", "create", "sample"], env);
       await this.rig(["list"], env);
-      await this.rig(["tool", "help", "sample", "example"], env);
+      await this.rig(["ls", "--plain"], env);
+      await this.rig(["help", "sample", "example"], env);
+      await this.rig(["inspect", "sample", "example"], env);
+      await this.rig(["run", "sample", "example", "--dry-run", "smoke"], env);
       const stdout = await this.rig(["run", "sample", "example", "smoke"], env);
       const parsed = JSON.parse(stdout);
       if (parsed.errors?.length !== 0 || parsed.data?.text !== "smoke") {

@@ -43,6 +43,18 @@ export class RigPaths {
     return join(this.runtimeDir, "sdk.ts");
   }
 
+  get runtimeTypesPath(): string {
+    return join(this.runtimeDir, "types.d.ts");
+  }
+
+  get runtimeGlobalsPath(): string {
+    return join(this.runtimeDir, "globals.d.ts");
+  }
+
+  get runtimeToolTsconfigPath(): string {
+    return join(this.runtimeDir, "tsconfig.tools.json");
+  }
+
   get defaultBaseRegistryDir(): string {
     return "~/.rig/tools";
   }

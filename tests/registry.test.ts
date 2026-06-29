@@ -40,13 +40,40 @@ describe("registries", () => {
     expect(removed.customRegistries).not.toContain(registry);
   });
 
+  test("discovers index.rig.tsx entry files", async () => {
+    const home = await homes.create();
+    const toolDir = join(home, ".rig", "tools", "view-tool");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(join(toolDir, "index.rig.tsx"), "export default {};\n", "utf8");
+
+    const tools = await new ToolDiscoveryService({ homeDir: home }).discover();
+
+    expect(tools).toMatchObject([
+      {
+        name: "view-tool",
+        toolPath: join(toolDir, "index.rig.tsx"),
+      },
+    ]);
+  });
+
+  test("rejects legacy tool.ts entry files", async () => {
+    const home = await homes.create();
+    const toolDir = join(home, ".rig", "tools", "legacy");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(join(toolDir, "tool.ts"), "export default {};\n", "utf8");
+
+    await expect(new ToolDiscoveryService({ homeDir: home }).discover()).rejects.toThrow(
+      "Tool legacy must use index.rig.ts or index.rig.tsx.",
+    );
+  });
+
   test("detects duplicate tool names across registries", async () => {
     const home = await homes.create();
     await new ToolCreator({ homeDir: home }).create("sample");
     const custom = join(home, "custom-tools");
     await new RegistryConfigService({ homeDir: home }).add(custom);
     await mkdir(join(custom, "sample"), { recursive: true });
-    await writeFile(join(custom, "sample", "tool.ts"), "export default {};\n", "utf8");
+    await writeFile(join(custom, "sample", "index.rig.ts"), "export default {};\n", "utf8");
 
     await expect(new ToolDiscoveryService({ homeDir: home }).discover()).rejects.toThrow(
       "Duplicate tool name: sample",

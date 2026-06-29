@@ -1,6 +1,7 @@
 import type { z } from "zod";
 
 export type SideEffectLevel = "read" | "write" | "network" | "shell" | "destructive";
+export type SideEffectDeclaration = SideEffectLevel | SideEffectLevel[];
 
 export const SideEffectLevels: SideEffectLevel[] = [
   "read",
@@ -9,6 +10,29 @@ export const SideEffectLevels: SideEffectLevel[] = [
   "shell",
   "destructive",
 ];
+
+export const RigSchemaRoleSymbol = Symbol.for("rig.schemaRole");
+export type RigSchemaRole = "input" | "output";
+export declare const RigInputSchemaBrand: unique symbol;
+export declare const RigOutputSchemaBrand: unique symbol;
+
+export type RigInputSchema<T extends z.ZodTypeAny = z.ZodTypeAny> = T & {
+  readonly [RigInputSchemaBrand]: T;
+  readonly [RigSchemaRoleSymbol]?: "input";
+};
+
+export type RigOutputSchema<T extends z.ZodTypeAny = z.ZodTypeAny> = T & {
+  readonly [RigOutputSchemaBrand]: T;
+  readonly [RigSchemaRoleSymbol]?: "output";
+};
+
+export type RigSchema<T = any> = RigInputSchema<z.ZodType<T>> | RigOutputSchema<z.ZodType<T>>;
+export type AnyRigInputSchema = RigInputSchema<z.ZodTypeAny>;
+export type AnyRigOutputSchema = RigOutputSchema<z.ZodTypeAny>;
+export type RigInputData<T extends AnyRigInputSchema> = z.output<T>;
+export type RigOutputData<T extends AnyRigOutputSchema> = z.output<T>;
+export type RigOutputCandidate<T extends AnyRigOutputSchema> = z.input<T>;
+export type MaybePromise<T> = T | Promise<T>;
 
 export type ShellOptions = {
   cwd?: string;
@@ -29,11 +53,45 @@ export type RigShell = {
   json(args: string[], options?: ShellOptions): Promise<unknown>;
 };
 
+export type RigPathHelper = {
+  home(): string;
+  resolve(cwd: string, pathValue: string): string;
+  ensureParent(pathValue: string): Promise<void>;
+  size(pathValue: string): number;
+};
+
+export type RigArgBuilder = {
+  raw(...values: string[]): RigArgBuilder;
+  flag(name: string, enabled?: boolean): RigArgBuilder;
+  value(name: string, value: string | number | boolean | undefined | null): RigArgBuilder;
+  values(name: string, values: string[] | undefined): RigArgBuilder;
+  toArray(): string[];
+};
+
+export type SchemaFromValue<T extends z.ZodTypeAny | z.ZodRawShape> = T extends z.ZodTypeAny
+  ? T
+  : T extends z.ZodRawShape
+    ? z.ZodObject<T>
+    : never;
+
+export type RigToolKit = {
+  z: typeof z;
+  defineTool<T extends ToolDefinition>(definition: T): T;
+  command<I extends AnyRigInputSchema, O extends AnyRigOutputSchema>(
+    definition: CommandDefinition<I, O>,
+  ): CommandDefinition<I, O>;
+  input<T extends z.ZodTypeAny | z.ZodRawShape>(value: T): RigInputSchema<SchemaFromValue<T>>;
+  output<T extends z.ZodTypeAny | z.ZodRawShape>(value: T): RigOutputSchema<SchemaFromValue<T>>;
+  args(): RigArgBuilder;
+  paths: RigPathHelper;
+};
+
 export type ToolRunContext<Input> = {
   input: Input;
   env: NodeJS.ProcessEnv;
   cwd: string;
   shell: RigShell;
+  rig: RigToolKit;
 };
 
 export type ToolExample<Input = any, Output = any> = {
@@ -43,13 +101,16 @@ export type ToolExample<Input = any, Output = any> = {
   output?: Output;
 };
 
-export type CommandDefinition<Input = any, Output = any> = {
+export type CommandDefinition<
+  Input extends AnyRigInputSchema = AnyRigInputSchema,
+  Output extends AnyRigOutputSchema = AnyRigOutputSchema,
+> = {
   description: string;
-  input: z.ZodType<Input>;
-  output: z.ZodType<Output>;
-  sideEffects: SideEffectLevel;
-  examples?: ToolExample<Input, Output>[];
-  run: (ctx: ToolRunContext<Input>) => Promise<Output> | Output;
+  input: Input;
+  output: Output;
+  sideEffects: SideEffectDeclaration;
+  examples?: ToolExample<z.input<Input>, z.output<Output>>[];
+  run: (ctx: ToolRunContext<z.output<Input>>) => MaybePromise<z.input<Output>>;
 };
 
 export type ToolDefinition = {
@@ -57,6 +118,9 @@ export type ToolDefinition = {
   description: string;
   commands: Record<string, CommandDefinition>;
 };
+
+export type ToolFactory = (rig: RigToolKit) => ToolDefinition | Promise<ToolDefinition>;
+export type ToolModuleDefault = ToolDefinition | ToolFactory;
 
 export type LoadedTool = {
   name: string;
@@ -67,5 +131,23 @@ export type LoadedTool = {
 export class CommandIds {
   static from(tool: string, command: string): string {
     return `${tool}.${command}`;
+  }
+}
+
+export class SideEffectSet {
+  static normalize(value: SideEffectDeclaration): SideEffectLevel[] {
+    const levels = Array.isArray(value) ? value : [value];
+    const unique = Array.from(new Set(levels));
+    if (unique.length > 1 && unique.includes("read"))
+      return unique.filter((level) => level !== "read");
+    return unique;
+  }
+
+  static label(value: SideEffectDeclaration): string {
+    return this.normalize(value).join(",");
+  }
+
+  static includes(value: SideEffectDeclaration, level: SideEffectLevel): boolean {
+    return this.normalize(value).includes(level);
   }
 }

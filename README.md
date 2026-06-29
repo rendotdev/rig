@@ -16,7 +16,7 @@ Command run output always has top-level `data` and `errors`. If `errors` is empt
 bun install
 bun run src/cli.ts
 bun run src/cli.ts tool create my-tool
-bun run src/cli.ts tool help my-tool
+bun run src/cli.ts help my-tool
 bun run src/cli.ts run my-tool example test
 ```
 
@@ -66,14 +66,20 @@ rig dev link
 rig dev unlink
 rig dev status
 rig list
+rig ls
 rig list --plain
 rig tool create <tool>
-rig tool help <tool>
-rig tool help <tool> <command>
+rig help
+rig help <tool>
+rig help <tool> <command>
+rig inspect <tool>
+rig inspect <tool> <command>
 rig tool inspect <tool>
 rig tool inspect <tool> <command>
+rig typecheck [tool]
 rig run <tool> <command> [args...]
-rig help
+rig run <tool> <command> --dry-run [args...]
+rig llm.txt
 ```
 
 ## Run output
@@ -89,7 +95,22 @@ A successful command run prints JSON like this:
 }
 ```
 
-An error returns `data: null` and a non-empty `errors` array.
+An error returns `data: null` and a non-empty `errors` array. Use `--dry-run` to validate input and inspect command metadata without executing the command.
+
+Large successful outputs are truncated to 50KB or 2000 lines, whichever comes first. Rig saves the full command data as JSON in a temp file and returns a preview plus metadata in `data`:
+
+```json
+{
+  "data": {
+    "truncated": true,
+    "preview": "{\n  \"text\": \"...",
+    "previewFormat": "partial-json",
+    "fullOutputPath": "/tmp/rig-output-abc123/data.json",
+    "fullOutputFormat": "json"
+  },
+  "errors": []
+}
+```
 
 ## Development
 
@@ -112,15 +133,48 @@ rig dev status
 
 This writes a small shim to `~/.local/bin/rig` that runs `src/cli.ts` with Bun. Remove it with `rig dev unlink`.
 
+## Publishing
+
+The GitHub Actions publish workflow uses npm trusted publishing through OIDC, so it does not need an `NPM_TOKEN` secret. Configure npm package settings with:
+
+- Publisher: GitHub Actions
+- Organization or user: `rendotdev`
+- Repository: `rig`
+- Workflow filename: `publish.yml`
+- Allowed action: `npm publish`
+
+Trusted publishing requires npm 11.5.1 or newer and Node 22.14.0 or newer. The workflow uses Node 24 and updates npm before publishing. npm currently requires the package to exist before you can configure trusted publishing, so the first package version may need to be published manually or with a short-lived token. After that, use trusted publishing and remove publish tokens.
+
 ## Tool files
 
 Generated tools create one file by default:
 
 ```txt
-~/.rig/tools/my-tool/tool.ts
+~/.rig/tools/my-tool/index.rig.ts
 ```
 
-Examples live inside the tool definition, not in separate README or input files. `rig tool help` renders command inputs, outputs, and examples from the definition. `rig tool inspect` includes full JSON Schema metadata.
+Examples live inside the tool definition, not in separate README or input files. `rig help <tool>` renders command inputs, outputs, and examples from the definition. `rig inspect` includes full JSON Schema metadata.
+
+Tool modules export a factory. Rig injects the tool runtime so tools do not need to import Rig helpers. Define command schemas with `rig.input(...)` and `rig.output(...)`; Rig brands those schemas and rejects raw Zod schemas so inputs and outputs stay inspectable and policy-ready. Run `rig typecheck [tool]` to type-check tool files with the generated global `RigToolFactory` type. Rig packages TypeScript as a runtime dependency and uses the TypeScript compiler API directly, so users do not need a global `tsc` install.
+
+```ts
+const tool: RigToolFactory = (rig) =>
+  rig.defineTool({
+    name: "my-tool",
+    description: "Describe what this tool does.",
+    commands: {
+      example: rig.command({
+        description: "Echo input text.",
+        input: rig.input({ text: rig.z.string().default("example") }),
+        output: rig.output({ text: rig.z.string() }),
+        sideEffects: "read",
+        run: async ({ input }) => ({ text: input.text }),
+      }),
+    },
+  });
+
+export default tool;
+```
 
 ## Limitations
 

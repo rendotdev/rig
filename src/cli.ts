@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { Command } from "commander";
 import { RigConfigStore } from "./config/config";
 import { RigPaths, type PathOptions } from "./config/paths";
@@ -11,6 +11,7 @@ import { ToolHelpService } from "./tools/help";
 import { ToolInspector } from "./tools/inspect";
 import { ToolListService } from "./tools/list";
 import { ToolRunner } from "./tools/run";
+import { ToolTypecheckService } from "./tools/typecheck";
 
 class CliApplication {
   private readonly program = new Command();
@@ -39,14 +40,25 @@ class CliApplication {
     this.configureConfigCommands();
     this.configureRegistryCommands();
     this.configureListCommand();
+    this.configureInspectCommand();
     this.configureToolCommands();
     this.configureRunCommand();
+    this.configureTypecheckCommand();
     this.configureDevCommands();
     this.program
       .command("help")
-      .description("Print agent-facing instructions in Markdown.")
+      .argument("[tool]")
+      .argument("[command]")
+      .description("Print Rig, tool, or command help.")
+      .action(async (tool?: string, command?: string) => {
+        if (tool) console.log(await new ToolHelpService(this.pathOptions()).render(tool, command));
+        else console.log(this.helpText());
+      });
+    this.program
+      .command("llm.txt")
+      .description("Print Rig instructions for LLMs.")
       .action(() => {
-        console.log(this.helpText());
+        console.log(this.llmText());
       });
   }
 
@@ -116,8 +128,9 @@ class CliApplication {
   private configureListCommand(): void {
     this.program
       .command("list")
+      .alias("ls")
       .description("List discovered tools and commands.")
-      .option("--plain", "Print a plain text list.")
+      .option("--plain", "Print a compact plain text command list.")
       .action(async (commandOptions: { plain?: boolean }) => {
         const service = new ToolListService(this.pathOptions());
         const data = await service.list();
@@ -126,25 +139,25 @@ class CliApplication {
       });
   }
 
+  private configureInspectCommand(): void {
+    this.program
+      .command("inspect")
+      .argument("<tool>")
+      .argument("[command]")
+      .description("Print tool or command metadata as JSON.")
+      .action(async (tool: string, command?: string) => {
+        this.printJson(await new ToolInspector(this.pathOptions()).inspect(tool, command));
+      });
+  }
+
   private configureToolCommands(): void {
-    const toolCommand = this.program
-      .command("tool")
-      .description("Create, inspect, and help tools.");
+    const toolCommand = this.program.command("tool").description("Create and inspect tools.");
     toolCommand
       .command("create")
       .argument("<tool>")
       .description("Create a starter tool in the base registry.")
       .action(async (name: string) => {
         await this.createTool(name);
-      });
-
-    toolCommand
-      .command("help")
-      .argument("<tool>")
-      .argument("[command]")
-      .description("Print tool or command help from the tool definition.")
-      .action(async (tool: string, command?: string) => {
-        console.log(await new ToolHelpService(this.pathOptions()).render(tool, command));
       });
 
     toolCommand
@@ -170,6 +183,7 @@ class CliApplication {
       .option("--allow-network", "Allow network side effects.")
       .option("--allow-shell", "Allow shell side effects.")
       .option("--allow-destructive", "Allow destructive side effects.")
+      .option("--dry-run", "Validate input and show what would run without executing.")
       .action(
         async (
           tool: string,
@@ -177,20 +191,21 @@ class CliApplication {
           args: string[],
           commandOptions: Record<string, unknown>,
         ) => {
-          const result = await new ToolRunner(this.pathOptions()).run(tool, command, {
-            ...this.pathOptions(),
-            args,
-            input: commandOptions.input as string | undefined,
-            inputFile: commandOptions.inputFile as string | undefined,
-            allowWrite: Boolean(commandOptions.allowWrite),
-            allowNetwork: Boolean(commandOptions.allowNetwork),
-            allowShell: Boolean(commandOptions.allowShell),
-            allowDestructive: Boolean(commandOptions.allowDestructive),
-          });
-          this.printJson(result.envelope);
-          process.exitCode = result.exitCode;
+          await this.runToolCommand(tool, command, args, commandOptions);
         },
       );
+  }
+
+  private configureTypecheckCommand(): void {
+    this.program
+      .command("typecheck")
+      .argument("[tool]")
+      .description("Type-check local tool files with the injected Rig tool runtime types.")
+      .action(async (tool?: string) => {
+        const result = await new ToolTypecheckService(this.pathOptions()).typecheck(tool);
+        this.printJson(result);
+        process.exitCode = result.exitCode;
+      });
   }
 
   private configureDevCommands(): void {
@@ -232,6 +247,27 @@ class CliApplication {
       });
   }
 
+  private async runToolCommand(
+    tool: string,
+    command: string,
+    args: string[],
+    commandOptions: Record<string, unknown>,
+  ): Promise<void> {
+    const result = await new ToolRunner(this.pathOptions()).run(tool, command, {
+      ...this.pathOptions(),
+      args,
+      input: commandOptions.input as string | undefined,
+      inputFile: commandOptions.inputFile as string | undefined,
+      allowWrite: Boolean(commandOptions.allowWrite),
+      allowNetwork: Boolean(commandOptions.allowNetwork),
+      allowShell: Boolean(commandOptions.allowShell),
+      allowDestructive: Boolean(commandOptions.allowDestructive),
+      dryRun: Boolean(commandOptions.dryRun),
+    });
+    this.printJson(result.envelope);
+    process.exitCode = result.exitCode;
+  }
+
   private async showDefaultStatus(): Promise<void> {
     const options = this.pathOptions();
     const paths = new RigPaths(options);
@@ -246,21 +282,23 @@ class CliApplication {
     console.log(`Tools found:   ${tools.length}`);
     console.log("\nNext steps:");
     console.log("  rig tool create my-tool");
-    console.log("  rig tool help my-tool");
+    console.log("  rig help my-tool");
     console.log("  rig run my-tool example test");
-    console.log("  rig help");
+    console.log("  rig llm.txt");
     console.log('\nRun "rig doctor" if you want to verify your setup.');
   }
 
   private async createTool(name: string): Promise<void> {
     const result = await new ToolCreator(this.pathOptions()).create(name);
     console.log(`Created tool ${result.name}`);
-    console.log(`\nPath: ${result.toolDir}`);
-    console.log("Files:");
+    console.log(`\nTool directory: ${result.toolDir}`);
+    console.log(`Tool file:      ${result.toolPath}`);
+    console.log("\nFiles:");
     for (const file of result.files) console.log(`  ${file}`);
+    console.log(`\nEdit: ${result.toolPath}`);
     console.log("\nTry:");
-    console.log(`  rig tool help ${result.name}`);
-    console.log(`  rig tool help ${result.name} ${result.command}`);
+    console.log(`  rig help ${result.name}`);
+    console.log(`  rig help ${result.name} ${result.command}`);
     console.log(`  rig run ${result.name} ${result.command} test`);
   }
 
@@ -284,26 +322,35 @@ class CliApplication {
   }
 
   private helpText(): string {
-    return `# Rig help
+    return this.workflowText("# Rig help");
+  }
+
+  private llmText(): string {
+    return this.workflowText("# Rig llm.txt");
+  }
+
+  private workflowText(title: string): string {
+    return `${title}
 
 Rig is a typed local command runtime. It runs local TypeScript tools that contain one or more commands.
 
 Use this workflow:
 
 1. Run \`rig list\` to discover tools and command ids.
-2. Run \`rig tool help <tool>\` to read the tool API in plain text.
-3. Run \`rig tool help <tool> <command>\` before using a command.
-4. Use \`rig tool inspect <tool> <command>\` when you need machine-readable schemas and examples.
+2. Run \`rig help <tool>\` to read the tool API in plain text.
+3. Run \`rig help <tool> <command>\` before using a command.
+4. Use \`rig inspect <tool> <command>\` when you need machine-readable schemas and examples.
 5. Run commands with \`rig run <tool> <command> [args...]\`. Use \`--input\` or \`--input-file\` when JSON is clearer.
-6. Parse stdout as JSON with top-level \`data\` and \`errors\`.
-7. On success, \`errors\` is empty and the command result is in \`data\`.
-8. On failure, \`errors\` is non-empty. Read \`errors[0].message\` and \`errors[0].code\`.
-9. Treat stderr as logs or human-readable diagnostics.
-10. Remember that tools are local TypeScript files on the user's machine.
-11. Prefer read-only commands. Ask the user before write, network, shell, or destructive side effects.
-12. If Rig returns \`POLICY_CONFIRMATION_REQUIRED\`, show the suggested command from \`errors[0].details.suggestedCommand\` to the user and ask for consent.
+6. Use \`--dry-run\` to validate input and inspect side effects without executing a command.
+7. Parse stdout as JSON with top-level \`data\` and \`errors\`.
+8. On success, \`errors\` is empty and the command result is in \`data\`.
+9. On failure, \`errors\` is non-empty. Read \`errors[0].message\` and \`errors[0].code\`.
+10. Treat stderr as logs or human-readable diagnostics.
+11. Remember that tools are local TypeScript files on the user's machine.
+12. Prefer read-only commands. Ask the user before write, network, shell, or destructive side effects.
+13. If Rig returns \`POLICY_CONFIRMATION_REQUIRED\`, show the suggested command from \`errors[0].details.suggestedCommand\` to the user and ask for consent.
 
-A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. The CLI run syntax keeps those as separate arguments, for example \`rig run github list-prs owner=octocat repo=hello-world\`.
+A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. It is an identifier for discovery and inspection; execute it with \`rig run github list-prs owner=octocat repo=hello-world\`.
 `;
   }
 

@@ -5,14 +5,14 @@
     "": {
       "name": "rig",
       "dependencies": {
+        "@types/bun": "latest",
         "commander": "latest",
+        "typescript": "latest",
         "zod": "latest",
       },
       "devDependencies": {
-        "@types/bun": "latest",
         "oxfmt": "^0.56.0",
         "oxlint": "^1.71.0",
-        "typescript": "latest",
         "vitest": "^4.1.9",
       },
     },

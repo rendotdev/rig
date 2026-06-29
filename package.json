@@ -1,26 +1,46 @@
 {
-  "name": "rig",
+  "name": "@rendotdev/rig",
   "version": "0.0.1",
-  "private": true,
   "description": "Local typed command runtime for agents.",
-  "bin": {
-    "rig": "./dist/rig"
+  "homepage": "https://github.com/rendotdev/rig#readme",
+  "bugs": {
+    "url": "https://github.com/rendotdev/rig/issues"
   },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github-rendotdev/rendotdev/rig.git"
+  },
+  "bin": {
+    "rig": "./dist/rig.js"
+  },
+  "files": [
+    "dist/rig.js",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "bun build ./src/cli.ts --compile --outfile dist/rig",
-    "test": "oxfmt . --check && oxlint . --deny-warnings && vitest run"
+    "build": "bun build ./src/cli.ts --target=node --outfile dist/rig.js",
+    "test": "oxfmt . --check && oxlint . --deny-warnings && vitest run",
+    "prepack": "bun run build"
   },
   "dependencies": {
+    "@types/bun": "latest",
     "commander": "latest",
+    "typescript": "latest",
     "zod": "latest"
   },
   "devDependencies": {
-    "@types/bun": "latest",
     "oxfmt": "^0.56.0",
     "oxlint": "^1.71.0",
-    "typescript": "latest",
     "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
