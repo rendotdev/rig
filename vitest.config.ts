@@ -3,6 +3,9 @@ import { defineConfig } from "vitest/config";
 class VitestConfigFactory {
   static create() {
     return defineConfig({
+      ssr: {
+        external: ["typescript"],
+      },
       test: {
         environment: "node",
         globals: false,
