@@ -10,11 +10,12 @@ class SmokeScript {
     try {
       const env = { RIG_HOME: this.home };
       await this.rig(["init"], env);
-      await this.rig(["tool", "create", "hello"], env);
-      await this.rig(["tool", "help", "hello", "greet"], env);
-      const stdout = await this.rig(["run", "hello", "greet", "--input", '{"name":"world"}'], env);
+      await this.rig(["tool", "create", "sample"], env);
+      await this.rig(["list"], env);
+      await this.rig(["tool", "help", "sample", "example"], env);
+      const stdout = await this.rig(["run", "sample", "example", "smoke"], env);
       const parsed = JSON.parse(stdout);
-      if (!parsed.extensions?.rig?.ok || parsed.extensions?.rig?.id !== "hello.greet") {
+      if (parsed.errors?.length !== 0 || parsed.data?.text !== "smoke") {
         throw new Error(`Unexpected smoke output: ${stdout}`);
       }
       console.log("Smoke OK");

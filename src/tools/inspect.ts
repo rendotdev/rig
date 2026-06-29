@@ -1,6 +1,5 @@
 import type { ConfigOptions } from "../config/config";
 import { RigError } from "../errors/RigError";
-import { GraphApiRenderer } from "./graphql";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
 import { CommandIds, type CommandDefinition } from "./types";
@@ -55,7 +54,7 @@ export class ToolInspector {
       sideEffects: command.sideEffects,
       inputSchema: SchemaRenderer.toJsonSchema(command.input),
       outputSchema: SchemaRenderer.toJsonSchema(command.output),
-      api: GraphApiRenderer.metadata(toolName, name, command),
+      run: `rig run ${toolName} ${name} [args...]`,
       examples: command.examples ?? [],
     };
   }

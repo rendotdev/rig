@@ -30,8 +30,8 @@ export class ToolCreator {
 
     return {
       name,
-      command: "greet",
-      id: `${name}.greet`,
+      command: "example",
+      id: `${name}.example`,
       toolDir,
       toolPath,
       files: [toolPath],
@@ -43,34 +43,34 @@ export class ToolCreator {
 
 export default RigTool.define({
   name: ${JSON.stringify(name)},
-  description: "A starter tool that demonstrates Rig commands.",
+  description: "Describe what this tool does.",
   commands: {
-    greet: {
-      description: "Return a friendly greeting.",
+    example: {
+      description: "Example command. Replace this with a real command.",
       input: z.object({
-        name: z.string().default("world"),
+        text: z.string().default("example"),
       }),
       output: z.object({
-        message: z.string(),
+        text: z.string(),
       }),
       sideEffects: "read",
       examples: [
         {
-          title: "Greet the world",
+          title: "Run the example command",
           text: "Use this to verify Rig can run a local command.",
-          input: { name: "world" },
-          output: { message: "Hello, world!" },
+          input: { text: "example" },
+          output: { text: "example" },
         },
         {
-          title: "Greet a person",
-          text: "Use this when the caller provides a name.",
-          input: { name: "René-Pier" },
-          output: { message: "Hello, René-Pier!" },
+          title: "Pass custom text",
+          text: "Use this to see how arguments map into command input.",
+          input: { text: "custom" },
+          output: { text: "custom" },
         },
       ],
       run: async ({ input }) => {
         return {
-          message: \`Hello, \${input.name}!\`,
+          text: input.text,
         };
       },
     },

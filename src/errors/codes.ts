@@ -9,6 +9,7 @@ export const ErrorCodes = {
   POLICY_CONFIRMATION_REQUIRED: "POLICY_CONFIRMATION_REQUIRED",
   INPUT_ERROR: "INPUT_ERROR",
   SHELL_ERROR: "SHELL_ERROR",
+  DEV_LINK_ERROR: "DEV_LINK_ERROR",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

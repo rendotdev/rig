@@ -32,85 +32,60 @@ afterEach(async () => {
 describe("tool commands", () => {
   test("creates a starter tool with definition-owned examples", async () => {
     const home = await homes.create();
-    const result = await new ToolCreator({ homeDir: home }).create("hello");
+    const result = await new ToolCreator({ homeDir: home }).create("sample");
     expect(result.files).toHaveLength(1);
-    expect(result.id).toBe("hello.greet");
+    expect(result.id).toBe("sample.example");
 
-    const help = await new ToolHelpService({ homeDir: home }).render("hello", "greet");
-    expect(help).toContain("Greet a person");
-    expect(help).toContain("rig run hello greet");
-    expect(help).toContain("type Query");
+    const help = await new ToolHelpService({ homeDir: home }).render("sample", "example");
+    expect(help).toContain("Pass custom text");
+    expect(help).toContain("rig run sample example");
+    expect(help).toContain("Input:");
+    expect(help).toContain("Output:");
   });
 
   test("inspects command metadata as JSON", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("hello");
-    const inspected = await new ToolInspector({ homeDir: home }).inspect("hello", "greet");
+    await new ToolCreator({ homeDir: home }).create("sample");
+    const inspected = await new ToolInspector({ homeDir: home }).inspect("sample", "example");
     expect(inspected).toMatchObject({
-      tool: "hello",
-      command: "greet",
-      id: "hello.greet",
+      tool: "sample",
+      command: "example",
+      id: "sample.example",
       sideEffects: "read",
-      api: {
-        style: "graphql-inspired",
-        operation: "query",
-      },
+      run: "rig run sample example [args...]",
     });
   });
 
   test("runs a command and returns a success envelope", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("hello");
-    const result = await new ToolRunner({ homeDir: home }).run("hello", "greet", {
+    await new ToolCreator({ homeDir: home }).create("sample");
+    const result = await new ToolRunner({ homeDir: home }).run("sample", "example", {
       homeDir: home,
-      input: '{"name":"Agent"}',
+      args: ["Agent"],
     });
     expect(result.exitCode).toBe(0);
     expect(result.envelope).toMatchObject({
-      data: {
-        hello: {
-          greet: { message: "Hello, Agent!" },
-        },
-      },
+      data: { text: "Agent" },
       errors: [],
-      extensions: {
-        rig: {
-          ok: true,
-          tool: "hello",
-          command: "greet",
-          id: "hello.greet",
-          path: ["hello", "greet"],
-        },
-      },
     });
   });
 
   test("returns an error envelope for invalid input", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("hello");
-    const result = await new ToolRunner({ homeDir: home }).run("hello", "greet", {
+    await new ToolCreator({ homeDir: home }).create("sample");
+    const result = await new ToolRunner({ homeDir: home }).run("sample", "example", {
       homeDir: home,
-      input: '{"name":123}',
+      input: '{"text":123}',
     });
     expect(result.exitCode).toBe(1);
     expect(result.envelope).toMatchObject({
       data: null,
       errors: [
         {
+          code: "VALIDATION_ERROR",
           message: "Invalid input.",
-          path: ["hello", "greet"],
-          extensions: { code: "VALIDATION_ERROR" },
         },
       ],
-      extensions: {
-        rig: {
-          ok: false,
-          tool: "hello",
-          command: "greet",
-          id: "hello.greet",
-          path: ["hello", "greet"],
-        },
-      },
     });
   });
 });

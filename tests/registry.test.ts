@@ -42,14 +42,14 @@ describe("registries", () => {
 
   test("detects duplicate tool names across registries", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("hello");
+    await new ToolCreator({ homeDir: home }).create("sample");
     const custom = join(home, "custom-tools");
     await new RegistryConfigService({ homeDir: home }).add(custom);
-    await mkdir(join(custom, "hello"), { recursive: true });
-    await writeFile(join(custom, "hello", "tool.ts"), "export default {};\n", "utf8");
+    await mkdir(join(custom, "sample"), { recursive: true });
+    await writeFile(join(custom, "sample", "tool.ts"), "export default {};\n", "utf8");
 
     await expect(new ToolDiscoveryService({ homeDir: home }).discover()).rejects.toThrow(
-      "Duplicate tool name: hello",
+      "Duplicate tool name: sample",
     );
   });
 });

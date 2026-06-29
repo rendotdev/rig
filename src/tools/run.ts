@@ -5,12 +5,14 @@ import { EnvelopeFactory } from "../runtime/envelope";
 import { PolicyChecker, type PolicyOptions } from "../runtime/policy";
 import { BunRigShell } from "../runtime/shell";
 import { ToolLoader } from "./loader";
-import { CommandIds, type RigShell, type ShellOptions, type ShellResult } from "./types";
+import { SchemaRenderer } from "./schema";
+import type { CommandDefinition, RigShell, ShellOptions, ShellResult } from "./types";
 
 export type RunCommandOptions = ConfigOptions &
   PolicyOptions & {
     input?: string;
     inputFile?: string;
+    args?: string[];
   };
 
 export type RunCommandResult = {
@@ -52,9 +54,124 @@ class GuardedShell implements RigShell {
   }
 }
 
+class RunInputReader {
+  async read(
+    command: CommandDefinition,
+    options: RunCommandOptions,
+  ): Promise<{ value: unknown; source: string }> {
+    const args = options.args ?? [];
+    const inputSources = [
+      Boolean(options.input),
+      Boolean(options.inputFile),
+      args.length > 0,
+    ].filter(Boolean).length;
+
+    if (inputSources > 1) {
+      throw new RigError("INPUT_ERROR", "Use args, --input, or --input-file, not more than one.");
+    }
+
+    if (options.inputFile) {
+      const raw = await readFile(options.inputFile, "utf8");
+      return { value: JSON.parse(raw), source: `--input-file ${options.inputFile}` };
+    }
+
+    if (options.input) {
+      return { value: JSON.parse(options.input), source: `--input '${options.input}'` };
+    }
+
+    if (args.length > 0) {
+      const parser = new InputArgumentParser(command.input);
+      return { value: parser.parse(args), source: new InputSourceRenderer().render(args) };
+    }
+
+    return { value: {}, source: "--input '{}'" };
+  }
+}
+
+class InputArgumentParser {
+  constructor(private readonly schema: unknown) {}
+
+  parse(args: string[]): unknown {
+    if (args.length === 1) {
+      const maybeJson = this.tryParseJson(args[0]);
+      if (maybeJson.parsed && this.shouldUseJsonValue(maybeJson.value)) return maybeJson.value;
+    }
+
+    if (args.every((arg) => arg.includes("="))) {
+      return Object.fromEntries(args.map((arg) => this.parseKeyValueArg(arg)));
+    }
+
+    const fields = this.inputFieldNames();
+    if (fields.length === 0) {
+      if (args.length === 1) return this.parseScalar(args[0]);
+      throw new RigError("INPUT_ERROR", "This command does not declare positional input fields.", {
+        args,
+      });
+    }
+
+    if (args.length > fields.length) {
+      throw new RigError("INPUT_ERROR", "Too many positional arguments.", {
+        args,
+        expectedFields: fields,
+      });
+    }
+
+    return Object.fromEntries(args.map((arg, index) => [fields[index], this.parseScalar(arg)]));
+  }
+
+  private parseKeyValueArg(arg: string): [string, unknown] {
+    const separatorIndex = arg.indexOf("=");
+    const key = arg.slice(0, separatorIndex);
+    const value = arg.slice(separatorIndex + 1);
+    if (!key) {
+      throw new RigError("INPUT_ERROR", "Argument keys must not be empty.", { arg });
+    }
+    return [key, this.parseScalar(value)];
+  }
+
+  private parseScalar(value: string): unknown {
+    const maybeJson = this.tryParseJson(value);
+    return maybeJson.parsed ? maybeJson.value : value;
+  }
+
+  private tryParseJson(value: string): { parsed: true; value: unknown } | { parsed: false } {
+    try {
+      return { parsed: true, value: JSON.parse(value) };
+    } catch {
+      return { parsed: false };
+    }
+  }
+
+  private shouldUseJsonValue(value: unknown): boolean {
+    return typeof value === "object" && value !== null;
+  }
+
+  private inputFieldNames(): string[] {
+    const jsonSchema = SchemaRenderer.toJsonSchema(this.schema);
+    if (!this.isRecord(jsonSchema) || !this.isRecord(jsonSchema.properties)) return [];
+    return Object.keys(jsonSchema.properties);
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+}
+
+class InputSourceRenderer {
+  render(args: string[]): string {
+    return args.map((arg) => this.shellArg(arg)).join(" ");
+  }
+
+  private shellArg(value: string): string {
+    if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) return value;
+    return `'${value.replaceAll("'", "'\\''")}'`;
+  }
+}
+
 export class ToolRunner {
   private readonly loader: ToolLoader;
   private readonly policy: PolicyChecker;
+  private readonly inputReader = new RunInputReader();
 
   constructor(options: ConfigOptions = {}) {
     this.loader = new ToolLoader(options);
@@ -66,12 +183,9 @@ export class ToolRunner {
     commandName: string,
     options: RunCommandOptions = {},
   ): Promise<RunCommandResult> {
-    const start = performance.now();
-    const id = CommandIds.from(toolName, commandName);
-
     try {
-      const { tool, command } = await this.loader.loadCommand(toolName, commandName);
-      const input = await this.readInput(options);
+      const { command } = await this.loader.loadCommand(toolName, commandName);
+      const input = await this.inputReader.read(command, options);
 
       this.policy.check({
         tool: toolName,
@@ -104,11 +218,7 @@ export class ToolRunner {
 
       return {
         envelope: EnvelopeFactory.success({
-          tool: tool.definition.name,
-          command: commandName,
-          id,
           data: outputResult.data,
-          elapsedMs: this.elapsed(start),
         }),
         exitCode: 0,
       };
@@ -116,38 +226,13 @@ export class ToolRunner {
       const rigError = this.asInputAwareRigError(error);
       return {
         envelope: EnvelopeFactory.error({
-          tool: toolName,
-          command: commandName,
-          id,
           code: rigError.code,
           message: rigError.message,
           details: rigError.details,
-          elapsedMs: this.elapsed(start),
         }),
         exitCode: 1,
       };
     }
-  }
-
-  private async readInput(options: RunCommandOptions): Promise<{ value: unknown; source: string }> {
-    if (options.input && options.inputFile) {
-      throw new RigError("INPUT_ERROR", "Use either --input or --input-file, not both.");
-    }
-
-    if (options.inputFile) {
-      const raw = await readFile(options.inputFile, "utf8");
-      return { value: JSON.parse(raw), source: `--input-file ${options.inputFile}` };
-    }
-
-    if (options.input) {
-      return { value: JSON.parse(options.input), source: `--input '${options.input}'` };
-    }
-
-    return { value: {}, source: "--input '{}'" };
-  }
-
-  private elapsed(start: number): number {
-    return Math.max(0, Math.round(performance.now() - start));
   }
 
   private asInputAwareRigError(error: unknown): RigError {

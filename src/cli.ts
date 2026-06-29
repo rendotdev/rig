@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { RigConfigStore } from "./config/config";
 import { RigPaths, type PathOptions } from "./config/paths";
+import { DevLinkService } from "./dev/dev-link";
 import { RigError, RigErrors } from "./errors/RigError";
 import { RegistryConfigService } from "./registry/registry";
 import { ToolDiscoveryService } from "./registry/discover";
@@ -32,18 +33,20 @@ class CliApplication {
     this.program
       .name("rig")
       .description("Local typed command runtime for agents.")
-      .version("0.0.1");
+      .version("0.0.1")
+      .addHelpCommand(false);
     this.configureInitCommands();
     this.configureConfigCommands();
     this.configureRegistryCommands();
-    this.configureToolsCommands();
+    this.configureListCommand();
     this.configureToolCommands();
     this.configureRunCommand();
+    this.configureDevCommands();
     this.program
-      .command("help-agent")
+      .command("help")
       .description("Print agent-facing instructions in Markdown.")
       .action(() => {
-        console.log(this.helpAgentText());
+        console.log(this.helpText());
       });
   }
 
@@ -110,9 +113,8 @@ class CliApplication {
       });
   }
 
-  private configureToolsCommands(): void {
-    const toolsCommand = this.program.command("tools").description("Discover tools.");
-    toolsCommand
+  private configureListCommand(): void {
+    this.program
       .command("list")
       .description("List discovered tools and commands.")
       .option("--plain", "Print a plain text list.")
@@ -160,6 +162,7 @@ class CliApplication {
       .command("run")
       .argument("<tool>")
       .argument("<command>")
+      .argument("[args...]", "Command arguments.")
       .description("Run a tool command.")
       .option("--input <json>", "JSON input string.")
       .option("--input-file <path>", "Read JSON input from a file.")
@@ -167,18 +170,65 @@ class CliApplication {
       .option("--allow-network", "Allow network side effects.")
       .option("--allow-shell", "Allow shell side effects.")
       .option("--allow-destructive", "Allow destructive side effects.")
-      .action(async (tool: string, command: string, commandOptions: Record<string, unknown>) => {
-        const result = await new ToolRunner(this.pathOptions()).run(tool, command, {
-          ...this.pathOptions(),
-          input: commandOptions.input as string | undefined,
-          inputFile: commandOptions.inputFile as string | undefined,
-          allowWrite: Boolean(commandOptions.allowWrite),
-          allowNetwork: Boolean(commandOptions.allowNetwork),
-          allowShell: Boolean(commandOptions.allowShell),
-          allowDestructive: Boolean(commandOptions.allowDestructive),
+      .action(
+        async (
+          tool: string,
+          command: string,
+          args: string[],
+          commandOptions: Record<string, unknown>,
+        ) => {
+          const result = await new ToolRunner(this.pathOptions()).run(tool, command, {
+            ...this.pathOptions(),
+            args,
+            input: commandOptions.input as string | undefined,
+            inputFile: commandOptions.inputFile as string | undefined,
+            allowWrite: Boolean(commandOptions.allowWrite),
+            allowNetwork: Boolean(commandOptions.allowNetwork),
+            allowShell: Boolean(commandOptions.allowShell),
+            allowDestructive: Boolean(commandOptions.allowDestructive),
+          });
+          this.printJson(result.envelope);
+          process.exitCode = result.exitCode;
+        },
+      );
+  }
+
+  private configureDevCommands(): void {
+    const devCommand = this.program.command("dev").description("Local development helpers.");
+    devCommand
+      .command("link")
+      .description("Link this checkout as the local rig command for development.")
+      .option("--bin-dir <path>", "Directory where the rig shim should be written.")
+      .option("--force", "Overwrite an existing non-Rig shim.")
+      .action(async (commandOptions: { binDir?: string; force?: boolean }) => {
+        const service = new DevLinkService(this.pathOptions());
+        const status = await service.link({
+          binDir: commandOptions.binDir,
+          force: Boolean(commandOptions.force),
         });
-        this.printJson(result.envelope);
-        process.exitCode = result.exitCode;
+        console.log(service.renderLinkResult(status));
+      });
+
+    devCommand
+      .command("unlink")
+      .description("Remove the local rig development shim.")
+      .option("--bin-dir <path>", "Directory where the rig shim was written.")
+      .option("--force", "Remove even if the file is not a Rig dev shim.")
+      .action(async (commandOptions: { binDir?: string; force?: boolean }) => {
+        const service = new DevLinkService(this.pathOptions());
+        const status = await service.unlink({
+          binDir: commandOptions.binDir,
+          force: Boolean(commandOptions.force),
+        });
+        console.log(service.renderUnlinkResult(status));
+      });
+
+    devCommand
+      .command("status")
+      .description("Show local rig development shim status as JSON.")
+      .option("--bin-dir <path>", "Directory where the rig shim should be checked.")
+      .action(async (commandOptions: { binDir?: string }) => {
+        this.printJson(await new DevLinkService(this.pathOptions()).status(commandOptions));
       });
   }
 
@@ -195,10 +245,10 @@ class CliApplication {
     console.log(`Base registry: ${registries[0]?.path}`);
     console.log(`Tools found:   ${tools.length}`);
     console.log("\nNext steps:");
-    console.log("  rig tool create hello");
-    console.log("  rig tool help hello");
-    console.log('  rig run hello greet --input \'{"name":"world"}\'');
-    console.log("  rig help-agent");
+    console.log("  rig tool create my-tool");
+    console.log("  rig tool help my-tool");
+    console.log("  rig run my-tool example test");
+    console.log("  rig help");
     console.log('\nRun "rig doctor" if you want to verify your setup.');
   }
 
@@ -211,7 +261,7 @@ class CliApplication {
     console.log("\nTry:");
     console.log(`  rig tool help ${result.name}`);
     console.log(`  rig tool help ${result.name} ${result.command}`);
-    console.log(`  rig run ${result.name} ${result.command} --input '{"name":"world"}'`);
+    console.log(`  rig run ${result.name} ${result.command} test`);
   }
 
   private async doctor(): Promise<void> {
@@ -233,27 +283,27 @@ class CliApplication {
     console.log("\nStatus: OK");
   }
 
-  private helpAgentText(): string {
-    return `# Rig agent instructions
+  private helpText(): string {
+    return `# Rig help
 
 Rig is a typed local command runtime. It runs local TypeScript tools that contain one or more commands.
 
 Use this workflow:
 
-1. Run \`rig tools list\` to discover tools and command ids.
+1. Run \`rig list\` to discover tools and command ids.
 2. Run \`rig tool help <tool>\` to read the tool API in plain text.
 3. Run \`rig tool help <tool> <command>\` before using a command.
 4. Use \`rig tool inspect <tool> <command>\` when you need machine-readable schemas and examples.
-5. Run commands with \`rig run <tool> <command> --input '<json>'\` or \`--input-file ./input.json\`.
-6. Parse stdout as GraphQL-inspired JSON: \`data\`, \`errors\`, and \`extensions\`.
-7. On success, read the result at \`data.<tool>.<command>\`.
-8. On failure, read \`errors[0].message\` and \`errors[0].extensions.code\`.
+5. Run commands with \`rig run <tool> <command> [args...]\`. Use \`--input\` or \`--input-file\` when JSON is clearer.
+6. Parse stdout as JSON with top-level \`data\` and \`errors\`.
+7. On success, \`errors\` is empty and the command result is in \`data\`.
+8. On failure, \`errors\` is non-empty. Read \`errors[0].message\` and \`errors[0].code\`.
 9. Treat stderr as logs or human-readable diagnostics.
 10. Remember that tools are local TypeScript files on the user's machine.
 11. Prefer read-only commands. Ask the user before write, network, shell, or destructive side effects.
-12. If Rig returns \`POLICY_CONFIRMATION_REQUIRED\`, show the suggested command from \`errors[0].extensions.details.suggestedCommand\` to the user and ask for consent.
+12. If Rig returns \`POLICY_CONFIRMATION_REQUIRED\`, show the suggested command from \`errors[0].details.suggestedCommand\` to the user and ask for consent.
 
-A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. The CLI run syntax keeps those as separate arguments, for example \`rig run github list-prs --input '{}'\`.
+A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. The CLI run syntax keeps those as separate arguments, for example \`rig run github list-prs owner=octocat repo=hello-world\`.
 `;
   }
 
