@@ -12,7 +12,7 @@
     "url": "git+ssh://git@github-rendotdev/rendotdev/rig.git"
   },
   "bin": {
-    "rig": "./dist/rig.js"
+    "rig": "dist/rig.js"
   },
   "files": [
     "dist/rig.js",
