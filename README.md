@@ -143,7 +143,7 @@ The GitHub Actions publish workflow uses npm trusted publishing through OIDC, so
 - Workflow filename: `publish.yml`
 - Allowed action: `npm publish`
 
-Trusted publishing requires npm 11.5.1 or newer and Node 22.14.0 or newer. The workflow uses Node 24 and updates npm before publishing. npm currently requires the package to exist before you can configure trusted publishing, so the first package version may need to be published manually or with a short-lived token. After that, use trusted publishing and remove publish tokens.
+Trusted publishing requires npm 11.5.1 or newer and Node 22.14.0 or newer. The workflow uses Node 24 and updates npm before publishing. npm currently requires the package to exist before you can configure trusted publishing, so the first package version uses a short-lived `NPM_TOKEN` repository secret. After that, use trusted publishing and remove publish tokens. Publish a version by pushing a matching tag, for example `v0.0.1`, creating a GitHub Release, or running the workflow manually.
 
 ## Tool files
 
