@@ -2,72 +2,24 @@ import { readFile } from "node:fs/promises";
 import type { ConfigOptions } from "../config/config";
 import { RigError, RigErrors } from "../errors/RigError";
 import { EnvelopeFactory } from "../runtime/envelope";
-import { PolicyChecker, type PolicyOptions } from "../runtime/policy";
 import { BunRigShell } from "../runtime/shell";
 import { RigOutputTruncator } from "../runtime/truncation";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
 import { createRigToolKit } from "./sdk";
-import {
-  CommandIds,
-  SideEffectSet,
-  type CommandDefinition,
-  type RigShell,
-  type ShellOptions,
-  type ShellResult,
-  type SideEffectDeclaration,
-} from "./types";
+import { CommandIds, type CommandDefinition } from "./types";
 
-export type RunCommandOptions = ConfigOptions &
-  PolicyOptions & {
-    input?: string;
-    inputFile?: string;
-    args?: string[];
-    dryRun?: boolean;
-  };
+export type RunCommandOptions = ConfigOptions & {
+  input?: string;
+  inputFile?: string;
+  args?: string[];
+  dryRun?: boolean;
+};
 
 export type RunCommandResult = {
   envelope: unknown;
   exitCode: number;
 };
-
-class GuardedShell implements RigShell {
-  private readonly shell = new BunRigShell();
-
-  constructor(
-    private readonly tool: string,
-    private readonly command: string,
-    private readonly declaredSideEffects: SideEffectDeclaration,
-  ) {}
-
-  async exec(args: string[], options?: ShellOptions): Promise<ShellResult> {
-    this.ensureShellAllowed(args);
-    return this.shell.exec(args, options);
-  }
-
-  async json(args: string[], options?: ShellOptions): Promise<unknown> {
-    this.ensureShellAllowed(args);
-    return this.shell.json(args, options);
-  }
-
-  private ensureShellAllowed(args: string[]): void {
-    if (
-      SideEffectSet.includes(this.declaredSideEffects, "shell") ||
-      SideEffectSet.includes(this.declaredSideEffects, "destructive")
-    )
-      return;
-    throw new RigError(
-      "POLICY_CONFIRMATION_REQUIRED",
-      "This command attempted to use the shell helper without declaring shell side effects.",
-      {
-        tool: this.tool,
-        command: this.command,
-        attemptedCommand: args,
-        declaredSideEffects: SideEffectSet.label(this.declaredSideEffects),
-      },
-    );
-  }
-}
 
 class RunInputReader {
   async read(
@@ -221,7 +173,6 @@ class DryRunPresenter {
   present(params: {
     tool: string;
     command: string;
-    sideEffects: SideEffectDeclaration;
     input: unknown;
     inputSource: string;
   }): Record<string, unknown> {
@@ -231,7 +182,6 @@ class DryRunPresenter {
       tool: params.tool,
       command: params.command,
       id: CommandIds.from(params.tool, params.command),
-      sideEffects: params.sideEffects,
       input: params.input,
       commandLine: `rig run ${params.tool} ${params.command} ${params.inputSource}`,
     };
@@ -240,13 +190,11 @@ class DryRunPresenter {
 
 export class ToolRunner {
   private readonly loader: ToolLoader;
-  private readonly policy: PolicyChecker;
   private readonly inputReader = new RunInputReader();
   private readonly outputTruncator = new RigOutputTruncator();
 
   constructor(options: ConfigOptions = {}) {
     this.loader = new ToolLoader(options);
-    this.policy = new PolicyChecker();
   }
 
   async run(
@@ -271,7 +219,6 @@ export class ToolRunner {
         const data = new DryRunPresenter().present({
           tool: toolName,
           command: commandName,
-          sideEffects: command.sideEffects,
           input: inputResult.data,
           inputSource: input.source,
         });
@@ -283,19 +230,11 @@ export class ToolRunner {
         };
       }
 
-      this.policy.check({
-        tool: toolName,
-        command: commandName,
-        sideEffects: command.sideEffects,
-        options,
-        inputSource: input.source,
-      });
-
       const data = await command.run({
         input: inputResult.data,
         env: process.env,
         cwd: process.cwd(),
-        shell: new GuardedShell(toolName, commandName, command.sideEffects),
+        shell: new BunRigShell(),
         rig: createRigToolKit(),
       });
 

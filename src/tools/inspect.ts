@@ -2,7 +2,7 @@ import type { ConfigOptions } from "../config/config";
 import { RigError } from "../errors/RigError";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
-import { CommandIds, SideEffectSet, type CommandDefinition } from "./types";
+import { CommandIds, type CommandDefinition } from "./types";
 
 export class ToolInspector {
   private readonly loader: ToolLoader;
@@ -51,7 +51,6 @@ export class ToolInspector {
       name,
       id: CommandIds.from(toolName, name),
       description: command.description,
-      sideEffects: SideEffectSet.label(command.sideEffects),
       inputSchema: SchemaRenderer.toJsonSchema(command.input),
       outputSchema: SchemaRenderer.toJsonSchema(command.output),
       run: `rig run ${toolName} ${name} [args...]`,

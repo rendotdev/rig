@@ -14,7 +14,6 @@ import { RigError, RigErrors } from "../src/errors/RigError";
 import { ToolDiscoveryService } from "../src/registry/discover";
 import { RegistryConfigService } from "../src/registry/registry";
 import { RigPackageRoot } from "../src/runtime/package-root";
-import { PolicyChecker } from "../src/runtime/policy";
 import { BunRigShell } from "../src/runtime/shell";
 import { RuntimeSupport } from "../src/runtime/support";
 import { RigOutputTruncator } from "../src/runtime/truncation";
@@ -34,7 +33,7 @@ import {
   RigTool,
   rig,
 } from "../src/tools/sdk";
-import { CommandIds, RigSchemaRoleSymbol, SideEffectSet } from "../src/tools/types";
+import { CommandIds, RigSchemaRoleSymbol } from "../src/tools/types";
 import { ToolTypecheckService } from "../src/tools/typecheck";
 
 class TempWorkspaceStore {
@@ -86,7 +85,6 @@ function simpleToolSource(name: string, command = "echo") {
       description: "Echo text.",
       input: rig.input({ text: rig.z.string().default("default") }),
       output: rig.output({ text: rig.z.string() }),
-      sideEffects: "read",
       run: async ({ input }) => ({ text: input.text }),
     }),
   },
@@ -285,64 +283,6 @@ describe("coverage support", () => {
     expect(RigPackageRoot.find(import.meta.url)).toBe(await realpath(symlinkRoot));
   });
 
-  test("exercises policy checks for every side-effect level", () => {
-    const checker = new PolicyChecker();
-    expect(() =>
-      checker.check({
-        tool: "sample",
-        command: "read",
-        sideEffects: "read",
-        options: {},
-        inputSource: "--input '{}'",
-      }),
-    ).not.toThrow();
-
-    const levels = [
-      ["write", "allowWrite", "--allow-write"],
-      ["network", "allowNetwork", "--allow-network"],
-      ["shell", "allowShell", "--allow-shell"],
-      ["destructive", "allowDestructive", "--allow-destructive"],
-    ] as const;
-
-    for (const [level, option, flag] of levels) {
-      expect(() =>
-        checker.check({
-          tool: "sample",
-          command: level,
-          sideEffects: ["read", level],
-          options: {},
-          inputSource: "text=hi",
-        }),
-      ).toThrow("requires confirmation");
-      expect(() =>
-        checker.check({
-          tool: "sample",
-          command: level,
-          sideEffects: level,
-          options: { [option]: true },
-          inputSource: "text=hi",
-        }),
-      ).not.toThrow();
-
-      let thrownError: RigError | undefined;
-      try {
-        checker.check({
-          tool: "sample",
-          command: level,
-          sideEffects: level,
-          options: {},
-          inputSource: "text=hi",
-        });
-      } catch (error) {
-        thrownError = error as RigError;
-      }
-      expect(thrownError?.details).toMatchObject({
-        missing: [level],
-        suggestedCommand: expect.stringContaining(flag),
-      });
-    }
-  });
-
   test("exercises shell execution, JSON parsing, validation, truncation, and timeouts", async () => {
     const shell = new BunRigShell({ timeoutMs: 5_000, maxOutputBytes: 20 });
     const success = await shell.exec(["bun", "-e", "console.log('hello')"], {
@@ -536,10 +476,6 @@ describe("coverage support", () => {
     expect(SchemaRenderer.toJsonSchema({})).toMatchObject({ type: "unknown" });
     expect(SchemaRenderer.summary(z.object({ text: z.string() }))).toContain("text");
     expect(CommandIds.from("tool", "command")).toBe("tool.command");
-    expect(SideEffectSet.normalize(["read", "write", "write"])).toEqual(["write"]);
-    expect(SideEffectSet.normalize(["network", "network"])).toEqual(["network"]);
-    expect(SideEffectSet.label(["shell", "destructive"])).toBe("shell,destructive");
-    expect(SideEffectSet.includes("read", "read")).toBe(true);
 
     const toolkit = createRigToolKit();
     const builtArgs = toolkit
@@ -586,7 +522,6 @@ describe("coverage support", () => {
       description: "Valid command.",
       input: toolkit.input({ text: toolkit.z.string() }),
       output: toolkit.output({ text: toolkit.z.string() }),
-      sideEffects: "read" as const,
       examples: [{ title: "Example", text: "Example text." }],
       run: async ({ input: commandInput }: { input: { text: string } }) => ({
         text: commandInput.text,
@@ -613,14 +548,6 @@ describe("coverage support", () => {
       [
         { ...validTool, commands: { echo: { ...validCommand, description: "" } } },
         "needs a description",
-      ],
-      [
-        { ...validTool, commands: { echo: { ...validCommand, sideEffects: [] } } },
-        "invalid side effect",
-      ],
-      [
-        { ...validTool, commands: { echo: { ...validCommand, sideEffects: ["bad"] } } },
-        "invalid side effect",
       ],
       [
         { ...validTool, commands: { echo: { ...validCommand, input: null } } },
@@ -683,7 +610,7 @@ describe("coverage support", () => {
     );
   });
 
-  test("exercises runner input parsing, policies, shell guards, and error envelopes", async () => {
+  test("exercises runner input parsing, shell helpers, and error envelopes", async () => {
     const home = await workspaces.create();
     await writeTool(home, "sample", simpleToolSource("sample"));
     await writeTool(
@@ -697,7 +624,6 @@ describe("coverage support", () => {
       description: "Echo scalar.",
       input: rig.input(rig.z.string()),
       output: rig.output(rig.z.string()),
-      sideEffects: "read",
       run: async ({ input }) => input,
     }),
   },
@@ -715,7 +641,6 @@ describe("coverage support", () => {
       description: "Save text.",
       input: rig.input({ text: rig.z.string() }),
       output: rig.output({ ok: rig.z.boolean() }),
-      sideEffects: "write",
       run: async () => ({ ok: true }),
     }),
   },
@@ -733,7 +658,6 @@ describe("coverage support", () => {
       description: "Blocked shell.",
       input: rig.input({}),
       output: rig.output({ ok: rig.z.boolean() }),
-      sideEffects: "read",
       run: async ({ shell }) => {
         await shell.exec(["bun", "-e", "console.log('blocked')"]);
         return { ok: true };
@@ -743,7 +667,6 @@ describe("coverage support", () => {
       description: "Allowed shell exec.",
       input: rig.input({}),
       output: rig.output({ text: rig.z.string() }),
-      sideEffects: "shell",
       run: async ({ shell }) => {
         const result = await shell.exec(["bun", "-e", "console.log('ok')"]);
         return { text: result.stdout.trim() };
@@ -753,7 +676,6 @@ describe("coverage support", () => {
       description: "Allowed shell JSON.",
       input: rig.input({}),
       output: rig.output({ ok: rig.z.boolean() }),
-      sideEffects: "destructive",
       run: async ({ shell }) => await shell.json(["bun", "-e", "console.log(JSON.stringify({ok:true}))"]),
     }),
   },
@@ -771,7 +693,6 @@ describe("coverage support", () => {
       description: "Return wrong output.",
       input: rig.input({}),
       output: rig.output({ text: rig.z.string() }),
-      sideEffects: "read",
       run: async () => ({ text: 123 }),
     }),
   },
@@ -789,7 +710,6 @@ describe("coverage support", () => {
       description: "Throw a string.",
       input: rig.input({}),
       output: rig.output({ ok: rig.z.boolean() }),
-      sideEffects: "read",
       run: async () => { throw "boom"; },
     }),
   },
@@ -850,24 +770,20 @@ describe("coverage support", () => {
 
     await expect(
       runner.run("writer", "save", { homeDir: home, args: ["text=hi"] }),
-    ).resolves.toMatchObject({
-      exitCode: 1,
-      envelope: { errors: [{ code: "POLICY_CONFIRMATION_REQUIRED" }] },
-    });
-    await expect(
-      runner.run("writer", "save", { homeDir: home, args: ["text=hi"], allowWrite: true }),
     ).resolves.toMatchObject({ exitCode: 0, envelope: { data: { ok: true } } });
 
     await expect(runner.run("sheller", "blocked", { homeDir: home })).resolves.toMatchObject({
-      exitCode: 1,
-      envelope: { errors: [{ code: "POLICY_CONFIRMATION_REQUIRED" }] },
+      exitCode: 0,
+      envelope: { data: { ok: true } },
     });
-    await expect(
-      runner.run("sheller", "exec", { homeDir: home, allowShell: true }),
-    ).resolves.toMatchObject({ exitCode: 0, envelope: { data: { text: "ok" } } });
-    await expect(
-      runner.run("sheller", "json", { homeDir: home, allowDestructive: true }),
-    ).resolves.toMatchObject({ exitCode: 0, envelope: { data: { ok: true } } });
+    await expect(runner.run("sheller", "exec", { homeDir: home })).resolves.toMatchObject({
+      exitCode: 0,
+      envelope: { data: { text: "ok" } },
+    });
+    await expect(runner.run("sheller", "json", { homeDir: home })).resolves.toMatchObject({
+      exitCode: 0,
+      envelope: { data: { ok: true } },
+    });
     await expect(runner.run("bad-output", "fail", { homeDir: home })).resolves.toMatchObject({
       exitCode: 1,
       envelope: { errors: [{ code: "OUTPUT_VALIDATION_ERROR" }] },

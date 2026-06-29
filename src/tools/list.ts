@@ -1,7 +1,7 @@
 import type { ConfigOptions } from "../config/config";
 import { ToolDiscoveryService } from "../registry/discover";
 import { ToolLoader } from "./loader";
-import { CommandIds, SideEffectSet } from "./types";
+import { CommandIds } from "./types";
 
 export class ToolListService {
   private readonly discovery: ToolDiscoveryService;
@@ -21,7 +21,6 @@ export class ToolListService {
           name,
           id: CommandIds.from(loaded.definition.name, name),
           description: command.description,
-          sideEffects: SideEffectSet.label(command.sideEffects),
         }));
         return {
           name: loaded.definition.name,
@@ -40,11 +39,7 @@ export class ToolListService {
   renderPlain(data: Awaited<ReturnType<ToolListService["list"]>>): string {
     if (data.tools.length === 0) return "No tools found.";
     return data.tools
-      .flatMap((tool) =>
-        tool.commands.map(
-          (command) => `${command.id} [${command.sideEffects}] ${command.description}`,
-        ),
-      )
+      .flatMap((tool) => tool.commands.map((command) => `${command.id} ${command.description}`))
       .join("\n");
   }
 }

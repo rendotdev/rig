@@ -102,7 +102,7 @@ describe("cli application", () => {
       '"command": "example"',
     );
     expect(await cli.run(["list"])).toContain('"tools"');
-    expect(await cli.run(["ls", "--plain"])).toContain("sample.example [read]");
+    expect(await cli.run(["ls", "--plain"])).toContain("sample.example Example command");
   });
 
   test("runs and typechecks tools", async () => {
@@ -113,19 +113,9 @@ describe("cli application", () => {
     expect(await cli.run(["run", "sample", "example", "--input", '{"text":"cli"}'])).toContain(
       '"text": "cli"',
     );
-    expect(
-      await cli.run([
-        "run",
-        "sample",
-        "example",
-        "Agent",
-        "--allow-write",
-        "--allow-network",
-        "--allow-shell",
-        "--allow-destructive",
-        "--dry-run",
-      ]),
-    ).toContain('"dryRun": true');
+    expect(await cli.run(["run", "sample", "example", "Agent", "--dry-run"])).toContain(
+      '"dryRun": true',
+    );
     expect(await cli.run(["typecheck", "sample"])).toContain('"ok": true');
     expect(process.exitCode).toBe(0);
   });

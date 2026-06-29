@@ -181,10 +181,6 @@ export class CliApplication {
       .description("Run a tool command.")
       .option("--input <json>", "JSON input string.")
       .option("--input-file <path>", "Read JSON input from a file.")
-      .option("--allow-write", "Allow write side effects.")
-      .option("--allow-network", "Allow network side effects.")
-      .option("--allow-shell", "Allow shell side effects.")
-      .option("--allow-destructive", "Allow destructive side effects.")
       .option("--dry-run", "Validate input and show what would run without executing.")
       .action(
         async (
@@ -260,10 +256,6 @@ export class CliApplication {
       args,
       input: commandOptions.input as string | undefined,
       inputFile: commandOptions.inputFile as string | undefined,
-      allowWrite: Boolean(commandOptions.allowWrite),
-      allowNetwork: Boolean(commandOptions.allowNetwork),
-      allowShell: Boolean(commandOptions.allowShell),
-      allowDestructive: Boolean(commandOptions.allowDestructive),
       dryRun: Boolean(commandOptions.dryRun),
     });
     this.printJson(result.envelope);
@@ -343,14 +335,12 @@ Use this workflow:
 3. Run \`rig help <tool> <command>\` before using a command.
 4. Use \`rig inspect <tool> <command>\` when you need machine-readable schemas and examples.
 5. Run commands with \`rig run <tool> <command> [args...]\`. Use \`--input\` or \`--input-file\` when JSON is clearer.
-6. Use \`--dry-run\` to validate input and inspect side effects without executing a command.
+6. Use \`--dry-run\` to validate input and see the command line without executing a command.
 7. Parse stdout as JSON with top-level \`data\` and \`errors\`.
 8. On success, \`errors\` is empty and the command result is in \`data\`.
 9. On failure, \`errors\` is non-empty. Read \`errors[0].message\` and \`errors[0].code\`.
 10. Treat stderr as logs or human-readable diagnostics.
 11. Remember that tools are local TypeScript files on the user's machine.
-12. Prefer read-only commands. Ask the user before write, network, shell, or destructive side effects.
-13. If Rig returns \`POLICY_CONFIRMATION_REQUIRED\`, show the suggested command from \`errors[0].details.suggestedCommand\` to the user and ask for consent.
 
 A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. It is an identifier for discovery and inspection; execute it with \`rig run github list-prs owner=octocat repo=hello-world\`.
 `;

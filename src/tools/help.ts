@@ -2,7 +2,7 @@ import type { ConfigOptions } from "../config/config";
 import { RigError } from "../errors/RigError";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
-import { CommandIds, SideEffectSet, type CommandDefinition, type ToolDefinition } from "./types";
+import { CommandIds, type CommandDefinition, type ToolDefinition } from "./types";
 
 export class ToolHelpRenderer {
   render(definition: ToolDefinition, selectedCommand?: string): string {
@@ -45,8 +45,6 @@ export class ToolHelpRenderer {
       `${heading} ${id}`,
       "",
       command.description,
-      "",
-      `Side effects: ${SideEffectSet.label(command.sideEffects)}`,
       "",
       "Input:",
       "",

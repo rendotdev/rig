@@ -54,7 +54,6 @@ describe("tool commands", () => {
       tool: "sample",
       command: "example",
       id: "sample.example",
-      sideEffects: "read",
       run: "rig run sample example [args...]",
     });
   });
@@ -83,7 +82,6 @@ describe("tool commands", () => {
       description: "Return the wrong output type.",
       input: rig.input({ text: rig.z.string() }),
       output: rig.output({ text: rig.z.string() }),
-      sideEffects: "read",
       run: async ({ input }) => ({ text: 123 }),
     }),
   },
@@ -121,11 +119,11 @@ export default tool;
     const list = await service.list();
 
     expect(service.renderPlain(list)).toContain(
-      "sample.example [read] Example command. Replace this with a real command.",
+      "sample.example Example command. Replace this with a real command.",
     );
   });
 
-  test("dry-runs a side-effect command without policy confirmation or execution", async () => {
+  test("dry-runs a command without execution", async () => {
     const home = await homes.create();
     await new ToolCreator({ homeDir: home }).create("sample");
     const toolDir = join(home, ".rig", "tools", "writer");
@@ -140,7 +138,6 @@ export default tool;
       description: "Save text.",
       input: rig.input({ text: rig.z.string() }),
       output: rig.output({ ok: rig.z.boolean() }),
-      sideEffects: "write",
       run: async () => {
         throw new Error("dry-run should not execute command code");
       },
@@ -163,7 +160,6 @@ export default tool;
         dryRun: true,
         wouldRun: false,
         id: "writer.save",
-        sideEffects: "write",
         input: { text: "Agent" },
       },
       errors: [],
@@ -185,7 +181,6 @@ export default tool;
       description: "Dump large text.",
       input: rig.input({}),
       output: rig.output({ text: rig.z.string() }),
-      sideEffects: "read",
       run: async () => ({ text: "x".repeat(60 * 1024) }),
     }),
   },
@@ -232,7 +227,6 @@ export default RigTool.define({
       description: "Bypass Rig schema helpers.",
       input: z.object({ text: z.string() }),
       output: z.object({ text: z.string() }),
-      sideEffects: "read",
       run: async ({ input }) => ({ text: input.text }),
     },
   },

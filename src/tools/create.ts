@@ -52,7 +52,6 @@ export class ToolCreator {
       output: rig.output({
         text: rig.z.string(),
       }),
-      sideEffects: "read",
       examples: [
         {
           title: "Run the example command",

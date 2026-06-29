@@ -6,7 +6,7 @@
 
 Rig is a local command runtime for AI agents.
 
-It exposes TypeScript files on the user's machine as discoverable commands. Each command has typed input, typed output, examples, and declared side effects. Every run returns a JSON envelope with `data` and `errors`, so agents can inspect, execute, and recover predictably.
+It exposes TypeScript files on the user's machine as discoverable commands. Each command has typed input, typed output, examples, and a run function. Every run returns a JSON envelope with `data` and `errors`, so agents can inspect, execute, and recover predictably.
 
 ## Install
 
@@ -44,7 +44,7 @@ rig inspect <tool>
 rig inspect <tool> <command>
 ```
 
-Use `rig help` for human-readable docs. Use `rig inspect` for machine-readable schemas, examples, side effects, and run syntax.
+Use `rig help` for human-readable docs. Use `rig inspect` for machine-readable schemas, examples, and run syntax.
 
 ### Want to run a command?
 
@@ -63,7 +63,7 @@ Parse stdout as JSON. Success is `errors: []` with the result in `data`. Failure
 rig run <tool> <command> --dry-run [args...]
 ```
 
-Use `--dry-run` before commands with write, network, shell, or destructive side effects.
+Use `--dry-run` to validate input and see the command line before execution.
 
 ### Want to create a new tool or command?
 
@@ -95,28 +95,6 @@ rig typecheck <tool>
 ```
 
 Run this after creating or editing tools.
-
-### Want to handle permission errors?
-
-If a run returns `POLICY_CONFIRMATION_REQUIRED`, read `errors[0].details.suggestedCommand`, explain the side effects to the user, and ask for consent before rerunning.
-
-Permission flags:
-
-```bash
---allow-write
---allow-network
---allow-shell
---allow-destructive
-```
-
-Examples:
-
-```bash
-rig run <tool> <command> --allow-write [args...]
-rig run <tool> <command> --allow-network [args...]
-rig run <tool> <command> --allow-shell [args...]
-rig run <tool> <command> --allow-destructive [args...]
-```
 
 ### Want to inspect or fix local setup?
 
@@ -150,8 +128,7 @@ Add the output to an agent prompt or memory file.
 - Inspect a command before running it when the command is unfamiliar.
 - Prefer `rig help <tool> <command>` for readable docs.
 - Prefer `rig inspect <tool> <command>` when you need schemas or examples.
-- Use `--dry-run` before commands with side effects.
-- Ask the user before adding allow flags.
+- Use `--dry-run` when you want to validate input without executing the command.
 - Parse stdout as JSON.
 - Treat stderr as logs or diagnostics.
 - Use `data` on success and `errors[0]` on failure.
@@ -205,18 +182,6 @@ Failure:
 
 Large successful outputs are truncated to 50KB or 2000 lines. Rig saves the full JSON output to a temp file and returns the path in `data.fullOutputPath`.
 
-## Side effect levels
-
-Commands declare one of these side effect levels:
-
-- `read`
-- `write`
-- `network`
-- `shell`
-- `destructive`
-
-Read commands run without extra flags. Other levels require the matching allow flag.
-
 ## Tool authoring notes
 
 - Tool files export a Rig tool factory.
@@ -245,4 +210,4 @@ rig dev unlink
 
 ## Limits
 
-Rig validates schemas, returns consistent JSON envelopes, and blocks risky side effects until they are allowed. Tools are local TypeScript code, so run tools the user trusts.
+Rig validates schemas and returns consistent JSON envelopes. Tools are local TypeScript code, so run tools the user trusts.

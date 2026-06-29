@@ -1,16 +1,5 @@
 import type { z } from "zod";
 
-export type SideEffectLevel = "read" | "write" | "network" | "shell" | "destructive";
-export type SideEffectDeclaration = SideEffectLevel | SideEffectLevel[];
-
-export const SideEffectLevels: SideEffectLevel[] = [
-  "read",
-  "write",
-  "network",
-  "shell",
-  "destructive",
-];
-
 export const RigSchemaRoleSymbol = Symbol.for("rig.schemaRole");
 export type RigSchemaRole = "input" | "output";
 export declare const RigInputSchemaBrand: unique symbol;
@@ -108,7 +97,6 @@ export type CommandDefinition<
   description: string;
   input: Input;
   output: Output;
-  sideEffects: SideEffectDeclaration;
   examples?: ToolExample<z.input<Input>, z.output<Output>>[];
   run: (ctx: ToolRunContext<z.output<Input>>) => MaybePromise<z.input<Output>>;
 };
@@ -131,23 +119,5 @@ export type LoadedTool = {
 export class CommandIds {
   static from(tool: string, command: string): string {
     return `${tool}.${command}`;
-  }
-}
-
-export class SideEffectSet {
-  static normalize(value: SideEffectDeclaration): SideEffectLevel[] {
-    const levels = Array.isArray(value) ? value : [value];
-    const unique = Array.from(new Set(levels));
-    if (unique.length > 1 && unique.includes("read"))
-      return unique.filter((level) => level !== "read");
-    return unique;
-  }
-
-  static label(value: SideEffectDeclaration): string {
-    return this.normalize(value).join(",");
-  }
-
-  static includes(value: SideEffectDeclaration, level: SideEffectLevel): boolean {
-    return this.normalize(value).includes(level);
   }
 }

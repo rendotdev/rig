@@ -6,12 +6,9 @@ import { createRigToolKit } from "./sdk";
 import {
   CommandIds,
   RigSchemaRoleSymbol,
-  SideEffectLevels,
-  SideEffectSet,
   type CommandDefinition,
   type LoadedTool,
   type RigSchemaRole,
-  type SideEffectDeclaration,
   type ToolDefinition,
 } from "./types";
 
@@ -97,12 +94,6 @@ export class ToolDefinitionValidator {
       });
     }
 
-    if (!this.hasValidSideEffects(value.sideEffects)) {
-      throw new RigError("TOOL_INVALID", `Command ${id} has an invalid side effect level.`, {
-        allowed: SideEffectLevels,
-      });
-    }
-
     this.validateSchema(value.input, "input", id);
     this.validateSchema(value.output, "output", id);
 
@@ -154,13 +145,6 @@ export class ToolDefinitionValidator {
         actual: actualRole ?? "unbranded Zod schema",
       });
     }
-  }
-
-  private hasValidSideEffects(value: unknown): value is SideEffectDeclaration {
-    if (typeof value === "string") return SideEffectLevels.includes(value as never);
-    if (!Array.isArray(value) || value.length === 0) return false;
-    const normalized = SideEffectSet.normalize(value as SideEffectDeclaration);
-    return normalized.length > 0 && normalized.every((level) => SideEffectLevels.includes(level));
   }
 
   private hasSafeParse(value: unknown): boolean {
