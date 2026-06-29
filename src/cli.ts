@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { RigConfigStore } from "./config/config";
 import { RigPaths, type PathOptions } from "./config/paths";
@@ -6,6 +7,7 @@ import { DevLinkService } from "./dev/dev-link";
 import { RigError, RigErrors } from "./errors/RigError";
 import { RegistryConfigService } from "./registry/registry";
 import { ToolDiscoveryService } from "./registry/discover";
+import { RigPackageRoot } from "./runtime/package-root";
 import { ToolCreator } from "./tools/create";
 import { ToolHelpService } from "./tools/help";
 import { ToolInspector } from "./tools/inspect";
@@ -34,7 +36,7 @@ class CliApplication {
     this.program
       .name("rig")
       .description("Local typed command runtime for agents.")
-      .version("0.0.1")
+      .version(this.version())
       .addHelpCommand(false);
     this.configureInitCommands();
     this.configureConfigCommands();
@@ -352,6 +354,18 @@ Use this workflow:
 
 A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. It is an identifier for discovery and inspection; execute it with \`rig run github list-prs owner=octocat repo=hello-world\`.
 `;
+  }
+
+  private version(): string {
+    try {
+      const packageJsonPath = RigPackageRoot.packageFile(import.meta.url, "package.json");
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+        version?: unknown;
+      };
+      return typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
+    } catch {
+      return "0.0.0";
+    }
   }
 
   private pathOptions(): PathOptions {
