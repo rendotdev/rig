@@ -56,4 +56,6 @@ jobs:
         run: npm pack --dry-run
 
       - name: Publish with trusted publishing
-        run: npm publish --access public
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public
