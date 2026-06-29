@@ -12,6 +12,7 @@ Rig is a minimalist command runtime for AI agents.
 
 It allows agents (and humans too) to create fully typed reusable commands with strict input and output validateion which agents can discover, inspect, and run predictably.
 
+
 ## Install
 
 Rig requires Node.js 20 or newer.
@@ -33,3 +34,7 @@ The `rig` CLI is installed on this machine. It allows you to write, run and own 
 - To create a new tool, run `rig create <tool>`.
 - To edit an existing tool, run `rig edit <tool>` and open the printed file path.
 - To remove an existing tool, run `rig remove <tool>`.
+
+## Feedback?
+
+Simply [send me a message](https://x.com/rendotdev) on X (formerly Twitter). I read all messages and respond to as many as I can.
