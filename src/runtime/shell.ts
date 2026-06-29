@@ -1,0 +1,82 @@
+import { RigError } from "../errors/RigError";
+import type { RigShell, ShellOptions, ShellResult } from "../tools/types";
+
+export class BunRigShell implements RigShell {
+  constructor(private readonly defaults: ShellOptions = {}) {}
+
+  async exec(args: string[], options: ShellOptions = {}): Promise<ShellResult> {
+    this.validateArgs(args);
+    const timeoutMs = options.timeoutMs ?? this.defaults.timeoutMs ?? 30_000;
+    const maxOutputBytes = options.maxOutputBytes ?? this.defaults.maxOutputBytes ?? 1_048_576;
+    const proc = Bun.spawn(args, {
+      cwd: options.cwd ?? this.defaults.cwd ?? process.cwd(),
+      env: { ...process.env, ...this.defaults.env, ...options.env },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill();
+    }, timeoutMs);
+
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+
+      if (timedOut) {
+        throw new RigError("SHELL_ERROR", `Command timed out after ${timeoutMs}ms.`, {
+          command: args,
+        });
+      }
+
+      return {
+        command: args,
+        stdout: this.trimOutput(stdout, maxOutputBytes),
+        stderr: this.trimOutput(stderr, maxOutputBytes),
+        exitCode,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async json(args: string[], options: ShellOptions = {}): Promise<unknown> {
+    const result = await this.exec(args, options);
+    if (result.exitCode !== 0) {
+      throw new RigError("SHELL_ERROR", "Command failed before JSON could be parsed.", result);
+    }
+    try {
+      return JSON.parse(result.stdout);
+    } catch (error) {
+      throw new RigError("SHELL_ERROR", "Command stdout was not valid JSON.", { result, error });
+    }
+  }
+
+  private validateArgs(args: string[]): void {
+    if (
+      !Array.isArray(args) ||
+      args.length === 0 ||
+      args.some((arg) => typeof arg !== "string" || arg.length === 0)
+    ) {
+      throw new RigError(
+        "SHELL_ERROR",
+        "shell.exec expects a non-empty array of command arguments.",
+        {
+          args,
+        },
+      );
+    }
+  }
+
+  private trimOutput(value: string, maxOutputBytes?: number): string {
+    if (!maxOutputBytes) return value;
+    const bytes = new TextEncoder().encode(value);
+    if (bytes.byteLength <= maxOutputBytes) return value;
+    return `${value.slice(0, maxOutputBytes)}\n[rig: output truncated]`;
+  }
+}

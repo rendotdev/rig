@@ -1,0 +1,26 @@
+{
+  "name": "rig",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local typed command runtime for agents.",
+  "bin": {
+    "rig": "./dist/rig"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build ./src/cli.ts --compile --outfile dist/rig",
+    "test": "oxfmt . --check && oxlint . --deny-warnings && vitest run"
+  },
+  "dependencies": {
+    "commander": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "oxfmt": "^0.56.0",
+    "oxlint": "^1.71.0",
+    "typescript": "latest",
+    "vitest": "^4.1.9"
+  }
+}
