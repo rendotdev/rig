@@ -731,7 +731,7 @@ describe("coverage support", () => {
     await expect(
       runner.run("sample", "echo", { homeDir: home, args: ["two words"], dryRun: true }),
     ).resolves.toMatchObject({
-      envelope: { data: { commandLine: "rig run sample echo 'two words'" } },
+      envelope: { data: { commandLine: "rig run sample.echo 'two words'" } },
     });
 
     const inputPath = join(home, "input.json");

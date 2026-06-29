@@ -183,7 +183,7 @@ class DryRunPresenter {
       command: params.command,
       id: CommandIds.from(params.tool, params.command),
       input: params.input,
-      commandLine: `rig run ${params.tool} ${params.command} ${params.inputSource}`,
+      commandLine: `rig run ${CommandIds.from(params.tool, params.command)} ${params.inputSource}`,
     };
   }
 }

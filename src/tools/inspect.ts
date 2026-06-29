@@ -12,27 +12,28 @@ export class ToolInspector {
   }
 
   async inspect(toolName: string, commandName?: string) {
-    const loaded = await this.loader.load(toolName);
+    const target = this.inspectTarget(toolName, commandName);
+    const loaded = await this.loader.load(target.toolName);
     const definition = loaded.definition;
 
-    if (commandName) {
-      const command = definition.commands[commandName];
+    if (target.commandName) {
+      const command = definition.commands[target.commandName];
       if (!command) {
         throw new RigError(
           "COMMAND_NOT_FOUND",
-          `Command not found: ${CommandIds.from(toolName, commandName)}`,
+          `Command not found: ${CommandIds.from(target.toolName, target.commandName)}`,
           {
-            tool: toolName,
-            command: commandName,
+            tool: target.toolName,
+            command: target.commandName,
             available: Object.keys(definition.commands),
           },
         );
       }
       return {
         tool: definition.name,
-        command: commandName,
+        command: target.commandName,
         path: loaded.path,
-        ...this.commandMetadata(definition.name, commandName, command),
+        ...this.commandMetadata(definition.name, target.commandName, command),
       };
     }
 
@@ -46,6 +47,15 @@ export class ToolInspector {
     };
   }
 
+  private inspectTarget(
+    toolName: string,
+    commandName?: string,
+  ): { toolName: string; commandName?: string } {
+    if (commandName || !toolName.includes(".")) return { toolName, commandName };
+    const [parsedToolName, parsedCommandName] = toolName.split(".", 2);
+    return { toolName: parsedToolName!, commandName: parsedCommandName };
+  }
+
   private commandMetadata(toolName: string, name: string, command: CommandDefinition) {
     return {
       name,
@@ -53,7 +63,7 @@ export class ToolInspector {
       description: command.description,
       inputSchema: SchemaRenderer.toJsonSchema(command.input),
       outputSchema: SchemaRenderer.toJsonSchema(command.output),
-      run: `rig run ${toolName} ${name} [args...]`,
+      run: `rig run ${CommandIds.from(toolName, name)} [args...]`,
       examples: command.examples ?? [],
     };
   }

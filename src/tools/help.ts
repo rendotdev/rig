@@ -61,7 +61,7 @@ export class ToolHelpRenderer {
       "Run:",
       "",
       "```bash",
-      `rig run ${toolName} ${commandName} [args...]`,
+      `rig run ${id} [args...]`,
       "```",
     ];
 
@@ -112,7 +112,7 @@ export class ToolHelpRenderer {
         if (example.output !== undefined) lines.push(`Output: ${this.compactJson(example.output)}`);
         if (example.input !== undefined) {
           lines.push(
-            `Run: rig run ${toolName} ${commandName} ${this.renderExampleArgs(example.input)}`,
+            `Run: rig run ${CommandIds.from(toolName, commandName)} ${this.renderExampleArgs(example.input)}`,
           );
         }
         return lines.join("\n");
@@ -151,7 +151,17 @@ export class ToolHelpService {
   }
 
   async render(toolName: string, commandName?: string): Promise<string> {
-    const tool = await this.loader.load(toolName);
-    return this.renderer.render(tool.definition, commandName);
+    const target = this.helpTarget(toolName, commandName);
+    const tool = await this.loader.load(target.toolName);
+    return this.renderer.render(tool.definition, target.commandName);
+  }
+
+  private helpTarget(
+    toolName: string,
+    commandName?: string,
+  ): { toolName: string; commandName?: string } {
+    if (commandName || !toolName.includes(".")) return { toolName, commandName };
+    const [parsedToolName, parsedCommandName] = toolName.split(".", 2);
+    return { toolName: parsedToolName!, commandName: parsedCommandName };
   }
 }

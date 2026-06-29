@@ -5,11 +5,11 @@ import { Command } from "commander";
 import { RigConfigStore } from "./config/config";
 import { RigPaths, type PathOptions } from "./config/paths";
 import { DevLinkService } from "./dev/dev-link";
-import { RigErrors } from "./errors/RigError";
+import { RigError, RigErrors } from "./errors/RigError";
 import { RegistryConfigService } from "./registry/registry";
 import { ToolDiscoveryService } from "./registry/discover";
 import { RigPackageRoot } from "./runtime/package-root";
-import { ToolCreator } from "./tools/create";
+import { ToolCreator, ToolFileService, ToolRemover } from "./tools/create";
 import { ToolHelpService } from "./tools/help";
 import { ToolInspector } from "./tools/inspect";
 import { ToolListService } from "./tools/list";
@@ -43,24 +43,19 @@ export class CliApplication {
     this.configureRegistryCommands();
     this.configureListCommand();
     this.configureInspectCommand();
-    this.configureToolCommands();
+    this.configureCreateCommand();
+    this.configureEditCommand();
+    this.configureRemoveCommand();
     this.configureRunCommand();
     this.configureTypecheckCommand();
     this.configureDevCommands();
     this.program
-      .command("help")
-      .argument("[tool]")
-      .argument("[command]")
-      .description("Print Rig, tool, or command help.")
-      .action(async (tool?: string, command?: string) => {
-        if (tool) console.log(await new ToolHelpService(this.pathOptions()).render(tool, command));
-        else console.log(this.helpText());
-      });
-    this.program
       .command("llm.txt")
-      .description("Print Rig instructions for LLMs.")
-      .action(() => {
-        console.log(this.llmText());
+      .argument("[target]", "Tool name or command id (<tool>.<command>.)")
+      .description("Print Rig instructions or tool docs for LLMs.")
+      .action(async (target?: string) => {
+        if (target) console.log(await new ToolHelpService(this.pathOptions()).render(target));
+        else console.log(this.llmText());
       });
   }
 
@@ -132,64 +127,71 @@ export class CliApplication {
       .command("list")
       .alias("ls")
       .description("List discovered tools and commands.")
+      .option("--json", "Print full JSON metadata.")
       .option("--plain", "Print a compact plain text command list.")
-      .action(async (commandOptions: { plain?: boolean }) => {
+      .action(async (commandOptions: { json?: boolean; plain?: boolean }) => {
         const service = new ToolListService(this.pathOptions());
         const data = await service.list();
-        if (commandOptions.plain) console.log(service.renderPlain(data));
-        else this.printJson(data);
+        if (commandOptions.json) this.printJson(data);
+        else console.log(service.renderPlain(data));
       });
   }
 
   private configureInspectCommand(): void {
     this.program
       .command("inspect")
-      .argument("<tool>")
-      .argument("[command]")
+      .argument("<target>", "Tool name or command id (<tool>.<command>.)")
       .description("Print tool or command metadata as JSON.")
-      .action(async (tool: string, command?: string) => {
-        this.printJson(await new ToolInspector(this.pathOptions()).inspect(tool, command));
+      .action(async (target: string) => {
+        this.printJson(await new ToolInspector(this.pathOptions()).inspect(target));
       });
   }
 
-  private configureToolCommands(): void {
-    const toolCommand = this.program.command("tool").description("Create and inspect tools.");
-    toolCommand
+  private configureCreateCommand(): void {
+    this.program
       .command("create")
       .argument("<tool>")
       .description("Create a starter tool in the base registry.")
       .action(async (name: string) => {
         await this.createTool(name);
       });
+  }
 
-    toolCommand
-      .command("inspect")
+  private configureEditCommand(): void {
+    this.program
+      .command("edit")
       .argument("<tool>")
-      .argument("[command]")
-      .description("Print tool or command metadata as JSON.")
-      .action(async (tool: string, command?: string) => {
-        this.printJson(await new ToolInspector(this.pathOptions()).inspect(tool, command));
+      .description("Print the TypeScript file path for a tool.")
+      .action(async (name: string) => {
+        const result = await new ToolFileService(this.pathOptions()).path(name);
+        console.log(result.toolPath);
+      });
+  }
+
+  private configureRemoveCommand(): void {
+    this.program
+      .command("remove")
+      .argument("<tool>")
+      .description("Remove a local tool directory.")
+      .action(async (name: string) => {
+        const result = await new ToolRemover(this.pathOptions()).remove(name);
+        console.log(`Removed tool ${result.name}`);
+        console.log(`Tool directory: ${result.toolDir}`);
       });
   }
 
   private configureRunCommand(): void {
     this.program
       .command("run")
-      .argument("<tool>")
-      .argument("<command>")
+      .argument("<command>", "Command id, formatted as <tool>.<command>.")
       .argument("[args...]", "Command arguments.")
       .description("Run a tool command.")
       .option("--input <json>", "JSON input string.")
       .option("--input-file <path>", "Read JSON input from a file.")
       .option("--dry-run", "Validate input and show what would run without executing.")
       .action(
-        async (
-          tool: string,
-          command: string,
-          args: string[],
-          commandOptions: Record<string, unknown>,
-        ) => {
-          await this.runToolCommand(tool, command, args, commandOptions);
+        async (commandId: string, args: string[], commandOptions: Record<string, unknown>) => {
+          await this.runToolCommand(commandId, args, commandOptions);
         },
       );
   }
@@ -246,18 +248,22 @@ export class CliApplication {
   }
 
   private async runToolCommand(
-    tool: string,
-    command: string,
+    commandId: string,
     args: string[],
     commandOptions: Record<string, unknown>,
   ): Promise<void> {
-    const result = await new ToolRunner(this.pathOptions()).run(tool, command, {
-      ...this.pathOptions(),
-      args,
-      input: commandOptions.input as string | undefined,
-      inputFile: commandOptions.inputFile as string | undefined,
-      dryRun: Boolean(commandOptions.dryRun),
-    });
+    const commandTarget = this.commandTarget(commandId);
+    const result = await new ToolRunner(this.pathOptions()).run(
+      commandTarget.tool,
+      commandTarget.command,
+      {
+        ...this.pathOptions(),
+        args,
+        input: commandOptions.input as string | undefined,
+        inputFile: commandOptions.inputFile as string | undefined,
+        dryRun: Boolean(commandOptions.dryRun),
+      },
+    );
     this.printJson(result.envelope);
     process.exitCode = result.exitCode;
   }
@@ -275,10 +281,7 @@ export class CliApplication {
     console.log(`Base registry: ${registries[0]?.path}`);
     console.log(`Tools found:   ${tools.length}`);
     console.log("\nNext steps:");
-    console.log("  rig tool create my-tool");
-    console.log("  rig help my-tool");
-    console.log("  rig run my-tool example test");
-    console.log("  rig llm.txt");
+    console.log("  rig list");
     console.log('\nRun "rig doctor" if you want to verify your setup.');
   }
 
@@ -291,9 +294,9 @@ export class CliApplication {
     for (const file of result.files) console.log(`  ${file}`);
     console.log(`\nEdit: ${result.toolPath}`);
     console.log("\nTry:");
-    console.log(`  rig help ${result.name}`);
-    console.log(`  rig help ${result.name} ${result.command}`);
-    console.log(`  rig run ${result.name} ${result.command} test`);
+    console.log(`  rig llm.txt ${result.name}`);
+    console.log(`  rig llm.txt ${result.id}`);
+    console.log(`  rig run ${result.id} test`);
   }
 
   private async doctor(): Promise<void> {
@@ -315,35 +318,24 @@ export class CliApplication {
     console.log("\nStatus: OK");
   }
 
-  private helpText(): string {
-    return this.workflowText("# Rig help");
-  }
-
   private llmText(): string {
-    return this.workflowText("# Rig llm.txt");
+    return `The \`rig\` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
+
+- To discover available tools, run \`rig list\`.
+- To learn about a tool's usage, run \`rig llm.txt <tool>\`.
+- To run a tool, use \`rig run <tool>.<command> [args]\`.
+- To create a new tool, run \`rig create <tool>\`.
+- To edit an existing tool, run \`rig edit <tool>\` and open the printed file path.
+- To remove an existing tool, run \`rig remove <tool>\`.
+`;
   }
 
-  private workflowText(title: string): string {
-    return `${title}
-
-Rig is a typed local command runtime. It runs local TypeScript tools that contain one or more commands.
-
-Use this workflow:
-
-1. Run \`rig list\` to discover tools and command ids.
-2. Run \`rig help <tool>\` to read the tool API in plain text.
-3. Run \`rig help <tool> <command>\` before using a command.
-4. Use \`rig inspect <tool> <command>\` when you need machine-readable schemas and examples.
-5. Run commands with \`rig run <tool> <command> [args...]\`. Use \`--input\` or \`--input-file\` when JSON is clearer.
-6. Use \`--dry-run\` to validate input and see the command line without executing a command.
-7. Parse stdout as JSON with top-level \`data\` and \`errors\`.
-8. On success, \`errors\` is empty and the command result is in \`data\`.
-9. On failure, \`errors\` is non-empty. Read \`errors[0].message\` and \`errors[0].code\`.
-10. Treat stderr as logs or human-readable diagnostics.
-11. Remember that tools are local TypeScript files on the user's machine.
-
-A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. It is an identifier for discovery and inspection; execute it with \`rig run github list-prs owner=octocat repo=hello-world\`.
-`;
+  private commandTarget(commandId: string): { tool: string; command: string } {
+    const parts = commandId.split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new RigError("INPUT_ERROR", `Command id must use <tool>.<command>: ${commandId}`);
+    }
+    return { tool: parts[0], command: parts[1] };
   }
 
   private version(): string {

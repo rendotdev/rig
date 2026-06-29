@@ -1,10 +1,16 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RigConfigStore, type ConfigOptions } from "../config/config";
 import { RigError } from "../errors/RigError";
-import { RigToolEntryFiles } from "../registry/discover";
+import { RigToolEntryFiles, ToolDiscoveryService } from "../registry/discover";
 import { ToolLoader } from "./loader";
+
+export type ToolFileResult = {
+  name: string;
+  toolDir: string;
+  toolPath: string;
+};
 
 export class ToolCreator {
   private readonly configStore: RigConfigStore;
@@ -77,5 +83,39 @@ export class ToolCreator {
 
 export default tool;
 `;
+  }
+}
+
+export class ToolFileService {
+  private readonly discovery: ToolDiscoveryService;
+  private readonly loader: ToolLoader;
+
+  constructor(options: ConfigOptions = {}) {
+    this.discovery = new ToolDiscoveryService(options);
+    this.loader = new ToolLoader(options);
+  }
+
+  async path(name: string): Promise<ToolFileResult> {
+    this.loader.validateToolName(name);
+    const tool = await this.discovery.find(name);
+    return {
+      name: tool.name,
+      toolDir: tool.toolDir,
+      toolPath: tool.toolPath,
+    };
+  }
+}
+
+export class ToolRemover {
+  private readonly files: ToolFileService;
+
+  constructor(options: ConfigOptions = {}) {
+    this.files = new ToolFileService(options);
+  }
+
+  async remove(name: string): Promise<ToolFileResult> {
+    const tool = await this.files.path(name);
+    await rm(tool.toolDir, { recursive: true, force: false });
+    return tool;
   }
 }

@@ -92,17 +92,21 @@ describe("cli application", () => {
     const home = await workspaces.create();
     const cli = new CliHarness(home);
 
-    expect(await cli.run(["tool", "create", "sample"])).toContain("Created tool sample");
-    expect(await cli.run(["help"])).toContain("# Rig help");
-    expect(await cli.run(["llm.txt"])).toContain("# Rig llm.txt");
-    expect(await cli.run(["help", "sample"])).toContain("# sample");
-    expect(await cli.run(["help", "sample", "example"])).toContain("Tool: sample");
-    expect(await cli.run(["inspect", "sample", "example"])).toContain('"id": "sample.example"');
-    expect(await cli.run(["tool", "inspect", "sample", "example"])).toContain(
-      '"command": "example"',
+    expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
+    expect(await cli.run(["llm.txt"])).toContain("The `rig` CLI is installed on this machine.");
+    expect(await cli.run(["llm.txt", "sample"])).toContain("# sample");
+    expect(await cli.run(["llm.txt", "sample.example"])).toContain("Tool: sample");
+    expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
+    expect(await cli.run(["list"])).toContain("$ rig llm.txt sample.example # Example command");
+    expect(await cli.run(["list", "--json"])).toContain('"tools"');
+    expect(await cli.run(["ls", "--plain"])).toContain(
+      "$ rig llm.txt sample.example # Example command",
     );
-    expect(await cli.run(["list"])).toContain('"tools"');
-    expect(await cli.run(["ls", "--plain"])).toContain("sample.example Example command");
+    expect(await cli.run(["edit", "sample"])).toContain(
+      join(home, ".rig", "tools", "sample", "index.rig.ts"),
+    );
+    expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
+    expect(await cli.run(["list"])).toContain("No tools found.");
   });
 
   test("runs and typechecks tools", async () => {
@@ -110,10 +114,10 @@ describe("cli application", () => {
     await new ToolCreator({ homeDir: home }).create("sample");
     const cli = new CliHarness(home);
 
-    expect(await cli.run(["run", "sample", "example", "--input", '{"text":"cli"}'])).toContain(
+    expect(await cli.run(["run", "sample.example", "--input", '{"text":"cli"}'])).toContain(
       '"text": "cli"',
     );
-    expect(await cli.run(["run", "sample", "example", "Agent", "--dry-run"])).toContain(
+    expect(await cli.run(["run", "sample.example", "Agent", "--dry-run"])).toContain(
       '"dryRun": true',
     );
     expect(await cli.run(["typecheck", "sample"])).toContain('"ok": true');
@@ -146,9 +150,11 @@ describe("cli application", () => {
       throw new Error(`exit:${code}`);
     }) as never);
 
-    await expect(cli.run(["help", "missing"])).rejects.toThrow("exit:1");
+    await expect(cli.run(["llm.txt", "missing"])).rejects.toThrow("exit:1");
     expect(cli.errorOutput).toContain("TOOL_NOT_FOUND: Tool not found: missing");
     expect(cli.errorOutput).toContain('"name": "missing"');
+    await expect(cli.run(["run", "sample", "x"])).rejects.toThrow("exit:1");
+    expect(cli.errorOutput).toContain("Command id must use <tool>.<command>: sample");
 
     const app = new CliApplication() as unknown as {
       printError(error: unknown): never;

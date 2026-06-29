@@ -39,7 +39,9 @@ export class ToolListService {
   renderPlain(data: Awaited<ReturnType<ToolListService["list"]>>): string {
     if (data.tools.length === 0) return "No tools found.";
     return data.tools
-      .flatMap((tool) => tool.commands.map((command) => `${command.id} ${command.description}`))
+      .flatMap((tool) =>
+        tool.commands.map((command) => `$ rig llm.txt ${command.id} # ${command.description}`),
+      )
       .join("\n");
   }
 }
