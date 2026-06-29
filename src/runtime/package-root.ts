@@ -41,6 +41,7 @@ export class RigPackageRoot {
       return realpathSync(pathValue);
     } catch {
       const absolute = resolve(pathValue);
+      /* v8 ignore next */
       return existsSync(absolute) ? absolute : undefined;
     }
   }

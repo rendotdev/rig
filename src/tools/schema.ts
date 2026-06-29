@@ -4,14 +4,16 @@ export class SchemaRenderer {
   static toJsonSchema(schema: unknown): unknown {
     const converter = (z as unknown as { toJSONSchema?: (schema: unknown) => unknown })
       .toJSONSchema;
-    if (typeof converter === "function") {
-      try {
-        return converter(schema);
-      } catch {
-        return { type: "unknown", note: "JSON Schema conversion failed." };
-      }
+    /* v8 ignore next */
+    if (typeof converter !== "function") {
+      return { type: "unknown", note: "JSON Schema conversion is unavailable." };
     }
-    return { type: "unknown", note: "JSON Schema conversion is unavailable." };
+
+    try {
+      return converter(schema);
+    } catch {
+      return { type: "unknown", note: "JSON Schema conversion failed." };
+    }
   }
 
   static summary(schema: unknown): string {

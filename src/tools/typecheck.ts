@@ -91,6 +91,7 @@ export class ToolTypecheckService {
   private runTypeScript(tsconfigPath: string): { stdout: string; exitCode: number } {
     const host = this.parseHost();
     const config = ts.getParsedCommandLineOfConfigFile(tsconfigPath, {}, host);
+    /* v8 ignore next */
     if (!config) {
       return {
         stdout: "Unable to parse generated Rig tool tsconfig.\n",

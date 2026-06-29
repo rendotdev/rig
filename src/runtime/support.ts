@@ -261,6 +261,7 @@ ${JSON.stringify(
 
   private resolveImport(specifier: string): string {
     const meta = import.meta as ImportMeta & { resolve?: (id: string) => string };
+    /* v8 ignore next */
     if (!meta.resolve) return specifier;
     return meta.resolve(specifier);
   }

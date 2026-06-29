@@ -1,44 +1,170 @@
 <p align="center">
-  <img src="assets/rig-logo.svg" alt="Rig logo" width="320">
+  <img src="https://raw.githubusercontent.com/rendotdev/rig/main/assets/rig-logo.svg" alt="Rig logo" width="320">
 </p>
 
 # Rig
 
-Rig is a local typed command runtime for agents.
+Rig is a local command runtime for AI agents.
 
-It lets users and terminal-based agents create, discover, inspect, and run local TypeScript tools. A tool contains one or more commands. Each command declares input and output schemas, examples, and side effect level.
+It exposes TypeScript files on the user's machine as discoverable commands. Each command has typed input, typed output, examples, and declared side effects. Every run returns a JSON envelope with `data` and `errors`, so agents can inspect, execute, and recover predictably.
 
-Command run output always has top-level `data` and `errors`. If `errors` is empty, the command succeeded and `data` is filled. If `errors` is not empty, the command failed.
+## Install
 
-## Quickstart
+Rig requires Node.js 20 or newer.
 
 ```bash
-bun install
-bun run src/cli.ts
-bun run src/cli.ts tool create my-tool
-bun run src/cli.ts help my-tool
-bun run src/cli.ts run my-tool example test
+npm install -g @rendotdev/rig
 ```
 
-## Model
+Initialize the local Rig environment:
 
-- Tool: a local TypeScript module, for example `my-tool` or `github`.
-- Command: a runnable action inside a tool, for example `example` or `list-prs`.
-- Command id: `<tool>.<command>`, for example `my-tool.example`.
-- Run syntax: `rig run <tool> <command> [args...]`.
-- Args can be positional (`rig run my-tool example test`), key-value pairs (`rig run my-tool example text=test`), or a JSON object (`rig run my-tool example '{"text":"test"}'`).
-- Success data path: `data`.
-- Error details path: `errors[0]`.
-- Success means `errors.length === 0`.
+```bash
+rig
+```
 
-## Config
+## Agent command map
 
-First run creates:
+Use these commands when operating Rig for a user.
+
+### Want to discover available commands?
+
+```bash
+rig list --plain
+rig list
+```
+
+Use `rig list --plain` when you need a compact list of command ids. Use `rig list` when you need JSON metadata.
+
+### Want to understand a tool or command?
+
+```bash
+rig help <tool>
+rig help <tool> <command>
+rig inspect <tool>
+rig inspect <tool> <command>
+```
+
+Use `rig help` for human-readable docs. Use `rig inspect` for machine-readable schemas, examples, side effects, and run syntax.
+
+### Want to run a command?
+
+```bash
+rig run <tool> <command> [args...]
+rig run <tool> <command> key=value
+rig run <tool> <command> --input '{"key":"value"}'
+rig run <tool> <command> --input-file input.json
+```
+
+Parse stdout as JSON. Success is `errors: []` with the result in `data`. Failure is `data: null` with the first error in `errors[0]`.
+
+### Want to validate before running?
+
+```bash
+rig run <tool> <command> --dry-run [args...]
+```
+
+Use `--dry-run` before commands with write, network, shell, or destructive side effects.
+
+### Want to create a new tool or command?
+
+```bash
+rig tool create <tool>
+```
+
+Then edit:
+
+```txt
+~/.rig/tools/<tool>/index.rig.ts
+```
+
+After editing, run:
+
+```bash
+rig typecheck <tool>
+rig help <tool>
+rig inspect <tool>
+```
+
+Generated tools use `rig.command(...)`, `rig.input(...)`, and `rig.output(...)`. Keep examples inside the tool definition so agents can inspect them.
+
+### Want to type-check tools?
+
+```bash
+rig typecheck
+rig typecheck <tool>
+```
+
+Run this after creating or editing tools.
+
+### Want to handle permission errors?
+
+If a run returns `POLICY_CONFIRMATION_REQUIRED`, read `errors[0].details.suggestedCommand`, explain the side effects to the user, and ask for consent before rerunning.
+
+Permission flags:
+
+```bash
+--allow-write
+--allow-network
+--allow-shell
+--allow-destructive
+```
+
+Examples:
+
+```bash
+rig run <tool> <command> --allow-write [args...]
+rig run <tool> <command> --allow-network [args...]
+rig run <tool> <command> --allow-shell [args...]
+rig run <tool> <command> --allow-destructive [args...]
+```
+
+### Want to inspect or fix local setup?
+
+```bash
+rig init
+rig doctor
+rig config show
+rig config path
+```
+
+### Want to manage tool registries?
+
+```bash
+rig registry list
+rig registry add <path>
+rig registry remove <path>
+```
+
+Use registries to make additional local tool directories discoverable.
+
+### Want agent instructions?
+
+```bash
+rig llm.txt
+```
+
+Add the output to an agent prompt or memory file.
+
+## Agent rules
+
+- Inspect a command before running it when the command is unfamiliar.
+- Prefer `rig help <tool> <command>` for readable docs.
+- Prefer `rig inspect <tool> <command>` when you need schemas or examples.
+- Use `--dry-run` before commands with side effects.
+- Ask the user before adding allow flags.
+- Parse stdout as JSON.
+- Treat stderr as logs or diagnostics.
+- Use `data` on success and `errors[0]` on failure.
+- If output is truncated, read the JSON file at `data.fullOutputPath`.
+
+## Files Rig creates
 
 ```txt
 ~/.rig/rig.json
 ~/.rig/tools
 ~/.rig/runtime/sdk.ts
+~/.rig/runtime/types.d.ts
+~/.rig/runtime/globals.d.ts
 ```
 
 Default config:
@@ -51,131 +177,72 @@ Default config:
 }
 ```
 
-## Commands
+## Command output contract
 
-```bash
-rig
-rig init
-rig doctor
-rig config show
-rig config path
-rig registry list
-rig registry add <path>
-rig registry remove <path>
-rig dev link
-rig dev unlink
-rig dev status
-rig list
-rig ls
-rig list --plain
-rig tool create <tool>
-rig help
-rig help <tool>
-rig help <tool> <command>
-rig inspect <tool>
-rig inspect <tool> <command>
-rig tool inspect <tool>
-rig tool inspect <tool> <command>
-rig typecheck [tool]
-rig run <tool> <command> [args...]
-rig run <tool> <command> --dry-run [args...]
-rig llm.txt
-```
-
-## Run output
-
-A successful command run prints JSON like this:
+Success:
 
 ```json
 {
-  "data": {
-    "text": "test"
-  },
+  "data": {},
   "errors": []
 }
 ```
 
-An error returns `data: null` and a non-empty `errors` array. Use `--dry-run` to validate input and inspect command metadata without executing the command.
-
-Large successful outputs are truncated to 50KB or 2000 lines, whichever comes first. Rig saves the full command data as JSON in a temp file and returns a preview plus metadata in `data`:
+Failure:
 
 ```json
 {
-  "data": {
-    "truncated": true,
-    "preview": "{\n  \"text\": \"...",
-    "previewFormat": "partial-json",
-    "fullOutputPath": "/tmp/rig-output-abc123/data.json",
-    "fullOutputFormat": "json"
-  },
-  "errors": []
+  "data": null,
+  "errors": [
+    {
+      "code": "VALIDATION_ERROR",
+      "message": "Invalid input.",
+      "details": {}
+    }
+  ]
 }
 ```
 
-## Development
+Large successful outputs are truncated to 50KB or 2000 lines. Rig saves the full JSON output to a temp file and returns the path in `data.fullOutputPath`.
+
+## Side effect levels
+
+Commands declare one of these side effect levels:
+
+- `read`
+- `write`
+- `network`
+- `shell`
+- `destructive`
+
+Read commands run without extra flags. Other levels require the matching allow flag.
+
+## Tool authoring notes
+
+- Tool files export a Rig tool factory.
+- Commands live in the tool definition.
+- Inputs must use `rig.input(...)`.
+- Outputs must use `rig.output(...)`.
+- Examples should live in the command definition.
+- Run `rig typecheck <tool>` after edits.
+
+## Develop Rig from source
 
 ```bash
+bun install
 bun run dev
 bun run test
 bun run build
 ```
 
-`bun run test` runs Oxfmt format checks, Oxlint lint checks, and Vitest unit tests.
-
-Rig uses Vitest for unit tests, Oxfmt for formatting, and Oxlint for JavaScript and TypeScript linting. If formatting needs to be written, run `bunx oxfmt .` directly.
-
-For local CLI testing, link this checkout as `rig`:
+For local CLI testing:
 
 ```bash
 bun run src/cli.ts dev link
 rig dev status
+rig dev unlink
 ```
 
-This writes a small shim to `~/.local/bin/rig` that runs `src/cli.ts` with Bun. Remove it with `rig dev unlink`.
+## Limits
 
-## Publishing
-
-The GitHub Actions publish workflow uses npm trusted publishing through OIDC, so it does not need an `NPM_TOKEN` secret. Configure npm package settings with:
-
-- Publisher: GitHub Actions
-- Organization or user: `rendotdev`
-- Repository: `rig`
-- Workflow filename: `publish.yml`
-- Allowed action: `npm publish`
-
-Trusted publishing requires npm 11.5.1 or newer and Node 22.14.0 or newer. The workflow uses Node 24 and updates npm before publishing. npm currently requires the package to exist before you can configure trusted publishing, so publish the first package version manually with OTP, then configure trusted publishing and use CI for every later publish. Publish a CI version by pushing a matching tag, for example `v0.0.2`, creating a GitHub Release, or running the workflow manually.
-
-## Tool files
-
-Generated tools create one file by default:
-
-```txt
-~/.rig/tools/my-tool/index.rig.ts
-```
-
-Examples live inside the tool definition, not in separate README or input files. `rig help <tool>` renders command inputs, outputs, and examples from the definition. `rig inspect` includes full JSON Schema metadata.
-
-Tool modules export a factory. Rig injects the tool runtime so tools do not need to import Rig helpers. Define command schemas with `rig.input(...)` and `rig.output(...)`; Rig brands those schemas and rejects raw Zod schemas so inputs and outputs stay inspectable and policy-ready. Run `rig typecheck [tool]` to type-check tool files with the generated global `RigToolFactory` type. Rig packages TypeScript as a runtime dependency and uses the TypeScript compiler API directly, so users do not need a global `tsc` install.
-
-```ts
-const tool: RigToolFactory = (rig) =>
-  rig.defineTool({
-    name: "my-tool",
-    description: "Describe what this tool does.",
-    commands: {
-      example: rig.command({
-        description: "Echo input text.",
-        input: rig.input({ text: rig.z.string().default("example") }),
-        output: rig.output({ text: rig.z.string() }),
-        sideEffects: "read",
-        run: async ({ input }) => ({ text: input.text }),
-      }),
-    },
-  });
-
-export default tool;
-```
-
-## Limitations
-
-Rig v1 is policy guarded, not a hard sandbox. It validates schemas, produces JSON envelopes, uses safer shell helpers, and blocks declared risky side effects unless allowed. Arbitrary TypeScript still runs locally on the user's machine.
+Rig validates schemas, returns consistent JSON envelopes, and blocks risky side effects until they are allowed. Tools are local TypeScript code, so run tools the user trusts.

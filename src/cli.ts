@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { RigConfigStore } from "./config/config";
 import { RigPaths, type PathOptions } from "./config/paths";
 import { DevLinkService } from "./dev/dev-link";
-import { RigError, RigErrors } from "./errors/RigError";
+import { RigErrors } from "./errors/RigError";
 import { RegistryConfigService } from "./registry/registry";
 import { ToolDiscoveryService } from "./registry/discover";
 import { RigPackageRoot } from "./runtime/package-root";
@@ -15,7 +16,7 @@ import { ToolListService } from "./tools/list";
 import { ToolRunner } from "./tools/run";
 import { ToolTypecheckService } from "./tools/typecheck";
 
-class CliApplication {
+export class CliApplication {
   private readonly program = new Command();
 
   async run(argv: string[]): Promise<void> {
@@ -27,7 +28,6 @@ class CliApplication {
         await this.program.parseAsync(argv);
       }
     } catch (error) {
-      if (error instanceof RigError) this.printError(error);
       this.printError(error);
     }
   }
@@ -386,4 +386,12 @@ A command id looks like \`<tool>.<command>\`, for example \`github.list-prs\`. I
   }
 }
 
-await new CliApplication().run(process.argv);
+export function isCliEntrypoint(metaUrl: string, argvPath = process.argv[1]): boolean {
+  if (!argvPath) return false;
+  return metaUrl === pathToFileURL(argvPath).href;
+}
+
+/* v8 ignore next 3 */
+if (isCliEntrypoint(import.meta.url)) {
+  await new CliApplication().run(process.argv);
+}

@@ -13,6 +13,16 @@ class VitestConfigFactory {
         passWithNoTests: false,
         restoreMocks: true,
         testTimeout: 30_000,
+        coverage: {
+          provider: "v8",
+          include: ["src/**/*.ts"],
+          exclude: ["src/**/*.d.ts"],
+          reporter: ["text", "json-summary"],
+          thresholds: {
+            100: true,
+            perFile: true,
+          },
+        },
       },
     });
   }
