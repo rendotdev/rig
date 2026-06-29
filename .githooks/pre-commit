@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+allowed_name="rendotdev"
+allowed_email="294850895+rendotdev@users.noreply.github.com"
+
+fail() {
+  cat >&2 <<EOF
+Commit blocked: this repository only allows commits authored and committed as:
+  ${allowed_name} <${allowed_email}>
+
+Current identity:
+  author:    ${author_name:-unknown} <${author_email:-unknown}>
+  committer: ${committer_name:-unknown} <${committer_email:-unknown}>
+
+Fix with:
+  git config user.name "${allowed_name}"
+  git config user.email "${allowed_email}"
+EOF
+  exit 1
+}
+
+extract_name() {
+  local ident="$1"
+  printf '%s' "${ident%% <*}"
+}
+
+extract_email() {
+  local ident="$1"
+  sed -n 's/.*<\([^>]*\)>.*/\1/p' <<<"$ident"
+}
+
+author_ident="$(git var GIT_AUTHOR_IDENT)"
+committer_ident="$(git var GIT_COMMITTER_IDENT)"
+
+author_name="$(extract_name "$author_ident")"
+author_email="$(extract_email "$author_ident")"
+committer_name="$(extract_name "$committer_ident")"
+committer_email="$(extract_email "$committer_ident")"
+
+[[ "$author_name" == "$allowed_name" ]] || fail
+[[ "$author_email" == "$allowed_email" ]] || fail
+[[ "$committer_name" == "$allowed_name" ]] || fail
+[[ "$committer_email" == "$allowed_email" ]] || fail
