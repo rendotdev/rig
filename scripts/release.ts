@@ -47,10 +47,12 @@ class ReleaseOptionsParser {
     return [
       "Usage: npm run release -- [patch|minor|major|x.y.z] [options]",
       "",
+      "By default this commits package.json, pushes an annotated vX tag, and lets GitHub Actions run publish.yml from CI. It never runs npm publish locally.",
+      "",
       "Options:",
       "  --dry-run       Print the planned release without changing files.",
-      "  --no-push       Commit and tag locally, but do not push.",
-      "  --no-tag        Commit the version bump without creating a git tag.",
+      "  --no-push       Commit and tag locally, but do not push or start CI.",
+      "  --no-tag        Commit the version bump without creating a git tag or starting publish.yml.",
       "  --skip-checks   Skip bun run test and bun run build.",
       "",
       "Examples:",
@@ -195,7 +197,7 @@ class ReleaseCommand {
 
     console.log(`Release ${packageName}: ${manifest.version} -> ${nextVersion}`);
     if (options.dryRun) {
-      console.log(`Dry run only. Would commit ${tagName}${options.push ? " and push it" : ""}.`);
+      console.log(`Dry run only. ${this.renderDryRunPlan(options, tagName)}`);
       return;
     }
 
@@ -212,7 +214,19 @@ class ReleaseCommand {
     if (options.tag) this.runner.run(["git", "tag", "-a", tagName, "-m", `Release ${tagName}`]);
     if (options.push) this.push(options, tagName);
 
-    console.log(`Release ${tagName} is ready.`);
+    console.log(`Release ${tagName} is ready. ${this.renderCiStatus(options, tagName)}`);
+  }
+
+  private renderDryRunPlan(options: ReleaseOptions, tagName: string): string {
+    if (!options.push) return "Would leave the release commit and tag local.";
+    if (!options.tag) return "Would push the release commit without starting publish.yml.";
+    return `Would push ${tagName}; GitHub Actions would run publish.yml from CI.`;
+  }
+
+  private renderCiStatus(options: ReleaseOptions, tagName: string): string {
+    if (!options.push) return "Release commit and tag are local only.";
+    if (!options.tag) return "Pushed the release commit without starting publish.yml.";
+    return `Pushed ${tagName}; GitHub Actions will run publish.yml from CI.`;
   }
 
   private runChecks(): void {
