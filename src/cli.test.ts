@@ -77,7 +77,7 @@ describe("cli application", () => {
     const cli = new CliHarness(home);
 
     expect(await cli.run([])).toContain("Rig is ready.");
-    expect(await cli.run(["init"])).toContain("Rig initialized.");
+    expect(await cli.run(["init"])).toContain("Rig is ready.");
     expect(await cli.run(["doctor"])).toContain("Status: OK");
   });
 
