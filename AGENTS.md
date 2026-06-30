@@ -1,3 +1,4 @@
 # AGENTS.md
 
 - For custom code we write, prefer self-contained domain classes over floating functions.
+- For scripts, use `Bun.file(...).text()` or `Bun.file(...).json()` and `Bun.write(...)` for file I/O instead of `node:fs/promises` `readFile` or `writeFile`.
