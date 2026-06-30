@@ -60,8 +60,9 @@ Do not implement anything yet. Ask the user which workflow they want to implemen
 
 > Are you an AI agent looking for how to use rig? Assume the following:
 
-The `rig` CLI is installed on this machine. It allows you to write, run, and own local tools and scripts in a typed runtime.
+The `rig` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
 
+- To sync all tools to AGENTS.md and CLAUDE.md, run `rig` (or `rig init`).
 - To discover available tools, run `rig list`.
 - To learn about a tool's usage, run `rig help <tool>`.
 - To run a tool, use `rig run <tool>.<command> [args]`.
