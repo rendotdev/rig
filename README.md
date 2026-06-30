@@ -71,10 +71,9 @@ The `rig` CLI is installed on this machine. It allows you to write, run, and own
 - To list tool registries, run `rig registry list`.
 - To add a registry, run `rig registry add [path]` (defaults to current directory).
 
->> source: ./src/agents/instructions.ts
+> > source: ./src/agents/instructions.ts
 
-When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output. 
-
+When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output.
 
 ## Feedback?
 
