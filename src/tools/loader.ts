@@ -5,10 +5,8 @@ import type { ConfigOptions } from "../config/config";
 import { createRigToolKit } from "./sdk";
 import {
   CommandIds,
-  RigSchemaRoleSymbol,
   type CommandDefinition,
   type LoadedTool,
-  type RigSchemaRole,
   type ToolDefinition,
 } from "./types";
 
@@ -104,6 +102,7 @@ export class ToolDefinitionValidator {
     }
   }
 
+
   private validateExamples(value: unknown, path: string): void {
     if (value === undefined) return;
     if (!Array.isArray(value)) {
@@ -129,18 +128,10 @@ export class ToolDefinitionValidator {
     }
   }
 
-  private validateSchema(value: unknown, role: RigSchemaRole, id: string): void {
+  private validateSchema(value: unknown, role: string, id: string): void {
     if (!this.hasSafeParse(value)) {
-      throw new RigError("TOOL_INVALID", `Command ${id} needs a Rig ${role} schema.`, {
-        expected: `schema created with rig.${role}(...)`,
-      });
-    }
-
-    const actualRole = (value as { [RigSchemaRoleSymbol]?: unknown })[RigSchemaRoleSymbol];
-    if (actualRole !== role) {
-      throw new RigError("TOOL_INVALID", `Command ${id} needs a Rig ${role} schema.`, {
-        expected: `rig.${role}(...)`,
-        actual: actualRole ?? "unbranded Zod schema",
+      throw new RigError("TOOL_INVALID", `Command ${id} needs a Zod schema for ${role}.`, {
+        expected: `rig.z.object({ ... })`,
       });
     }
   }

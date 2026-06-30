@@ -50,12 +50,12 @@ export class ToolCreator {
   name: ${JSON.stringify(name)},
   description: "Describe what this tool does.",
   commands: {
-    example: rig.command({
+    example: rig.defineCommand({
       description: "Example command. Replace this with a real command.",
-      input: rig.input({
+      input: rig.z.object({
         text: rig.z.string().default("example"),
       }),
-      output: rig.output({
+      output: rig.z.object({
         text: rig.z.string(),
       }),
       examples: [
