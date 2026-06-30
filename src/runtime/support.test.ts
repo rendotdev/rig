@@ -794,8 +794,8 @@ describe("coverage support", () => {
       commands: { echo: validCommand },
     };
     expect(validator.validateToolDefinition(validTool, "valid")).toBe(validTool);
-    expect(() => validator.validateToolName("Bad")).toThrow("Invalid tool name");
-    expect(() => validator.validateCommandName("Bad")).toThrow("Invalid command name");
+    expect(() => validator.validateToolName("")).toThrow("Invalid tool name");
+    expect(() => validator.validateCommandName("")).toThrow("Invalid command name");
 
     const invalidDefinitions: Array<[unknown, string]> = [
       [null, "Tool default export must be an object"],
@@ -804,7 +804,7 @@ describe("coverage support", () => {
       [{ name: "valid", description: "", commands: {} }, "needs a description"],
       [{ name: "valid", description: "x" }, "needs a commands object"],
       [{ name: "valid", description: "x", commands: {} }, "must define at least one command"],
-      [{ ...validTool, commands: { Bad: validCommand } }, "Invalid command name"],
+      [{ ...validTool, commands: { "": validCommand } }, "Invalid command name"],
       [{ ...validTool, commands: { echo: null } }, "Invalid command valid.echo"],
       [
         { ...validTool, commands: { echo: { ...validCommand, description: "" } } },
@@ -854,7 +854,7 @@ describe("coverage support", () => {
     const home = await workspaces.create();
     const loader = new ToolLoader({ homeDir: home });
     loader.validateCommandName("echo");
-    await expect(loader.load("Bad")).rejects.toThrow("Invalid tool name");
+    await expect(loader.load("nonexistent")).rejects.toThrow("Tool not found");
     await expect(loader.loadCommand("valid", "Bad")).rejects.toThrow("Tool not found");
 
     await writeTool(home, "broken", "throw new Error('load failed');\n");

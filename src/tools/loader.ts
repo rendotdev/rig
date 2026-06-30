@@ -13,20 +13,18 @@ import {
 } from "./types";
 
 export class ToolDefinitionValidator {
-  private readonly namePattern = /^[a-z][a-z0-9-]*$/;
-
   validateToolName(name: string): void {
-    if (!this.namePattern.test(name)) {
+    if (!name || typeof name !== "string") {
       throw new RigError("TOOL_INVALID", `Invalid tool name: ${name}`, {
-        expected: "lowercase letters, numbers, and hyphens, starting with a letter",
+        expected: "non-empty string",
       });
     }
   }
 
   validateCommandName(name: string): void {
-    if (!this.namePattern.test(name)) {
+    if (!name || typeof name !== "string") {
       throw new RigError("TOOL_INVALID", `Invalid command name: ${name}`, {
-        expected: "lowercase letters, numbers, and hyphens, starting with a letter",
+        expected: "non-empty string",
       });
     }
   }
