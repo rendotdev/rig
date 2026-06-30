@@ -37,8 +37,12 @@ class RunInputReader {
     }
 
     if (options.inputFile) {
-      const raw = await readFile(options.inputFile, "utf8");
-      return { value: JSON.parse(raw), source: `--input-file ${options.inputFile}` };
+      /* v8 ignore next 3 */
+      const value =
+        typeof Bun !== "undefined"
+          ? await Bun.file(options.inputFile).json()
+          : JSON.parse(await readFile(options.inputFile, "utf8"));
+      return { value, source: `--input-file ${options.inputFile}` };
     }
 
     if (options.input) {

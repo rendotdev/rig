@@ -150,16 +150,13 @@ ${EndMarker}`;
     targets: Map<string, AgentInstructionTarget>,
     configPath: string,
   ): Promise<void> {
-    let raw: string;
-    try {
-      raw = await readFile(configPath, "utf8");
-    } catch {
-      return;
-    }
-
     let parsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      /* v8 ignore next 3 */
+      parsed =
+        typeof Bun !== "undefined"
+          ? await Bun.file(configPath).json()
+          : JSON.parse(await readFile(configPath, "utf8"));
     } catch {
       return;
     }
@@ -224,7 +221,11 @@ ${EndMarker}`;
     target: AgentInstructionTarget,
     block: string,
   ): Promise<boolean> {
-    const existing = target.existed ? await readFile(target.path, "utf8") : "";
+    const existing = target.existed
+      ? /* v8 ignore next */ typeof Bun !== "undefined"
+        ? await Bun.file(target.path).text()
+        : await readFile(target.path, "utf8")
+      : "";
     const nextBody = this.managedBlockPattern().test(existing)
       ? existing.replace(this.managedBlockPattern(), block)
       : this.appendBlock(existing, block);
@@ -232,7 +233,9 @@ ${EndMarker}`;
 
     if (next === existing) return false;
 
-    await writeFile(target.path, next, "utf8");
+    /* v8 ignore next 3 */
+    if (typeof Bun !== "undefined") await Bun.write(target.path, next);
+    else await writeFile(target.path, next, "utf8");
     return true;
   }
 
