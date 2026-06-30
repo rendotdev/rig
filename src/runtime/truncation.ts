@@ -68,7 +68,9 @@ class OutputTempFileStore {
   async writeJson(content: string): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "rig-output-"));
     const path = join(dir, "data.json");
-    await writeFile(path, `${content}\n`, "utf8");
+    /* v8 ignore next 3 */
+    if (typeof Bun !== "undefined") await Bun.write(path, `${content}\n`);
+    else await writeFile(path, `${content}\n`, "utf8");
     return path;
   }
 }

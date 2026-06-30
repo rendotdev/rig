@@ -102,11 +102,17 @@ export class CliApplication {
       .action(async (target?: string) => {
         if (!target) {
           const readmePath = join(fileURLToPath(import.meta.url), "..", "..", "README.md");
-          console.log(
-            existsSync(readmePath)
-              ? readFileSync(readmePath, "utf8")
-              : /* v8 ignore next */ this.program.helpInformation(),
-          );
+          if (existsSync(readmePath)) {
+            /* v8 ignore next 2 */
+            const content =
+              typeof Bun !== "undefined"
+                ? await Bun.file(readmePath).text()
+                : readFileSync(readmePath, "utf8");
+            console.log(content);
+          } else {
+            /* v8 ignore next */
+            console.log(this.program.helpInformation());
+          }
           return;
         }
         this.requestGeneratedSync();
