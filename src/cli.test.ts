@@ -92,15 +92,16 @@ describe("cli application", () => {
     expect(await cli.run(["registry", "list"])).toContain('"registries"');
 
     const custom = join(home, "custom-tools");
-    expect(await cli.run(["registry", "add", custom])).toContain(custom);
+    expect(await cli.run(["registry", "create", custom])).toContain(custom);
     expect(await cli.run(["registry", "remove", custom])).toContain('"customRegistries": []');
-    expect(await cli.run(["registry", "add"])).toContain(process.cwd());
+    expect(await cli.run(["registry", "create"])).toContain(process.cwd());
   });
 
   test("creates, lists, inspects, and renders help for tools", async () => {
     const home = await workspaces.create();
     const cli = new CliHarness(home);
 
+    expect(await cli.run(["help"])).toContain("# rig");
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
     expect(await cli.run(["help", "sample"])).toContain("# sample");
     expect(await cli.run(["help", "sample.example"])).toContain("Tool: sample");

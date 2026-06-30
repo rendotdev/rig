@@ -97,9 +97,18 @@ export class CliApplication {
     this.configureUpdateCommand();
     this.program
       .command("help")
-      .argument("<target>", "Tool name or command id (<tool>.<command>.)")
-      .description("Print tool docs.")
-      .action(async (target: string) => {
+      .argument("[target]", "Tool name or command id (<tool>.<command>).")
+      .description("Print general help or tool docs.")
+      .action(async (target?: string) => {
+        if (!target) {
+          const readmePath = join(fileURLToPath(import.meta.url), "..", "..", "README.md");
+          console.log(
+            existsSync(readmePath)
+              ? readFileSync(readmePath, "utf8")
+              : /* v8 ignore next */ this.program.helpInformation(),
+          );
+          return;
+        }
         this.requestGeneratedSync();
         const { ToolHelpService } = await import("./tools/help");
         console.log(await new ToolHelpService(this.pathOptions()).render(target));
@@ -163,7 +172,7 @@ export class CliApplication {
         this.printJson(await new RegistryConfigService(this.pathOptions()).list());
       });
     registryCommand
-      .command("add")
+      .command("create")
       .argument("[path]")
       .description("Add a custom registry. Defaults to the current directory.")
       .action(async (pathValue?: string) => {
