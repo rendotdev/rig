@@ -1,3 +1,4 @@
+// Keep in sync with README.md "Agent?" section
 export const RigAgentInstructions = `The \`rig\` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
 
 - To sync all tools to AGENTS.md and CLAUDE.md, run \`rig\` (or \`rig init\`).
