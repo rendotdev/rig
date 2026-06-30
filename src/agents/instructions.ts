@@ -6,4 +6,6 @@ export const RigAgentInstructions = `The \`rig\` CLI is installed on this machin
 - To create a new tool, run \`rig create <tool>\`.
 - To edit an existing tool, run \`rig edit <tool>\` and open the printed file path.
 - To remove an existing tool, run \`rig remove <tool>\`.
+- To list tool registries, run \`rig registry list\`.
+- To add a registry, run \`rig registry add [path]\` (defaults to current directory).
 `;

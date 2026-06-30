@@ -164,12 +164,14 @@ export class CliApplication {
       });
     registryCommand
       .command("add")
-      .argument("<path>")
-      .description("Add a custom registry.")
-      .action(async (pathValue: string) => {
+      .argument("[path]")
+      .description("Add a custom registry. Defaults to the current directory.")
+      .action(async (pathValue?: string) => {
         this.requestGeneratedSync();
         const { RegistryConfigService } = await import("./registry/registry");
-        this.printJson(await new RegistryConfigService(this.pathOptions()).add(pathValue));
+        this.printJson(
+          await new RegistryConfigService(this.pathOptions()).add(pathValue ?? process.cwd()),
+        );
       });
     registryCommand
       .command("remove")

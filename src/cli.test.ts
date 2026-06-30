@@ -94,6 +94,7 @@ describe("cli application", () => {
     const custom = join(home, "custom-tools");
     expect(await cli.run(["registry", "add", custom])).toContain(custom);
     expect(await cli.run(["registry", "remove", custom])).toContain('"customRegistries": []');
+    expect(await cli.run(["registry", "add"])).toContain(process.cwd());
   });
 
   test("creates, lists, inspects, and renders help for tools", async () => {

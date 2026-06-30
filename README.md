@@ -68,8 +68,13 @@ The `rig` CLI is installed on this machine. It allows you to write, run, and own
 - To create a new tool, run `rig create <tool>`.
 - To edit an existing tool, run `rig edit <tool>` and open the printed file path.
 - To remove an existing tool, run `rig remove <tool>`.
+- To list tool registries, run `rig registry list`.
+- To add a registry, run `rig registry add [path]` (defaults to current directory).
 
-When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output. It also keeps each tool file prefixed with a generated rig runtime reference for agents editing the TypeScript source.
+>> source: ./src/agents/instructions.ts
+
+When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output. 
+
 
 ## Feedback?
 
