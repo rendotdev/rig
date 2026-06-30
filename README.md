@@ -58,6 +58,8 @@ Do not implement anything yet. Ask the user which workflow they want to implemen
 
 ## Agent?
 
+<!-- Keep in sync with src/agents/instructions.ts -->
+
 > Are you an AI agent looking for how to use rig? Assume the following:
 
 The `rig` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
@@ -71,8 +73,6 @@ The `rig` CLI is installed on this machine. It allows you to write, run and own 
 - To remove an existing tool, run `rig remove <tool>`.
 - To list tool registries, run `rig registry list`.
 - To add a registry, run `rig registry create [path]` (defaults to current directory).
-
-> > source: ./src/agents/instructions.ts
 
 When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output.
 
