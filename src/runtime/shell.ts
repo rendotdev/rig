@@ -19,10 +19,12 @@ type BunShellGlobal = {
   $: (strings: TemplateStringsArray, ...values: unknown[]) => BunShellPromise;
 };
 
+type BunShellProvider = () => Partial<BunShellGlobal> | undefined;
+
 export class BunRigShell implements RigShell {
   constructor(
     private readonly defaults: ShellOptions = {},
-    private readonly bunProvider = () =>
+    private readonly bunProvider: BunShellProvider = () =>
       (globalThis as typeof globalThis & { Bun?: Partial<BunShellGlobal> }).Bun,
   ) {}
 

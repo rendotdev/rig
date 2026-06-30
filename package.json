@@ -26,11 +26,12 @@
   "scripts": {
     "dev": "bun run src/cli.ts",
     "build": "bun build ./src/cli.ts --target=node --outfile dist/rig.js",
+    "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "coverage": "vitest run --coverage",
-    "test": "oxfmt . --check && oxlint . --deny-warnings && vitest run --coverage",
+    "test": "oxfmt . --check && oxlint . --deny-warnings && tsc --noEmit && vitest run --coverage",
     "prepack": "bun run build"
   },
   "dependencies": {

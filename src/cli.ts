@@ -27,12 +27,15 @@ type BunRuntimeSpawn = (
   options: Parameters<typeof spawnSync>[2],
 ) => SpawnSyncReturns<Buffer>;
 
+type BunRuntimeGlobalProvider = () => unknown;
+
 export class BunRuntimeBootstrap {
   constructor(
     private readonly packageRoot = RigPackageRoot.find(import.meta.url),
     private readonly spawn: BunRuntimeSpawn = spawnSync,
     private readonly env: NodeJS.ProcessEnv = process.env,
-    private readonly bunGlobal = () => (globalThis as typeof globalThis & { Bun?: unknown }).Bun,
+    private readonly bunGlobal: BunRuntimeGlobalProvider = () =>
+      (globalThis as typeof globalThis & { Bun?: unknown }).Bun,
   ) {}
 
   run(metaUrl: string, argv: string[]): number | undefined {
