@@ -29,8 +29,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
-          scope: "@rendotdev"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -52,10 +50,26 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Check published version
+        id: published_version
+        run: |
+          set -euo pipefail
+          package_name="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).name")"
+          package_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+
+          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${package_name}@${package_version} is already published. Skipping npm publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Pack dry run
+        if: steps.published_version.outputs.already_published != 'true'
         run: npm pack --dry-run
 
       - name: Publish with trusted publishing
+        if: steps.published_version.outputs.already_published != 'true'
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
