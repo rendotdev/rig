@@ -3,8 +3,8 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RigConfigStore } from "../src/config/config";
-import { RigPaths } from "../src/config/paths";
+import { RigConfigStore } from "./config";
+import { RigPaths } from "./paths";
 
 class TestHomeStore {
   private readonly homes: string[] = [];

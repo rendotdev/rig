@@ -13,6 +13,7 @@ export type AgentInstructionSyncOptions = ConfigOptions & {
 export type AgentInstructionTarget = {
   path: string;
   existed: boolean;
+  scope: "all" | "visible";
 };
 
 export type AgentInstructionUpdate = AgentInstructionTarget & {
@@ -58,12 +59,14 @@ export class AgentInstructionSyncService {
     const targets = await this.discoverTargets();
     if (targets.length === 0) return { skipped: false, targets: [] };
 
-    const block = this.renderBlock(await this.renderToolList());
     const updates = await Promise.all(
-      targets.map(async (target) => ({
-        ...target,
-        changed: await this.upsertManagedBlock(target, block),
-      })),
+      targets.map(async (target) => {
+        const block = this.renderBlock(await this.renderToolList(target));
+        return {
+          ...target,
+          changed: await this.upsertManagedBlock(target, block),
+        };
+      }),
     );
 
     return { skipped: false, targets: updates };
@@ -75,20 +78,20 @@ export class AgentInstructionSyncService {
     await Promise.all(
       this.projectDirectories().flatMap((directory) => [
         ...AgentInstructionSyncLocations.projectFiles.map((file) =>
-          this.addExistingFile(targets, join(directory, file)),
+          this.addExistingFile(targets, join(directory, file), "visible"),
         ),
         ...AgentInstructionSyncLocations.projectClaudeDirectories.map((directoryName) =>
-          this.addClaudeDirectoryTarget(targets, join(directory, directoryName)),
+          this.addClaudeDirectoryTarget(targets, join(directory, directoryName), "visible"),
         ),
       ]),
     );
 
     await Promise.all([
       ...AgentInstructionSyncLocations.homeClaudeDirectories.map((path) =>
-        this.addClaudeDirectoryTarget(targets, join(this.paths.homeDir, ...path)),
+        this.addClaudeDirectoryTarget(targets, join(this.paths.homeDir, ...path), "all"),
       ),
       ...AgentInstructionSyncLocations.homeFiles.map((path) =>
-        this.addExistingFile(targets, join(this.paths.homeDir, ...path)),
+        this.addExistingFile(targets, join(this.paths.homeDir, ...path), "all"),
       ),
       this.addOpenCodeInstructionTargets(targets),
     ]);
@@ -109,25 +112,28 @@ ${toolList}
 ${EndMarker}`;
   }
 
-  private async renderToolList(): Promise<string> {
-    return this.listService.renderPlain(await this.listService.list());
+  private async renderToolList(target: AgentInstructionTarget): Promise<string> {
+    const options = target.scope === "visible" ? { visibleFromPath: target.path } : {};
+    return this.listService.renderPlain(await this.listService.list(options));
   }
 
   private async addExistingFile(
     targets: Map<string, AgentInstructionTarget>,
     path: string,
+    scope: AgentInstructionTarget["scope"],
   ): Promise<void> {
-    if (await this.isFile(path)) await this.setTarget(targets, path, true);
+    if (await this.isFile(path)) await this.setTarget(targets, path, true, scope);
   }
 
   private async addClaudeDirectoryTarget(
     targets: Map<string, AgentInstructionTarget>,
     directory: string,
+    scope: AgentInstructionTarget["scope"],
   ): Promise<void> {
     const path = join(directory, "CLAUDE.md");
     const fileExists = await this.isFile(path);
     const directoryExists = fileExists ? false : await this.isDirectory(directory);
-    if (fileExists || directoryExists) await this.setTarget(targets, path, fileExists);
+    if (fileExists || directoryExists) await this.setTarget(targets, path, fileExists, scope);
   }
 
   private async addOpenCodeInstructionTargets(
@@ -163,9 +169,14 @@ ${EndMarker}`;
     await Promise.all(
       parsed.instructions.map((instruction) => {
         if (typeof instruction !== "string") return Promise.resolve();
+        const instructionPath = this.resolveOpenCodeInstructionPath(
+          instruction,
+          dirname(configPath),
+        );
         return this.addExistingFile(
           targets,
-          this.resolveOpenCodeInstructionPath(instruction, dirname(configPath)),
+          instructionPath,
+          this.instructionScope(instructionPath),
         );
       }),
     );
@@ -176,6 +187,22 @@ ${EndMarker}`;
     return isAbsolute(path) ? path : resolve(configDir, path);
   }
 
+  private instructionScope(path: string): AgentInstructionTarget["scope"] {
+    let current = dirname(path);
+    const home = resolve(this.paths.homeDir);
+
+    while (true) {
+      if (existsSync(join(current, ".git")) || existsSync(join(current, "package.json"))) {
+        return "visible";
+      }
+
+      if (current === home) return "all";
+      const parent = dirname(current);
+      if (parent === current) return "visible";
+      current = parent;
+    }
+  }
+
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
   }
@@ -184,10 +211,13 @@ ${EndMarker}`;
     targets: Map<string, AgentInstructionTarget>,
     path: string,
     existed: boolean,
+    scope: AgentInstructionTarget["scope"],
   ): Promise<void> {
     const key = existed ? await this.realPath(path) : path;
     const current = targets.get(key);
-    if (!current || path < current.path) targets.set(key, { path, existed });
+    const nextScope = current?.scope === "visible" || scope === "visible" ? "visible" : "all";
+    if (!current || path < current.path) targets.set(key, { path, existed, scope: nextScope });
+    else current.scope = nextScope;
   }
 
   private async upsertManagedBlock(

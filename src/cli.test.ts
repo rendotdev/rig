@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BunRuntimeBootstrap, CliApplication, isCliEntrypoint } from "../src/cli";
-import { ToolCreator } from "../src/tools/create";
+import { BunRuntimeBootstrap, CliApplication, isCliEntrypoint } from "./cli";
+import { ToolCreator } from "./tools/create";
 
 class CliWorkspaceStore {
   private readonly paths: string[] = [];
@@ -51,6 +51,7 @@ class CliHarness {
     else delete process.env.RIG_HOME;
     if (this.agentSync) delete process.env.RIG_AGENT_SYNC;
     else process.env.RIG_AGENT_SYNC = "0";
+    process.env.RIG_UPDATE_CHECK = "0";
     await new CliApplication().run(["node", "rig", ...args]);
     return this.output;
   }
@@ -100,20 +101,20 @@ describe("cli application", () => {
     const cli = new CliHarness(home);
 
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
-    expect(await cli.run(["help"])).toContain("The `rig` CLI is installed on this machine.");
     expect(await cli.run(["help", "sample"])).toContain("# sample");
     expect(await cli.run(["help", "sample.example"])).toContain("Tool: sample");
     expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
-    expect(await cli.run(["list"])).toContain("$ rig help sample.example # Example command");
+    const listOutput = await cli.run(["list"]);
+    expect(listOutput).toContain("sample.example");
+    expect(listOutput).toContain("run:  rig run sample.example text=example");
+    expect(listOutput).toContain("help: rig help sample.example");
     expect(await cli.run(["list", "--json"])).toContain('"tools"');
-    expect(await cli.run(["ls", "--plain"])).toContain(
-      "$ rig help sample.example # Example command",
-    );
+    expect(await cli.run(["ls", "--plain"])).toContain("run:  rig run sample.example text=example");
     expect(await cli.run(["edit", "sample"])).toContain(
       join(home, ".rig", "tools", "sample", "index.rig.ts"),
     );
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
-    expect(await cli.run(["list"])).toContain("No tools found.");
+    expect(await cli.run(["list"])).toContain("No Rig tools found.");
   });
 
   test("syncs agent instruction files after commands", async () => {
@@ -135,11 +136,12 @@ describe("cli application", () => {
     const synced = await readFile(join(project, "AGENTS.md"), "utf8");
     expect(synced).toContain("<!-- rig:agent-instructions:start -->");
     expect(synced).toContain("The `rig` CLI is installed on this machine.");
-    expect(synced).toContain("$ rig help sample.example # Example command");
+    expect(synced).toContain("No Rig tools found.");
+    expect(synced).not.toContain("sample.example");
 
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
     const updated = await readFile(join(project, "AGENTS.md"), "utf8");
-    expect(updated).toContain("No tools found.");
+    expect(updated).toContain("No Rig tools found.");
     expect(updated).not.toContain("sample.example");
   });
 

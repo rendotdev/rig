@@ -1,12 +1,17 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { RigConfigStore, type ConfigOptions, type RegistryEntry } from "../config/config";
+import { RigPaths } from "../config/paths";
 import { RigError } from "../errors/RigError";
 
 export type RegistryKind = "base" | "custom";
 
 export const RigToolEntryFiles = ["index.rig.ts", "index.rig.tsx"] as const;
+
+export type ToolDiscoveryOptions = {
+  visibleFromPath?: string;
+};
 
 export type DiscoveredTool = {
   name: string;
@@ -18,14 +23,19 @@ export type DiscoveredTool = {
 
 export class ToolDiscoveryService {
   private readonly configStore: RigConfigStore;
+  private readonly paths: RigPaths;
 
   constructor(options: ConfigOptions = {}) {
     this.configStore = new RigConfigStore(options);
+    this.paths = new RigPaths(options);
   }
 
-  async discover(): Promise<DiscoveredTool[]> {
+  async discover(options: ToolDiscoveryOptions = {}): Promise<DiscoveredTool[]> {
     const config = await this.configStore.ensure();
-    const entries = this.configStore.registryEntries(config);
+    const entries = this.visibleRegistryEntries(
+      this.configStore.registryEntries(config),
+      options.visibleFromPath,
+    );
     const discoveredByRegistry = await Promise.all(
       entries.map((entry) => this.discoverRegistry(entry)),
     );
@@ -53,6 +63,52 @@ export class ToolDiscoveryService {
       throw new RigError("TOOL_NOT_FOUND", `Tool not found: ${name}`, { name });
     }
     return tool;
+  }
+
+  projectRootFor(pathValue: string): string {
+    let current = this.visibilityStartDirectory(pathValue);
+    let packageRoot: string | undefined;
+
+    while (true) {
+      if (existsSync(join(current, ".git"))) return current;
+      if (!packageRoot && existsSync(join(current, "package.json"))) packageRoot = current;
+
+      const parent = dirname(current);
+      if (parent === current) return packageRoot ?? this.visibilityStartDirectory(pathValue);
+
+      current = parent;
+    }
+  }
+
+  private visibleRegistryEntries(
+    entries: RegistryEntry[],
+    visibleFromPath?: string,
+  ): RegistryEntry[] {
+    if (!visibleFromPath) return entries;
+    const projectRoot = this.projectRootFor(visibleFromPath);
+    return entries.filter((entry) => this.pathContains(projectRoot, entry.path));
+  }
+
+  private visibilityStartDirectory(pathValue: string): string {
+    const absolute = this.paths.resolve(pathValue);
+    try {
+      const stat = statSync(absolute);
+      if (stat.isDirectory()) return absolute;
+    } catch {
+      // Missing instruction files still scope to their parent directory.
+    }
+
+    return dirname(absolute);
+  }
+
+  private pathContains(parent: string, child: string): boolean {
+    const parentPath = resolve(parent);
+    const childPath = resolve(child);
+    const childRelativePath = relative(parentPath, childPath);
+    return (
+      childRelativePath === "" ||
+      (!childRelativePath.startsWith("..") && !isAbsolute(childRelativePath))
+    );
   }
 
   private async discoverRegistry(entry: RegistryEntry): Promise<DiscoveredTool[]> {

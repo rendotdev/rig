@@ -5,27 +5,27 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { z } from "zod";
-import { RigAgentInstructions } from "../src/agents/instructions";
-import { AgentInstructionSyncService } from "../src/agents/sync";
-import { RigConfigStore } from "../src/config/config";
-import { RigPaths } from "../src/config/paths";
-import { RigConfigDefaults } from "../src/config/schema";
-import { DevLinkService } from "../src/dev/dev-link";
-import { ErrorCodes } from "../src/errors/codes";
-import { RigError, RigErrors } from "../src/errors/RigError";
-import { ToolDiscoveryService } from "../src/registry/discover";
-import { RegistryConfigService } from "../src/registry/registry";
-import { RigPackageRoot } from "../src/runtime/package-root";
-import { BunRigShell } from "../src/runtime/shell";
-import { RuntimeSupport } from "../src/runtime/support";
-import { RigOutputTruncator } from "../src/runtime/truncation";
-import { ToolCreator } from "../src/tools/create";
-import { ToolHelpRenderer, ToolHelpService } from "../src/tools/help";
-import { ToolInspector } from "../src/tools/inspect";
-import { ToolDefinitionValidator, ToolLoader } from "../src/tools/loader";
-import { ToolRunner } from "../src/tools/run";
-import { ToolRuntimeCommentSyncService } from "../src/tools/runtime-comment";
-import { SchemaRenderer } from "../src/tools/schema";
+import { RigAgentInstructions } from "../agents/instructions";
+import { AgentInstructionSyncService } from "../agents/sync";
+import { RigConfigStore } from "../config/config";
+import { RigPaths } from "../config/paths";
+import { RigConfigDefaults } from "../config/schema";
+import { DevLinkService } from "../dev/dev-link";
+import { ErrorCodes } from "../errors/codes";
+import { RigError, RigErrors } from "../errors/RigError";
+import { ToolDiscoveryService } from "../registry/discover";
+import { RegistryConfigService } from "../registry/registry";
+import { RigPackageRoot } from "./package-root";
+import { BunRigShell } from "./shell";
+import { RuntimeSupport } from "./support";
+import { RigOutputTruncator } from "./truncation";
+import { ToolCreator } from "../tools/create";
+import { ToolHelpRenderer, ToolHelpService } from "../tools/help";
+import { ToolInspector } from "../tools/inspect";
+import { ToolDefinitionValidator, ToolLoader } from "../tools/loader";
+import { ToolRunner } from "../tools/run";
+import { ToolRuntimeCommentSyncService } from "../tools/runtime-comment";
+import { SchemaRenderer } from "../tools/schema";
 import {
   args,
   createRigToolKit,
@@ -35,9 +35,9 @@ import {
   paths,
   RigTool,
   rig,
-} from "../src/tools/sdk";
-import { CommandIds, RigSchemaRoleSymbol } from "../src/tools/types";
-import { ToolTypecheckService } from "../src/tools/typecheck";
+} from "../tools/sdk";
+import { CommandIds, RigSchemaRoleSymbol } from "../tools/types";
+import { ToolTypecheckService } from "../tools/typecheck";
 
 class TempWorkspaceStore {
   private readonly paths: string[] = [];
@@ -103,7 +103,7 @@ describe("coverage support", () => {
     const created = await new ToolCreator({ homeDir: home }).create("sample");
     const service = new ToolRuntimeCommentSyncService({ homeDir: home });
 
-    expect(service.renderPrefix()).toContain("rig.shell.$");
+    expect(service.renderPrefix()).toContain("rig.$");
     expect(service.upsertPrefix("#!/usr/bin/env bun\nconsole.log(1);\n")).toMatch(
       /^#!\/usr\/bin\/env bun\n\/\/ rig:runtime-reference:start/,
     );
@@ -166,6 +166,11 @@ describe("coverage support", () => {
         join(home, "missing"),
       ),
     ).resolves.toBe(join(home, "missing"));
+    expect(
+      (
+        service as unknown as { instructionScope(path: string): "all" | "visible" }
+      ).instructionScope("/tmp/global-agent.md"),
+    ).toBe("visible");
     expect((await service.discoverTargets()).map((target) => target.path)).toEqual([
       join(home, ".claude", "CLAUDE.md"),
       globalAgentLink,
@@ -177,14 +182,12 @@ describe("coverage support", () => {
     const first = await service.sync();
     expect(first).toMatchObject({ skipped: false });
     expect(first.targets.every((target) => target.changed)).toBe(true);
-    expect(await readFile(join(project, "AGENTS.md"), "utf8")).toContain(
-      "$ rig help sample.example # Example command",
-    );
+    expect(await readFile(join(project, "AGENTS.md"), "utf8")).toContain("No Rig tools found.");
     expect(await readFile(join(nested, ".claude", "CLAUDE.md"), "utf8")).toContain(
       "<!-- rig:agent-instructions:start -->",
     );
     expect(await readFile(globalAgentSource, "utf8")).toContain(
-      "$ rig help sample.example # Example command",
+      "run:  rig run sample.example text=example",
     );
 
     const second = await service.sync();
@@ -193,8 +196,8 @@ describe("coverage support", () => {
     await writeFile(
       join(project, "AGENTS.md"),
       (await readFile(join(project, "AGENTS.md"), "utf8")).replace(
-        "sample.example",
-        "stale.example",
+        "No Rig tools found.",
+        "Stale tools.",
       ),
       "utf8",
     );
@@ -227,7 +230,7 @@ describe("coverage support", () => {
     await expect(service.discoverTargets()).resolves.toEqual(expect.any(Array));
     await writeFile(
       join(home, ".opencode", "opencode.json"),
-      JSON.stringify({ instructions: ["~/wks/AGENTS.md"] }),
+      JSON.stringify({ instructions: ["~/wks/AGENTS.md", join(project, "AGENTS.md")] }),
       "utf8",
     );
     await expect(service.discoverTargets()).resolves.toEqual(expect.any(Array));
@@ -307,6 +310,7 @@ describe("coverage support", () => {
     );
 
     const discovery = new ToolDiscoveryService({ homeDir: home });
+    expect(discovery.projectRootFor("/")).toBe("/");
     await expect(discovery.find("missing")).rejects.toThrow("Tool not found: missing");
 
     await mkdir(join(home, ".rig", "tools", "empty"), { recursive: true });
@@ -383,6 +387,7 @@ describe("coverage support", () => {
       message: "string failure",
     });
     expect(ErrorCodes.SHELL_ERROR).toBe("SHELL_ERROR");
+    expect(ErrorCodes.TOOL_RUN_ERROR).toBe("TOOL_RUN_ERROR");
   });
 
   test("exercises package-root detection modes", async () => {
@@ -711,16 +716,29 @@ describe("coverage support", () => {
       "Command not found: sample.missing",
     );
     expect(
-      new (await import("../src/tools/list")).ToolListService({ homeDir: home }).renderPlain({
+      new (await import("../tools/list")).ToolListService({ homeDir: home }).renderPlain({
         tools: [],
       }),
-    ).toBe("No tools found.");
+    ).toBe("No Rig tools found.");
 
     expect(SchemaRenderer.toJsonSchema({})).toMatchObject({ type: "unknown" });
     expect(SchemaRenderer.summary(z.object({ text: z.string() }))).toContain("text");
     expect(CommandIds.from("tool", "command")).toBe("tool.command");
 
     const toolkit = createRigToolKit();
+    await expect(toolkit.$`echo toolkit-ok`).resolves.toMatchObject({
+      stdout: "toolkit-ok\n",
+      exitCode: 0,
+    });
+    await expect(toolkit.run({ command: "bad" })).rejects.toThrow(
+      "Command id must use <tool>.<command>",
+    );
+    await expect(toolkit.run({ tool: "bad", command: "" })).rejects.toThrow(
+      "Command id must use <tool>.<command>",
+    );
+    await expect(
+      createRigToolKit({ homeDir: home }).run({ command: "missing.echo" }),
+    ).rejects.toThrow("Rig tool command failed: missing.echo");
     const builtArgs = toolkit
       .args()
       .raw("run")

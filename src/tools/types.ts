@@ -65,6 +65,14 @@ export type SchemaFromValue<T extends z.ZodTypeAny | z.ZodRawShape> = T extends 
     ? z.ZodObject<T>
     : never;
 
+export type RigRunOptions = {
+  tool?: string;
+  command: string;
+  input?: unknown;
+  args?: string[];
+  dryRun?: boolean;
+};
+
 export type RigToolKit = {
   z: typeof z;
   defineTool<T extends ToolDefinition>(definition: T): T;
@@ -73,6 +81,8 @@ export type RigToolKit = {
   ): CommandDefinition<I, O>;
   input<T extends z.ZodTypeAny | z.ZodRawShape>(value: T): RigInputSchema<SchemaFromValue<T>>;
   output<T extends z.ZodTypeAny | z.ZodRawShape>(value: T): RigOutputSchema<SchemaFromValue<T>>;
+  run<T = unknown>(options: RigRunOptions): Promise<T>;
+  $(strings: TemplateStringsArray, ...values: unknown[]): Promise<ShellResult>;
   args(): RigArgBuilder;
   paths: RigPathHelper;
   shell: RigShell;

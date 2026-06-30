@@ -3,8 +3,12 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
+import type { ConfigOptions } from "../config/config";
+import { RigError } from "../errors/RigError";
+import type { SuccessEnvelope } from "../runtime/envelope";
 import { BunRigShell } from "../runtime/shell";
 import {
+  CommandIds,
   RigSchemaRoleSymbol,
   type AnyRigInputSchema,
   type AnyRigOutputSchema,
@@ -13,6 +17,7 @@ import {
   type RigInputSchema,
   type RigOutputSchema,
   type RigPathHelper,
+  type RigRunOptions,
   type RigSchema,
   type RigSchemaRole,
   type RigToolKit,
@@ -71,8 +76,44 @@ class RigArgsRuntime implements RigArgBuilder {
   }
 }
 
+type RigToolKitFactoryOptions = ConfigOptions;
+
+class RigCommandRunnerRuntime {
+  constructor(private readonly options: RigToolKitFactoryOptions = {}) {}
+
+  async run<T = unknown>(options: RigRunOptions): Promise<T> {
+    const target = this.commandTarget(options);
+    const { ToolRunner } = await import("./run");
+    const result = await new ToolRunner(this.options).run(target.tool, target.command, {
+      ...this.options,
+      args: options.args,
+      input: options.input === undefined ? undefined : JSON.stringify(options.input),
+      dryRun: options.dryRun,
+    });
+
+    if (result.exitCode === 0) return (result.envelope as SuccessEnvelope).data as T;
+
+    throw new RigError("TOOL_RUN_ERROR", `Rig tool command failed: ${target.id}`, {
+      command: target.id,
+      envelope: result.envelope,
+    });
+  }
+
+  private commandTarget(options: RigRunOptions): { tool: string; command: string; id: string } {
+    const id = options.tool ? CommandIds.from(options.tool, options.command) : options.command;
+    const parts = id.split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new RigError("INPUT_ERROR", `Command id must use <tool>.<command>: ${id}`);
+    }
+    return { tool: parts[0], command: parts[1], id };
+  }
+}
+
 class RigToolKitFactory {
+  constructor(private readonly options: RigToolKitFactoryOptions = {}) {}
+
   create(): RigToolKit {
+    const shell = new BunRigShell();
     return {
       z,
       defineTool: <T extends ToolDefinition>(definition: T) => definition,
@@ -81,9 +122,12 @@ class RigToolKitFactory {
       ) => definition,
       input: (value: z.ZodTypeAny | z.ZodRawShape) => this.schema(value, "input"),
       output: (value: z.ZodTypeAny | z.ZodRawShape) => this.schema(value, "output"),
+      run: <T = unknown>(options: RigRunOptions) =>
+        new RigCommandRunnerRuntime(this.options).run<T>(options),
+      $: (strings: TemplateStringsArray, ...values: unknown[]) => shell.$(strings, ...values),
       args: () => new RigArgsRuntime(),
       paths: new RigPathRuntime(),
-      shell: new BunRigShell(),
+      shell,
     } as RigToolKit;
   }
 
@@ -122,6 +166,7 @@ export function defineTool(value: ToolModuleDefault): ToolModuleDefault {
 export const command = rig.command;
 export const input = rig.input;
 export const output = rig.output;
+export const run = rig.run;
 export const args = rig.args;
 export const paths = rig.paths;
 
@@ -133,6 +178,6 @@ export class RigTool {
   }
 }
 
-export function createRigToolKit(): RigToolKit {
-  return new RigToolKitFactory().create();
+export function createRigToolKit(options: RigToolKitFactoryOptions = {}): RigToolKit {
+  return new RigToolKitFactory(options).create();
 }

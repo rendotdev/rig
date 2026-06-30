@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ToolCreator } from "../src/tools/create";
-import { ToolHelpService } from "../src/tools/help";
-import { ToolInspector } from "../src/tools/inspect";
-import { ToolListService } from "../src/tools/list";
-import { ToolRunner } from "../src/tools/run";
-import { ToolTypecheckService } from "../src/tools/typecheck";
+import { ToolCreator } from "./create";
+import { ToolHelpService } from "./help";
+import { ToolInspector } from "./inspect";
+import { ToolListService } from "./list";
+import { ToolRunner } from "./run";
+import { ToolTypecheckService } from "./typecheck";
 
 class TestHomeStore {
   private readonly homes: string[] = [];
@@ -117,15 +117,57 @@ export default tool;
     });
   });
 
+  test("runs registered tools from a tool context", async () => {
+    const home = await homes.create();
+    await new ToolCreator({ homeDir: home }).create("sample");
+    const toolDir = join(home, ".rig", "tools", "caller");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(
+      join(toolDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "caller",
+  description: "Tool runner test tool.",
+  commands: {
+    call: rig.command({
+      description: "Call another Rig tool.",
+      input: rig.input({ text: rig.z.string() }),
+      output: rig.output({ text: rig.z.string() }),
+      run: async (context) => {
+        const result = await context.rig.run({
+          command: "sample.example",
+          input: { text: context.input.text },
+        });
+        return { text: result.text };
+      },
+    }),
+  },
+});
+`,
+      "utf8",
+    );
+
+    const result = await new ToolRunner({ homeDir: home }).run("caller", "call", {
+      homeDir: home,
+      input: '{"text":"Nested"}',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.envelope).toMatchObject({
+      data: { text: "Nested" },
+      errors: [],
+    });
+  });
+
   test("renders a compact plain command list", async () => {
     const home = await homes.create();
     await new ToolCreator({ homeDir: home }).create("sample");
     const service = new ToolListService({ homeDir: home });
     const list = await service.list();
 
-    expect(service.renderPlain(list)).toContain(
-      "$ rig help sample.example # Example command. Replace this with a real command.",
-    );
+    const rendered = service.renderPlain(list);
+    expect(rendered).toContain("sample.example");
+    expect(rendered).toContain("run:  rig run sample.example text=example");
+    expect(rendered).toContain("help: rig help sample.example");
   });
 
   test("dry-runs a command without execution", async () => {

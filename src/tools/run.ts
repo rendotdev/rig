@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import type { ConfigOptions } from "../config/config";
 import { RigError, RigErrors } from "../errors/RigError";
 import { EnvelopeFactory } from "../runtime/envelope";
-import { BunRigShell } from "../runtime/shell";
 import { RigOutputTruncator } from "../runtime/truncation";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
@@ -193,7 +192,7 @@ export class ToolRunner {
   private readonly inputReader = new RunInputReader();
   private readonly outputTruncator = new RigOutputTruncator();
 
-  constructor(options: ConfigOptions = {}) {
+  constructor(private readonly options: ConfigOptions = {}) {
     this.loader = new ToolLoader(options);
   }
 
@@ -230,12 +229,13 @@ export class ToolRunner {
         };
       }
 
+      const rig = createRigToolKit(this.options);
       const data = await command.run({
         input: inputResult.data,
         env: process.env,
         cwd: process.cwd(),
-        shell: new BunRigShell(),
-        rig: createRigToolKit(),
+        shell: rig.shell,
+        rig,
       });
 
       const outputResult = command.output.safeParse(data);

@@ -3,23 +3,10 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Command } from "commander";
-import { RigAgentInstructions } from "./agents/instructions";
-import { AgentInstructionSyncService } from "./agents/sync";
-import { RigConfigStore } from "./config/config";
-import { RigPaths, type PathOptions } from "./config/paths";
-import { DevLinkService } from "./dev/dev-link";
+import type { Command } from "commander";
+import type { PathOptions } from "./config/paths";
 import { RigError, RigErrors } from "./errors/RigError";
-import { RegistryConfigService } from "./registry/registry";
-import { ToolDiscoveryService } from "./registry/discover";
 import { RigPackageRoot } from "./runtime/package-root";
-import { ToolCreator, ToolFileService, ToolRemover } from "./tools/create";
-import { ToolHelpService } from "./tools/help";
-import { ToolInspector } from "./tools/inspect";
-import { ToolListService } from "./tools/list";
-import { ToolRunner } from "./tools/run";
-import { ToolRuntimeCommentSyncService } from "./tools/runtime-comment";
-import { ToolTypecheckService } from "./tools/typecheck";
 
 type BunRuntimeSpawn = (
   command: string,
@@ -69,17 +56,22 @@ export class BunRuntimeBootstrap {
 }
 
 export class CliApplication {
-  private readonly program = new Command();
+  private program!: Command;
+  private generatedSyncRequested = false;
 
   async run(argv: string[]): Promise<void> {
+    const { Command } = await import("commander");
+    this.program = new Command();
+    this.generatedSyncRequested = false;
     this.configureProgram();
     try {
       if (argv.slice(2).length === 0) {
+        this.requestGeneratedSync();
         await this.showDefaultStatus();
       } else {
         await this.program.parseAsync(argv);
       }
-      await this.syncGeneratedFiles();
+      if (this.generatedSyncRequested) await this.syncGeneratedFiles();
     } catch (error) {
       this.printError(error);
     }
@@ -104,11 +96,12 @@ export class CliApplication {
     this.configureDevCommands();
     this.program
       .command("help")
-      .argument("[target]", "Tool name or command id (<tool>.<command>.)")
-      .description("Print Rig instructions or tool docs.")
-      .action(async (target?: string) => {
-        if (target) console.log(await new ToolHelpService(this.pathOptions()).render(target));
-        else console.log(this.helpText());
+      .argument("<target>", "Tool name or command id (<tool>.<command>.)")
+      .description("Print tool docs.")
+      .action(async (target: string) => {
+        this.requestGeneratedSync();
+        const { ToolHelpService } = await import("./tools/help");
+        console.log(await new ToolHelpService(this.pathOptions()).render(target));
       });
   }
 
@@ -117,6 +110,11 @@ export class CliApplication {
       .command("init")
       .description("Create Rig config and base registry if missing.")
       .action(async () => {
+        this.requestGeneratedSync();
+        const [{ RigConfigStore }, { RigPaths }] = await Promise.all([
+          import("./config/config"),
+          import("./config/paths"),
+        ]);
         const configStore = new RigConfigStore(this.pathOptions());
         const paths = new RigPaths(this.pathOptions());
         const config = await configStore.ensure();
@@ -129,6 +127,7 @@ export class CliApplication {
       .command("doctor")
       .description("Check local Rig setup.")
       .action(async () => {
+        this.requestGeneratedSync();
         await this.doctor();
       });
   }
@@ -139,6 +138,7 @@ export class CliApplication {
       .command("show")
       .description("Print config JSON.")
       .action(async () => {
+        const { RigConfigStore } = await import("./config/config");
         const configStore = new RigConfigStore(this.pathOptions());
         await configStore.ensure();
         this.printJson(await configStore.read());
@@ -146,7 +146,8 @@ export class CliApplication {
     configCommand
       .command("path")
       .description("Print absolute config path.")
-      .action(() => {
+      .action(async () => {
+        const { RigPaths } = await import("./config/paths");
         console.log(new RigPaths(this.pathOptions()).configPath);
       });
   }
@@ -157,6 +158,7 @@ export class CliApplication {
       .command("list")
       .description("List registries as JSON.")
       .action(async () => {
+        const { RegistryConfigService } = await import("./registry/registry");
         this.printJson(await new RegistryConfigService(this.pathOptions()).list());
       });
     registryCommand
@@ -164,6 +166,8 @@ export class CliApplication {
       .argument("<path>")
       .description("Add a custom registry.")
       .action(async (pathValue: string) => {
+        this.requestGeneratedSync();
+        const { RegistryConfigService } = await import("./registry/registry");
         this.printJson(await new RegistryConfigService(this.pathOptions()).add(pathValue));
       });
     registryCommand
@@ -171,6 +175,8 @@ export class CliApplication {
       .argument("<path>")
       .description("Remove a custom registry.")
       .action(async (pathValue: string) => {
+        this.requestGeneratedSync();
+        const { RegistryConfigService } = await import("./registry/registry");
         this.printJson(await new RegistryConfigService(this.pathOptions()).remove(pathValue));
       });
   }
@@ -182,9 +188,12 @@ export class CliApplication {
       .description("List discovered tools and commands.")
       .option("--json", "Print full JSON metadata.")
       .option("--plain", "Print a compact plain text command list.")
-      .action(async (commandOptions: { json?: boolean; plain?: boolean }) => {
+      .option("--for-path <path>", "Only list tools from registries visible from a path.")
+      .action(async (commandOptions: { json?: boolean; plain?: boolean; forPath?: string }) => {
+        this.requestGeneratedSync();
+        const { ToolListService } = await import("./tools/list");
         const service = new ToolListService(this.pathOptions());
-        const data = await service.list();
+        const data = await service.list({ visibleFromPath: commandOptions.forPath });
         if (commandOptions.json) this.printJson(data);
         else console.log(service.renderPlain(data));
       });
@@ -196,6 +205,8 @@ export class CliApplication {
       .argument("<target>", "Tool name or command id (<tool>.<command>.)")
       .description("Print tool or command metadata as JSON.")
       .action(async (target: string) => {
+        this.requestGeneratedSync();
+        const { ToolInspector } = await import("./tools/inspect");
         this.printJson(await new ToolInspector(this.pathOptions()).inspect(target));
       });
   }
@@ -206,6 +217,7 @@ export class CliApplication {
       .argument("<tool>")
       .description("Create a starter tool in the base registry.")
       .action(async (name: string) => {
+        this.requestGeneratedSync();
         await this.createTool(name);
       });
   }
@@ -216,6 +228,8 @@ export class CliApplication {
       .argument("<tool>")
       .description("Print the TypeScript file path for a tool.")
       .action(async (name: string) => {
+        this.requestGeneratedSync();
+        const { ToolFileService } = await import("./tools/create");
         const result = await new ToolFileService(this.pathOptions()).path(name);
         console.log(result.toolPath);
       });
@@ -227,6 +241,8 @@ export class CliApplication {
       .argument("<tool>")
       .description("Remove a local tool directory.")
       .action(async (name: string) => {
+        this.requestGeneratedSync();
+        const { ToolRemover } = await import("./tools/create");
         const result = await new ToolRemover(this.pathOptions()).remove(name);
         console.log(`Removed tool ${result.name}`);
         console.log(`Tool directory: ${result.toolDir}`);
@@ -244,6 +260,7 @@ export class CliApplication {
       .option("--dry-run", "Validate input and show what would run without executing.")
       .action(
         async (commandId: string, args: string[], commandOptions: Record<string, unknown>) => {
+          this.requestGeneratedSync();
           await this.runToolCommand(commandId, args, commandOptions);
         },
       );
@@ -255,6 +272,8 @@ export class CliApplication {
       .argument("[tool]")
       .description("Type-check local tool files with the injected Rig tool runtime types.")
       .action(async (tool?: string) => {
+        this.requestGeneratedSync();
+        const { ToolTypecheckService } = await import("./tools/typecheck");
         const result = await new ToolTypecheckService(this.pathOptions()).typecheck(tool);
         this.printJson(result);
         process.exitCode = result.exitCode;
@@ -269,6 +288,7 @@ export class CliApplication {
       .option("--bin-dir <path>", "Directory where the rig shim should be written.")
       .option("--force", "Overwrite an existing non-Rig shim.")
       .action(async (commandOptions: { binDir?: string; force?: boolean }) => {
+        const { DevLinkService } = await import("./dev/dev-link");
         const service = new DevLinkService(this.pathOptions());
         const status = await service.link({
           binDir: commandOptions.binDir,
@@ -283,6 +303,7 @@ export class CliApplication {
       .option("--bin-dir <path>", "Directory where the rig shim was written.")
       .option("--force", "Remove even if the file is not a Rig dev shim.")
       .action(async (commandOptions: { binDir?: string; force?: boolean }) => {
+        const { DevLinkService } = await import("./dev/dev-link");
         const service = new DevLinkService(this.pathOptions());
         const status = await service.unlink({
           binDir: commandOptions.binDir,
@@ -296,6 +317,7 @@ export class CliApplication {
       .description("Show local rig development shim status as JSON.")
       .option("--bin-dir <path>", "Directory where the rig shim should be checked.")
       .action(async (commandOptions: { binDir?: string }) => {
+        const { DevLinkService } = await import("./dev/dev-link");
         this.printJson(await new DevLinkService(this.pathOptions()).status(commandOptions));
       });
   }
@@ -305,6 +327,7 @@ export class CliApplication {
     args: string[],
     commandOptions: Record<string, unknown>,
   ): Promise<void> {
+    const { ToolRunner } = await import("./tools/run");
     const commandTarget = this.commandTarget(commandId);
     const result = await new ToolRunner(this.pathOptions()).run(
       commandTarget.tool,
@@ -322,6 +345,11 @@ export class CliApplication {
   }
 
   private async showDefaultStatus(): Promise<void> {
+    const [{ RigConfigStore }, { RigPaths }, { ToolDiscoveryService }] = await Promise.all([
+      import("./config/config"),
+      import("./config/paths"),
+      import("./registry/discover"),
+    ]);
     const options = this.pathOptions();
     const paths = new RigPaths(options);
     const configStore = new RigConfigStore(options);
@@ -336,9 +364,11 @@ export class CliApplication {
     console.log("\nNext steps:");
     console.log("  rig list");
     console.log('\nRun "rig doctor" if you want to verify your setup.');
+    await this.printUpdateNotice();
   }
 
   private async createTool(name: string): Promise<void> {
+    const { ToolCreator } = await import("./tools/create");
     const result = await new ToolCreator(this.pathOptions()).create(name);
     console.log(`Created tool ${result.name}`);
     console.log(`\nTool directory: ${result.toolDir}`);
@@ -353,6 +383,11 @@ export class CliApplication {
   }
 
   private async doctor(): Promise<void> {
+    const [{ RigConfigStore }, { RigPaths }, { ToolDiscoveryService }] = await Promise.all([
+      import("./config/config"),
+      import("./config/paths"),
+      import("./registry/discover"),
+    ]);
     const options = this.pathOptions();
     const paths = new RigPaths(options);
     const configStore = new RigConfigStore(options);
@@ -369,17 +404,32 @@ export class CliApplication {
     }
     console.log(`Tools:         ${tools.length}`);
     console.log("\nStatus: OK");
+    await this.printUpdateNotice();
   }
 
-  private helpText(): string {
-    return RigAgentInstructions;
+  private async printUpdateNotice(): Promise<void> {
+    await this.ignoreSyncErrors(async () => {
+      const { NpmUpdateCheckService } = await import("./runtime/update-check");
+      const notice = await new NpmUpdateCheckService(this.pathOptions()).check(this.version());
+      /* v8 ignore next */
+      if (notice) console.log(`\n${notice.message}`);
+    });
+  }
+
+  private requestGeneratedSync(): void {
+    this.generatedSyncRequested = true;
   }
 
   private async syncGeneratedFiles(): Promise<void> {
     await this.ignoreSyncErrors(async () => {
+      const { ToolRuntimeCommentSyncService } = await import("./tools/runtime-comment");
       await new ToolRuntimeCommentSyncService(this.pathOptions()).sync();
     });
+
+    if (process.env.RIG_AGENT_SYNC === "0") return;
+
     await this.ignoreSyncErrors(async () => {
+      const { AgentInstructionSyncService } = await import("./agents/sync");
       await new AgentInstructionSyncService(this.pathOptions()).sync();
     });
   }

@@ -15,7 +15,7 @@
     "rig": "dist/rig.js"
   },
   "files": [
-    "dist/rig.js",
+    "dist/**/*",
     "README.md",
     "LICENSE"
   ],
@@ -25,7 +25,8 @@
   },
   "scripts": {
     "dev": "bun run src/cli.ts",
-    "build": "bun build ./src/cli.ts --target=node --outfile dist/rig.js",
+    "build": "bun run scripts/build.ts",
+    "bench": "bun run scripts/bench.ts",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
     "test:watch": "vitest",

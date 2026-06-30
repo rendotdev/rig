@@ -1,31 +1,25 @@
 import { defineConfig } from "vitest/config";
 
-class VitestConfigFactory {
-  static create() {
-    return defineConfig({
-      ssr: {
-        external: ["typescript"],
+export default defineConfig({
+  ssr: {
+    external: ["typescript"],
+  },
+  test: {
+    environment: "node",
+    globals: false,
+    include: ["src/**/*.test.ts"],
+    passWithNoTests: false,
+    restoreMocks: true,
+    testTimeout: 30_000,
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.d.ts", "src/**/*.test.ts"],
+      reporter: ["text", "json-summary"],
+      thresholds: {
+        100: true,
+        perFile: true,
       },
-      test: {
-        environment: "node",
-        globals: false,
-        include: ["tests/**/*.test.ts"],
-        passWithNoTests: false,
-        restoreMocks: true,
-        testTimeout: 30_000,
-        coverage: {
-          provider: "v8",
-          include: ["src/**/*.ts"],
-          exclude: ["src/**/*.d.ts"],
-          reporter: ["text", "json-summary"],
-          thresholds: {
-            100: true,
-            perFile: true,
-          },
-        },
-      },
-    });
-  }
-}
-
-export default VitestConfigFactory.create();
+    },
+  },
+});

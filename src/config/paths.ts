@@ -55,6 +55,10 @@ export class RigPaths {
     return join(this.runtimeDir, "tsconfig.tools.json");
   }
 
+  get updateCheckCachePath(): string {
+    return join(this.rigDir, "update-check.json");
+  }
+
   get defaultBaseRegistryDir(): string {
     return "~/.rig/tools";
   }
