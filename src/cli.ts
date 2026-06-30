@@ -118,19 +118,10 @@ export class CliApplication {
   private configureInitCommands(): void {
     this.program
       .command("init")
-      .description("Create Rig config and base registry if missing.")
+      .description("Initialize config and sync tools to AGENTS.md/CLAUDE.md.")
       .action(async () => {
         this.requestGeneratedSync();
-        const [{ RigConfigStore }, { RigPaths }] = await Promise.all([
-          import("./config/config"),
-          import("./config/paths"),
-        ]);
-        const configStore = new RigConfigStore(this.pathOptions());
-        const paths = new RigPaths(this.pathOptions());
-        const config = await configStore.ensure();
-        console.log("Rig initialized.");
-        console.log(`Config: ${paths.configPath}`);
-        console.log(`Base registry: ${configStore.registryEntries(config)[0]?.path}`);
+        await this.showDefaultStatus();
       });
 
     this.program
