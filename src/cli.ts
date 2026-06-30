@@ -306,6 +306,7 @@ export class CliApplication {
         } else {
           console.log(`Updated: ${currentVersion} -> ${newVersion}`);
         }
+        spawnSync("rig", ["init"], { stdio: "inherit" });
       });
   }
 
