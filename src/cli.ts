@@ -94,6 +94,7 @@ export class CliApplication {
     this.configureRunCommand();
     this.configureTypecheckCommand();
     this.configureDevCommands();
+    this.configureUpdateCommand();
     this.program
       .command("help")
       .argument("<target>", "Tool name or command id (<tool>.<command>.)")
@@ -277,6 +278,32 @@ export class CliApplication {
         const result = await new ToolTypecheckService(this.pathOptions()).typecheck(tool);
         this.printJson(result);
         process.exitCode = result.exitCode;
+      });
+  }
+
+  /* v8 ignore next 20 */
+  private configureUpdateCommand(): void {
+    this.program
+      .command("update")
+      .description("Update rig to the latest published version.")
+      .action(async () => {
+        const currentVersion = this.version();
+        console.log(`Current version: ${currentVersion}`);
+        console.log("Checking for updates...");
+        const result = spawnSync("npm", ["install", "-g", "@rendotdev/rig@latest", "--force"], {
+          stdio: "inherit",
+        });
+        if (result.status !== 0) {
+          console.error("Update failed.");
+          process.exit(1);
+        }
+        const check = spawnSync("rig", ["--version"], { encoding: "utf8", stdio: "pipe" });
+        const newVersion = check.stdout?.trim() ?? "unknown";
+        if (newVersion === currentVersion) {
+          console.log(`Already on the latest version (${currentVersion}).`);
+        } else {
+          console.log(`Updated: ${currentVersion} -> ${newVersion}`);
+        }
       });
   }
 
