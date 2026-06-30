@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Command } from "commander";
@@ -482,7 +482,12 @@ export class CliApplication {
 
 export function isCliEntrypoint(metaUrl: string, argvPath = process.argv[1]): boolean {
   if (!argvPath) return false;
-  return metaUrl === pathToFileURL(argvPath).href;
+  try {
+    const resolved = realpathSync(argvPath);
+    return metaUrl === pathToFileURL(resolved).href;
+  } catch {
+    return metaUrl === pathToFileURL(argvPath).href;
+  }
 }
 
 /* v8 ignore next 5 */
