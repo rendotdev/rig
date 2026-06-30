@@ -86,16 +86,16 @@ describe("registries", () => {
   name: "project-tool",
   description: "Project visible test tool.",
   commands: {
-    see: rig.command({
+    see: rig.defineCommand({
       description: "See the project tool.",
-      input: rig.input({ text: rig.z.string() }),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object({ text: rig.z.string() }),
+      output: rig.z.object({ text: rig.z.string() }),
       run: async (context) => ({ text: context.input.text }),
     }),
-    none: rig.command({
+    none: rig.defineCommand({
       description: "Run without required input.",
-      input: rig.input({ optional: rig.z.string().optional() }),
-      output: rig.output({ ok: rig.z.boolean() }),
+      input: rig.z.object({ optional: rig.z.string().optional() }),
+      output: rig.z.object({ ok: rig.z.boolean() }),
       run: async () => ({ ok: true }),
     }),
   },
@@ -109,9 +109,9 @@ describe("registries", () => {
   name: "many-fields",
   description: "Many fields test tool.",
   commands: {
-    pack: rig.command({
+    pack: rig.defineCommand({
       description: "Pack many required fields.",
-      input: rig.input({
+      input: rig.z.object({
         text: rig.z.string(),
         count: rig.z.number(),
         enabled: rig.z.boolean(),
@@ -119,7 +119,7 @@ describe("registries", () => {
         meta: rig.z.object({}),
         maybe: rig.z.string().nullable(),
       }),
-      output: rig.output({ ok: rig.z.boolean() }),
+      output: rig.z.object({ ok: rig.z.boolean() }),
       run: async () => ({ ok: true }),
     }),
   },
@@ -133,17 +133,17 @@ describe("registries", () => {
   name: "scalar-example",
   description: "Scalar example test tool.",
   commands: {
-    say: rig.command({
+    say: rig.defineCommand({
       description: "Say scalar text.",
-      input: rig.input(rig.z.string()),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object(rig.z.string()),
+      output: rig.z.object({ text: rig.z.string() }),
       examples: [{ title: "Say hello", text: "Say hello.", input: "two words" }],
       run: async (context) => ({ text: context.input }),
     }),
-    count: rig.command({
+    count: rig.defineCommand({
       description: "Count with an example.",
-      input: rig.input({ count: rig.z.number() }),
-      output: rig.output({ count: rig.z.number() }),
+      input: rig.z.object({ count: rig.z.number() }),
+      output: rig.z.object({ count: rig.z.number() }),
       examples: [{ title: "Count", text: "Count.", input: { count: 2 } }],
       run: async (context) => ({ count: context.input.count }),
     }),
@@ -158,10 +158,10 @@ describe("registries", () => {
   name: "scalar-required",
   description: "Scalar required test tool.",
   commands: {
-    say: rig.command({
+    say: rig.defineCommand({
       description: "Say required scalar text.",
-      input: rig.input(rig.z.string()),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object(rig.z.string()),
+      output: rig.z.object({ text: rig.z.string() }),
       run: async (context) => ({ text: context.input }),
     }),
   },

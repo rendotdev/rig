@@ -30,13 +30,11 @@ import {
   args,
   createRigToolKit,
   defineTool,
-  input,
-  output,
   paths,
   RigTool,
   rig,
 } from "../tools/sdk";
-import { CommandIds, RigSchemaRoleSymbol } from "../tools/types";
+import { CommandIds } from "../tools/types";
 import { ToolTypecheckService } from "../tools/typecheck";
 
 class TempWorkspaceStore {
@@ -86,10 +84,10 @@ function simpleToolSource(name: string, command = "echo") {
   name: ${JSON.stringify(name)},
   description: "${name} test tool.",
   commands: {
-    ${command}: rig.command({
+    ${command}: rig.defineCommand({
       description: "Echo text.",
-      input: rig.input({ text: rig.z.string().default("default") }),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object({ text: rig.z.string().default("default") }),
+      output: rig.z.object({ text: rig.z.string() }),
       run: async ({ input }) => ({ text: input.text }),
     }),
   },
@@ -651,7 +649,7 @@ describe("coverage support", () => {
         commands: {
           example: {
             ...command,
-            input: rig.input({ maybe: rig.z.string().optional() }),
+            input: rig.z.object({ maybe: rig.z.string().optional() }),
             examples: undefined,
           },
         },
@@ -763,9 +761,6 @@ describe("coverage support", () => {
     expect(paths.resolve(home, parent)).toBe(parent);
     expect(paths.home()).toBeTruthy();
 
-    const inputSchema = input({ text: rig.z.string() });
-    expect(input(inputSchema)[RigSchemaRoleSymbol]).toBe("input");
-    expect(output(z.object({ ok: z.boolean() }))[RigSchemaRoleSymbol]).toBe("output");
     const definition = { name: "defined", description: "Defined.", commands: {} } as never;
     expect(defineTool(definition)).toBe(definition);
     const factory = () => definition;
@@ -779,8 +774,8 @@ describe("coverage support", () => {
     const toolkit = createRigToolKit();
     const validCommand = {
       description: "Valid command.",
-      input: toolkit.input({ text: toolkit.z.string() }),
-      output: toolkit.output({ text: toolkit.z.string() }),
+      input: toolkit.z.object({ text: toolkit.z.string() }),
+      output: toolkit.z.object({ text: toolkit.z.string() }),
       examples: [{ title: "Example", text: "Example text." }],
       run: async ({ input: commandInput }: { input: { text: string } }) => ({
         text: commandInput.text,
@@ -810,15 +805,11 @@ describe("coverage support", () => {
       ],
       [
         { ...validTool, commands: { echo: { ...validCommand, input: null } } },
-        "needs a Rig input schema",
+        "needs a Zod schema for input",
       ],
       [
-        { ...validTool, commands: { echo: { ...validCommand, input: z.object({}) } } },
-        "needs a Rig input schema",
-      ],
-      [
-        { ...validTool, commands: { echo: { ...validCommand, output: toolkit.input({}) } } },
-        "needs a Rig output schema",
+        { ...validTool, commands: { echo: { ...validCommand, output: "not-a-schema" } } },
+        "needs a Zod schema for output",
       ],
       [{ ...validTool, commands: { echo: { ...validCommand, examples: {} } } }, "Invalid examples"],
       [
@@ -879,10 +870,10 @@ describe("coverage support", () => {
   name: "scalar",
   description: "Scalar test tool.",
   commands: {
-    echo: rig.command({
+    echo: rig.defineCommand({
       description: "Echo scalar.",
-      input: rig.input(rig.z.string()),
-      output: rig.output(rig.z.string()),
+      input: rig.z.string(),
+      output: rig.z.string(),
       run: async ({ input }) => input,
     }),
   },
@@ -896,10 +887,10 @@ describe("coverage support", () => {
   name: "writer",
   description: "Writer test tool.",
   commands: {
-    save: rig.command({
+    save: rig.defineCommand({
       description: "Save text.",
-      input: rig.input({ text: rig.z.string() }),
-      output: rig.output({ ok: rig.z.boolean() }),
+      input: rig.z.object({ text: rig.z.string() }),
+      output: rig.z.object({ ok: rig.z.boolean() }),
       run: async () => ({ ok: true }),
     }),
   },
@@ -913,29 +904,29 @@ describe("coverage support", () => {
   name: "sheller",
   description: "Shell test tool.",
   commands: {
-    blocked: rig.command({
+    blocked: rig.defineCommand({
       description: "Blocked shell.",
-      input: rig.input({}),
-      output: rig.output({ ok: rig.z.boolean() }),
-      run: async ({ shell }) => {
-        await shell.exec(["bun", "-e", "console.log('blocked')"]);
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async () => {
+        await rig.shell.exec(["bun", "-e", "console.log('blocked')"]);
         return { ok: true };
       },
     }),
-    exec: rig.command({
+    exec: rig.defineCommand({
       description: "Allowed shell exec.",
-      input: rig.input({}),
-      output: rig.output({ text: rig.z.string() }),
-      run: async ({ shell }) => {
-        const result = await shell.exec(["bun", "-e", "console.log('ok')"]);
+      input: rig.z.object({}),
+      output: rig.z.object({ text: rig.z.string() }),
+      run: async () => {
+        const result = await rig.shell.exec(["bun", "-e", "console.log('ok')"]);
         return { text: result.stdout.trim() };
       },
     }),
-    json: rig.command({
+    json: rig.defineCommand({
       description: "Allowed shell JSON.",
-      input: rig.input({}),
-      output: rig.output({ ok: rig.z.boolean() }),
-      run: async ({ shell }) => await shell.json(["bun", "-e", "console.log(JSON.stringify({ok:true}))"]),
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async () => await rig.shell.json(["bun", "-e", "console.log(JSON.stringify({ok:true}))"]),
     }),
   },
 });
@@ -948,10 +939,10 @@ describe("coverage support", () => {
   name: "bad-output",
   description: "Bad output tool.",
   commands: {
-    fail: rig.command({
+    fail: rig.defineCommand({
       description: "Return wrong output.",
-      input: rig.input({}),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object({}),
+      output: rig.z.object({ text: rig.z.string() }),
       run: async () => ({ text: 123 }),
     }),
   },
@@ -965,10 +956,10 @@ describe("coverage support", () => {
   name: "thrower",
   description: "Throwing tool.",
   commands: {
-    string: rig.command({
+    string: rig.defineCommand({
       description: "Throw a string.",
-      input: rig.input({}),
-      output: rig.output({ ok: rig.z.boolean() }),
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
       run: async () => { throw "boom"; },
     }),
   },
