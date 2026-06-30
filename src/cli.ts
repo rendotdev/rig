@@ -293,7 +293,7 @@ export class CliApplication {
         console.log(`Current version: ${currentVersion}`);
         console.log("Checking for updates...");
         const result = spawnSync("npm", ["install", "-g", "@rendotdev/rig@latest", "--force"], {
-          stdio: "inherit",
+          stdio: "pipe",
         });
         if (result.status !== 0) {
           console.error("Update failed.");
