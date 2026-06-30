@@ -40,7 +40,7 @@ export class ToolListService {
     if (data.tools.length === 0) return "No tools found.";
     return data.tools
       .flatMap((tool) =>
-        tool.commands.map((command) => `$ rig llm.txt ${command.id} # ${command.description}`),
+        tool.commands.map((command) => `$ rig help ${command.id} # ${command.description}`),
       )
       .join("\n");
   }

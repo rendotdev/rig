@@ -41,7 +41,10 @@ describe("tool commands", () => {
 
     const help = await new ToolHelpService({ homeDir: home }).render("sample", "example");
     const commandIdHelp = await new ToolHelpService({ homeDir: home }).render("sample.example");
-    expect(commandIdHelp).toContain("Tool: sample");
+    expect(commandIdHelp).toMatch(
+      /^Tool: sample\nCommand: example\nRun: rig run sample\.example \[args\.\.\.\]/,
+    );
+    expect(commandIdHelp).not.toContain("```bash");
     expect(help).toContain("Pass custom text");
     expect(help).toContain("rig run sample.example");
     expect(help).toContain("Input:");
@@ -121,7 +124,7 @@ export default tool;
     const list = await service.list();
 
     expect(service.renderPlain(list)).toContain(
-      "$ rig llm.txt sample.example # Example command. Replace this with a real command.",
+      "$ rig help sample.example # Example command. Replace this with a real command.",
     );
   });
 

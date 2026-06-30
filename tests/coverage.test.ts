@@ -114,7 +114,7 @@ describe("coverage support", () => {
     const synced = await readFile(created.toolPath, "utf8");
     expect(synced).toMatch(/^\/\/ rig:runtime-reference:start/);
     expect(synced).toContain("Rig tool runtime");
-    expect(synced).toContain("bash execution");
+    expect(synced).toContain("Bun Shell");
 
     const second = await service.sync();
     expect(second.tools).toEqual([{ name: "sample", path: created.toolPath, changed: false }]);
@@ -136,21 +136,39 @@ describe("coverage support", () => {
     const nested = join(project, "src");
     const packageProject = join(home, "package-project");
     const packageNested = join(packageProject, "app");
+    const globalAgentSource = join(home, "wks", "AGENTS.md");
+    const globalAgentLink = join(home, ".pi", "agent", "AGENTS.md");
     await mkdir(join(project, ".git"), { recursive: true });
     await mkdir(join(nested, ".claude"), { recursive: true });
     await mkdir(join(home, ".claude"), { recursive: true });
+    await mkdir(join(home, ".pi", "agent"), { recursive: true });
+    await mkdir(join(home, ".config", "opencode"), { recursive: true });
+    await mkdir(join(home, "wks"), { recursive: true });
     await mkdir(packageNested, { recursive: true });
     await writeFile(join(project, "AGENTS.md"), "# Root agent notes\n", "utf8");
     await writeFile(join(nested, "CLAUDE.md"), "# Nested Claude notes\n", "utf8");
     await writeFile(join(nested, "package.json"), "{}\n", "utf8");
     await writeFile(join(packageProject, "package.json"), "{}\n", "utf8");
     await writeFile(join(packageProject, "AGENTS.md"), "# Package notes\n", "utf8");
+    await writeFile(globalAgentSource, "# Global agent notes\n", "utf8");
+    await writeFile(
+      join(home, ".config", "opencode", "opencode.json"),
+      JSON.stringify({ instructions: [globalAgentSource, "./missing.md", 42] }),
+      "utf8",
+    );
+    await symlink(globalAgentSource, globalAgentLink);
     await new ToolCreator({ homeDir: home }).create("sample");
 
     const service = new AgentInstructionSyncService({ homeDir: home, cwd: nested });
     expect(service.renderBlock("No tools found.")).toContain(RigAgentInstructions);
+    await expect(
+      (service as unknown as { realPath(path: string): Promise<string> }).realPath(
+        join(home, "missing"),
+      ),
+    ).resolves.toBe(join(home, "missing"));
     expect((await service.discoverTargets()).map((target) => target.path)).toEqual([
       join(home, ".claude", "CLAUDE.md"),
+      globalAgentLink,
       join(project, "AGENTS.md"),
       join(nested, ".claude", "CLAUDE.md"),
       join(nested, "CLAUDE.md"),
@@ -160,10 +178,13 @@ describe("coverage support", () => {
     expect(first).toMatchObject({ skipped: false });
     expect(first.targets.every((target) => target.changed)).toBe(true);
     expect(await readFile(join(project, "AGENTS.md"), "utf8")).toContain(
-      "$ rig llm.txt sample.example # Example command",
+      "$ rig help sample.example # Example command",
     );
     expect(await readFile(join(nested, ".claude", "CLAUDE.md"), "utf8")).toContain(
       "<!-- rig:agent-instructions:start -->",
+    );
+    expect(await readFile(globalAgentSource, "utf8")).toContain(
+      "$ rig help sample.example # Example command",
     );
 
     const second = await service.sync();
@@ -178,7 +199,9 @@ describe("coverage support", () => {
       "utf8",
     );
     const third = await service.sync();
-    expect(third.targets.find((target) => target.path.endsWith("AGENTS.md"))?.changed).toBe(true);
+    expect(
+      third.targets.find((target) => target.path === join(project, "AGENTS.md"))?.changed,
+    ).toBe(true);
 
     expect(
       (
@@ -188,6 +211,26 @@ describe("coverage support", () => {
         }).discoverTargets()
       ).map((target) => target.path),
     ).toContain(join(packageProject, "AGENTS.md"));
+    expect(
+      (
+        await new AgentInstructionSyncService({
+          homeDir: home,
+          cwd: join(home, "wks"),
+        }).discoverTargets()
+      ).filter((target) => target.path.endsWith("AGENTS.md")),
+    ).toHaveLength(1);
+
+    await mkdir(join(home, ".opencode"), { recursive: true });
+    await writeFile(join(home, ".opencode", "opencode.json"), "{", "utf8");
+    await expect(service.discoverTargets()).resolves.toEqual(expect.any(Array));
+    await writeFile(join(home, ".opencode", "opencode.json"), "[]", "utf8");
+    await expect(service.discoverTargets()).resolves.toEqual(expect.any(Array));
+    await writeFile(
+      join(home, ".opencode", "opencode.json"),
+      JSON.stringify({ instructions: ["~/wks/AGENTS.md"] }),
+      "utf8",
+    );
+    await expect(service.discoverTargets()).resolves.toEqual(expect.any(Array));
 
     process.env.RIG_AGENT_SYNC = "0";
     await expect(service.sync()).resolves.toEqual({ skipped: true, targets: [] });
@@ -392,6 +435,64 @@ describe("coverage support", () => {
   });
 
   test("exercises shell execution, JSON parsing, validation, truncation, and timeouts", async () => {
+    const fakeBunCalls: { strings: string[]; raw: readonly string[]; values: unknown[] }[] = [];
+    let fakeBunDelay = 0;
+    const fakeBun = {
+      $: (strings: TemplateStringsArray, ...values: unknown[]) => {
+        fakeBunCalls.push({ strings: [...strings], raw: strings.raw, values });
+        return {
+          nothrow() {
+            return this;
+          },
+          cwd() {
+            return this;
+          },
+          env() {
+            return this;
+          },
+          async quiet() {
+            if (fakeBunDelay) {
+              await new Promise((done) => setTimeout(done, fakeBunDelay));
+            }
+            return {
+              stdout: Buffer.from("bun-out\n"),
+              stderr: Buffer.from("bun-err\n"),
+              exitCode: 0,
+            };
+          },
+        };
+      },
+    };
+
+    const plainBunShell = new BunRigShell({}, () => fakeBun);
+    await expect(plainBunShell.exec(["echo", "plain"])).resolves.toMatchObject({
+      stdout: "bun-out\n",
+    });
+
+    const bunShell = new BunRigShell({ timeoutMs: 5_000, maxOutputBytes: 100 }, () => fakeBun);
+    await expect(bunShell.$`echo ${"hello"}`).resolves.toMatchObject({ stdout: "bun-out\n" });
+    await expect(
+      bunShell.exec(["echo", "hello"], { cwd: process.cwd(), maxOutputBytes: 4 }),
+    ).resolves.toMatchObject({
+      command: ["echo", "hello"],
+      stdout: "bun-\n[rig: output truncated]",
+    });
+    await expect(bunShell.bash("echo raw")).resolves.toMatchObject({ command: ["echo raw"] });
+    expect(fakeBunCalls.map((call) => call.values)).toEqual([
+      [["echo", "plain"]],
+      ["hello"],
+      [["echo", "hello"]],
+      [],
+    ]);
+    fakeBunDelay = 20;
+    await expect(bunShell.exec(["slow"], { timeoutMs: 1 })).rejects.toThrow("Command timed out");
+    await expect(new BunRigShell({}, () => ({})).exec(["echo", "fallback"])).resolves.toMatchObject(
+      {
+        stdout: "fallback\n",
+      },
+    );
+    expect((bunShell as unknown as { bun(): unknown }).bun()).toBe(fakeBun);
+
     const shell = new BunRigShell({ timeoutMs: 5_000, maxOutputBytes: 20 });
     const success = await shell.exec(["bun", "-e", "console.log('hello')"], {
       cwd: process.cwd(),
@@ -407,6 +508,10 @@ describe("coverage support", () => {
     await expect(shell.$`printf '%s\n' ${["safe", "two words"]}`).resolves.toMatchObject({
       exitCode: 0,
       stdout: "safe\ntwo words\n",
+    });
+    await expect(shell.$`printf '%s\n' ${"safe; echo unsafe"}`).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "safe; echo unsafe\n",
     });
     await expect(shell.bash("echo bash-ok")).resolves.toMatchObject({
       exitCode: 0,
@@ -436,6 +541,20 @@ describe("coverage support", () => {
     await expect(
       shell.exec(["bun", "-e", "setTimeout(() => {}, 1000)"], { timeoutMs: 1 }),
     ).rejects.toThrow("Command timed out");
+    await expect(
+      (
+        shell as unknown as {
+          runNodeProcess(args: string[], options: { timeoutMs?: number }): Promise<unknown>;
+        }
+      ).runNodeProcess(["bun", "-e", "setTimeout(() => {}, 1000)"], { timeoutMs: 1 }),
+    ).rejects.toThrow("Command timed out");
+    await expect(
+      (
+        shell as unknown as {
+          runNodeProcess(args: string[], options: { maxOutputBytes?: number }): Promise<unknown>;
+        }
+      ).runNodeProcess(["bun", "-e", "console.log('node-fallback')"], { maxOutputBytes: 100 }),
+    ).resolves.toMatchObject({ stdout: "node-fallback\n" });
 
     expect(
       (
@@ -558,7 +677,7 @@ describe("coverage support", () => {
           },
         },
       }),
-    ).toContain('Output: {"text":"done"}');
+    ).toContain("$ rig run sample.example");
     expect(
       (
         renderer as unknown as {

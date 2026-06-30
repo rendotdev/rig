@@ -64,9 +64,19 @@ class RigArgsRuntime {
 }
 
 class RigShellRuntime {
-  async $(strings, ...values) { return this.bash(this.renderTemplateCommand(strings, values)); }
-  async bash(command, options = {}) { return this.exec(["bash", "-lc", command], options); }
+  async $(strings, ...values) {
+    const bun = this.bun();
+    if (bun) return this.runBunShell(bun.$(strings, ...values), [this.renderTemplateCommand(strings, values)]);
+    return this.bash(this.renderTemplateCommand(strings, values));
+  }
+  async bash(command, options = {}) {
+    const bun = this.bun();
+    if (bun) return this.runBunShell(bun.$(this.rawTemplate(command)), [command], options);
+    return this.exec(["bash", "-lc", command], options);
+  }
   async exec(args, options = {}) {
+    const bun = this.bun();
+    if (bun) return this.runBunShell(bun.$(this.interpolationTemplate(), args), args, options);
     const proc = spawn(args[0], args.slice(1), {
       cwd: options.cwd ?? process.cwd(),
       env: { ...process.env, ...options.env },
@@ -84,6 +94,21 @@ class RigShellRuntime {
     if (result.exitCode !== 0) throw new Error("Command failed before JSON could be parsed.");
     return JSON.parse(result.stdout);
   }
+  async runBunShell(shell, command, options = {}) {
+    let configured = shell.nothrow();
+    if (options.cwd) configured = configured.cwd(options.cwd);
+    if (options.env) configured = configured.env({ ...process.env, ...options.env });
+    const output = await configured.quiet();
+    return {
+      command,
+      stdout: output.stdout.toString("utf8"),
+      stderr: output.stderr.toString("utf8"),
+      exitCode: output.exitCode,
+    };
+  }
+  rawTemplate(command) { return Object.assign([command], { raw: [command] }); }
+  interpolationTemplate() { return Object.assign(["", ""], { raw: ["", ""] }); }
+  bun() { return typeof globalThis.Bun?.$ === "function" ? globalThis.Bun : undefined; }
   renderTemplateCommand(strings, values) {
     return strings.reduce((command, part, index) => command + part + (index < values.length ? this.renderTemplateValue(values[index]) : ""), "");
   }

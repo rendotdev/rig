@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CliApplication, isCliEntrypoint } from "../src/cli";
+import { BunRuntimeBootstrap, CliApplication, isCliEntrypoint } from "../src/cli";
 import { ToolCreator } from "../src/tools/create";
 
 class CliWorkspaceStore {
@@ -100,14 +100,14 @@ describe("cli application", () => {
     const cli = new CliHarness(home);
 
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
-    expect(await cli.run(["llm.txt"])).toContain("The `rig` CLI is installed on this machine.");
-    expect(await cli.run(["llm.txt", "sample"])).toContain("# sample");
-    expect(await cli.run(["llm.txt", "sample.example"])).toContain("Tool: sample");
+    expect(await cli.run(["help"])).toContain("The `rig` CLI is installed on this machine.");
+    expect(await cli.run(["help", "sample"])).toContain("# sample");
+    expect(await cli.run(["help", "sample.example"])).toContain("Tool: sample");
     expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
-    expect(await cli.run(["list"])).toContain("$ rig llm.txt sample.example # Example command");
+    expect(await cli.run(["list"])).toContain("$ rig help sample.example # Example command");
     expect(await cli.run(["list", "--json"])).toContain('"tools"');
     expect(await cli.run(["ls", "--plain"])).toContain(
-      "$ rig llm.txt sample.example # Example command",
+      "$ rig help sample.example # Example command",
     );
     expect(await cli.run(["edit", "sample"])).toContain(
       join(home, ".rig", "tools", "sample", "index.rig.ts"),
@@ -135,7 +135,7 @@ describe("cli application", () => {
     const synced = await readFile(join(project, "AGENTS.md"), "utf8");
     expect(synced).toContain("<!-- rig:agent-instructions:start -->");
     expect(synced).toContain("The `rig` CLI is installed on this machine.");
-    expect(synced).toContain("$ rig llm.txt sample.example # Example command");
+    expect(synced).toContain("$ rig help sample.example # Example command");
 
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
     const updated = await readFile(join(project, "AGENTS.md"), "utf8");
@@ -189,6 +189,73 @@ describe("cli application", () => {
     );
   });
 
+  test("resolves and runs the bundled Bun runtime bootstrap", async () => {
+    const home = await workspaces.create();
+    const bunPath = join(home, "node_modules", "bun", "bin", "bun.exe");
+    const entrypoint = join(home, "dist", "rig.js");
+    const calls: { command: string; args: string[]; env?: NodeJS.ProcessEnv }[] = [];
+    const spawn = ((command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options.env });
+      return { status: calls.length === 1 ? 7 : null };
+    }) as never;
+
+    await mkdir(join(home, "node_modules", "bun", "bin"), { recursive: true });
+    await writeFile(bunPath, "", "utf8");
+
+    const bootstrap = new BunRuntimeBootstrap(home, spawn, {}, () => undefined);
+    expect(bootstrap.resolveBunPath()).toBe(bunPath);
+    expect(bootstrap.shouldBootstrap()).toBe(true);
+    expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig", "list"])).toBe(7);
+    expect(calls[0]).toMatchObject({
+      command: bunPath,
+      args: [entrypoint, "list"],
+      env: { RIG_BUN_BOOTSTRAPPED: "1" },
+    });
+    expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig"])).toBe(1);
+    expect(
+      new BunRuntimeBootstrap(join(home, "missing"), spawn, {}, () => undefined).run(
+        pathToFileURL(entrypoint).href,
+        ["node", "rig"],
+      ),
+    ).toBeUndefined();
+    expect(
+      new BunRuntimeBootstrap(home, spawn, { RIG_BUN_BOOTSTRAPPED: "1" }, () => undefined).run(
+        pathToFileURL(entrypoint).href,
+        ["node", "rig"],
+      ),
+    ).toBeUndefined();
+    expect(
+      new BunRuntimeBootstrap(
+        home,
+        spawn,
+        { RIG_BUN_BOOTSTRAPPED: "1" },
+        () => undefined,
+      ).shouldBootstrap(),
+    ).toBe(false);
+    expect(
+      new BunRuntimeBootstrap(
+        home,
+        spawn,
+        { RIG_DISABLE_BUN_BOOTSTRAP: "1" },
+        () => undefined,
+      ).shouldBootstrap(),
+    ).toBe(false);
+    expect(
+      new BunRuntimeBootstrap(home, spawn, {}, () => ({ version: "test" })).shouldBootstrap(),
+    ).toBe(false);
+    expect(
+      new BunRuntimeBootstrap(
+        home,
+        spawn,
+        { RIG_BUN_PATH: bunPath },
+        () => undefined,
+      ).resolveBunPath(),
+    ).toBe(bunPath);
+    expect(new BunRuntimeBootstrap(home, spawn, {}).shouldBootstrap()).toBe(
+      (globalThis as typeof globalThis & { Bun?: unknown }).Bun === undefined,
+    );
+  });
+
   test("handles errors, entrypoint checks, and version fallbacks", async () => {
     const home = await workspaces.create();
     const cli = new CliHarness(home);
@@ -196,7 +263,7 @@ describe("cli application", () => {
       throw new Error(`exit:${code}`);
     }) as never);
 
-    await expect(cli.run(["llm.txt", "missing"])).rejects.toThrow("exit:1");
+    await expect(cli.run(["help", "missing"])).rejects.toThrow("exit:1");
     expect(cli.errorOutput).toContain("TOOL_NOT_FOUND: Tool not found: missing");
     expect(cli.errorOutput).toContain('"name": "missing"');
     await expect(cli.run(["run", "sample", "x"])).rejects.toThrow("exit:1");

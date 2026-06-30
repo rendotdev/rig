@@ -26,9 +26,9 @@ Rig tool runtime:
 - \`rig.output(shapeOrSchema)\` validates command output.
 - \`rig.args()\` builds argv arrays with \`.raw()\`, \`.flag()\`, \`.value()\`, \`.values()\`, and \`.toArray()\`.
 - \`rig.paths.home()\`, \`rig.paths.resolve(cwd, path)\`, \`rig.paths.ensureParent(path)\`, and \`rig.paths.size(path)\` cover common path work.
-- \`rig.shell.$\` runs a Bun-style tagged template command.
-- \`rig.shell.exec(args, options)\` runs a command from an argv array.
-- \`rig.shell.bash(command, options)\` runs a bash command.
+- \`rig.shell.$\` runs a Bun Shell tagged template command with escaped interpolations.
+- \`rig.shell.exec(args, options)\` runs a command from an argv array through Bun Shell.
+- \`rig.shell.bash(command, options)\` runs a command string through Bun Shell.
 - \`rig.shell.json(args, options)\` runs a command and parses JSON stdout.
 
 Command run context:
@@ -39,11 +39,11 @@ Command run context:
 - \`context.rig\` exposes the same helper API as the top-level \`rig\` tool factory argument.
 - Return a value that matches the output schema.
 
-Shell and bash execution:
+Shell execution:
 - Prefer \`context.rig.shell\` for local command execution.
-- Bun-style template execution: await context.rig.shell.$\`echo hello\`.
-- Run bash with \`await context.rig.shell.bash("echo hello", { cwd: context.cwd, timeoutMs: 30_000 })\`.
-- Parse JSON stdout with \`await context.rig.shell.json(["bash", "-lc", "jq -n '{ok:true}'"])\`.
+- Bun Shell template execution: await context.rig.shell.$\`echo hello\`.
+- Run a command string with \`await context.rig.shell.bash("echo hello", { cwd: context.cwd, timeoutMs: 30_000 })\`.
+- Parse JSON stdout with \`await context.rig.shell.json(["jq", "-n", "{ok:true}"])\`.
 - \`context.rig.shell.exec\` and \`context.rig.shell.bash\` return \`{ command, stdout, stderr, exitCode }\`.
 - Build argv safely with \`context.rig.args().raw("git", "status").flag("--short").toArray()\`.
 `;

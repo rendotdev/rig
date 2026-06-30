@@ -41,9 +41,13 @@ export class ToolHelpRenderer {
   ): string {
     const id = CommandIds.from(toolName, commandName);
     const heading = "#".repeat(options.headingLevel ?? 3);
-    const lines = [
-      `${heading} ${id}`,
-      "",
+    const lines = options.detailed
+      ? [`Tool: ${toolName}`, `Command: ${commandName}`, `Run: rig run ${id} [args...]`, ""]
+      : [`${heading} ${id}`, "", `Run: rig run ${id} [args...]`, ""];
+
+    if (options.detailed) lines.push(`${heading} ${id}`, "");
+
+    lines.push(
       command.description,
       "",
       "Input:",
@@ -57,17 +61,7 @@ export class ToolHelpRenderer {
       "Examples:",
       "",
       this.renderExamples(toolName, commandName, command),
-      "",
-      "Run:",
-      "",
-      "```bash",
-      `rig run ${id} [args...]`,
-      "```",
-    ];
-
-    if (options.detailed) {
-      lines.splice(3, 0, "", `Tool: ${toolName}`, `Command: ${commandName}`);
-    }
+    );
 
     return lines.join("\n");
   }
@@ -106,16 +100,12 @@ export class ToolHelpRenderer {
     if (examples.length === 0) return "No examples declared.";
 
     return examples
-      .map((example, index) => {
-        const lines = [`${index + 1}. ${example.title}`, example.text];
-        if (example.input !== undefined) lines.push(`Input: ${this.compactJson(example.input)}`);
-        if (example.output !== undefined) lines.push(`Output: ${this.compactJson(example.output)}`);
-        if (example.input !== undefined) {
-          lines.push(
-            `Run: rig run ${CommandIds.from(toolName, commandName)} ${this.renderExampleArgs(example.input)}`,
-          );
-        }
-        return lines.join("\n");
+      .map((example) => {
+        const args = example.input === undefined ? "" : ` ${this.renderExampleArgs(example.input)}`;
+        return [
+          `$ rig run ${CommandIds.from(toolName, commandName)}${args}`,
+          `# ${example.title}: ${example.text}`,
+        ].join("\n");
       })
       .join("\n\n");
   }
@@ -130,10 +120,6 @@ export class ToolHelpRenderer {
   private shellArg(value: string): string {
     if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) return value;
     return `'${value.replaceAll("'", "'\\''")}'`;
-  }
-
-  private compactJson(value: unknown): string {
-    return JSON.stringify(value);
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

@@ -2,15 +2,66 @@ import { spawn } from "node:child_process";
 import { RigError } from "../errors/RigError";
 import type { RigShell, ShellOptions, ShellResult } from "../tools/types";
 
+type BunShellOutput = {
+  stdout: Buffer;
+  stderr: Buffer;
+  exitCode: number;
+};
+
+type BunShellPromise = {
+  nothrow(): BunShellPromise;
+  quiet(): Promise<BunShellOutput>;
+  cwd(path: string): BunShellPromise;
+  env(values: NodeJS.ProcessEnv): BunShellPromise;
+};
+
+type BunShellGlobal = {
+  $: (strings: TemplateStringsArray, ...values: unknown[]) => BunShellPromise;
+};
+
 export class BunRigShell implements RigShell {
-  constructor(private readonly defaults: ShellOptions = {}) {}
+  constructor(
+    private readonly defaults: ShellOptions = {},
+    private readonly bunProvider = () =>
+      (globalThis as typeof globalThis & { Bun?: Partial<BunShellGlobal> }).Bun,
+  ) {}
 
   async $(strings: TemplateStringsArray, ...values: unknown[]): Promise<ShellResult> {
+    const bun = this.bun();
+    if (bun) {
+      return this.runBunShell(bun.$(strings, ...values), [
+        this.renderTemplateCommand(strings, values),
+      ]);
+    }
     return this.bash(this.renderTemplateCommand(strings, values));
   }
 
   async exec(args: string[], options: ShellOptions = {}): Promise<ShellResult> {
     this.validateArgs(args);
+    const bun = this.bun();
+    if (bun) return this.runBunShell(bun.$(this.interpolationTemplate(), args), args, options);
+    return this.runNodeProcess(args, options);
+  }
+
+  async bash(command: string, options: ShellOptions = {}): Promise<ShellResult> {
+    const bun = this.bun();
+    if (bun) return this.runBunShell(bun.$(this.rawTemplate(command)), [command], options);
+    return this.exec(["bash", "-lc", command], options);
+  }
+
+  async json(args: string[], options: ShellOptions = {}): Promise<unknown> {
+    const result = await this.exec(args, options);
+    if (result.exitCode !== 0) {
+      throw new RigError("SHELL_ERROR", "Command failed before JSON could be parsed.", result);
+    }
+    try {
+      return JSON.parse(result.stdout);
+    } catch (error) {
+      throw new RigError("SHELL_ERROR", "Command stdout was not valid JSON.", { result, error });
+    }
+  }
+
+  private async runNodeProcess(args: string[], options: ShellOptions = {}): Promise<ShellResult> {
     const timeoutMs = options.timeoutMs ?? this.defaults.timeoutMs ?? 30_000;
     const maxOutputBytes = options.maxOutputBytes ?? this.defaults.maxOutputBytes ?? 1_048_576;
     const proc = spawn(args[0]!, args.slice(1), {
@@ -49,20 +100,60 @@ export class BunRigShell implements RigShell {
     }
   }
 
-  async bash(command: string, options: ShellOptions = {}): Promise<ShellResult> {
-    return this.exec(["bash", "-lc", command], options);
+  private async runBunShell(
+    shell: BunShellPromise,
+    command: string[],
+    options: ShellOptions = {},
+  ): Promise<ShellResult> {
+    const timeoutMs = options.timeoutMs ?? this.defaults.timeoutMs ?? 30_000;
+    const maxOutputBytes = options.maxOutputBytes ?? this.defaults.maxOutputBytes ?? 1_048_576;
+    let configured = shell.nothrow();
+    const cwd = options.cwd ?? this.defaults.cwd;
+    const env = { ...process.env, ...this.defaults.env, ...options.env };
+    if (cwd) configured = configured.cwd(cwd);
+    configured = configured.env(env);
+    const output = await this.withTimeout(configured.quiet(), timeoutMs, command);
+    return {
+      command,
+      stdout: this.trimOutput(output.stdout.toString("utf8"), maxOutputBytes),
+      stderr: this.trimOutput(output.stderr.toString("utf8"), maxOutputBytes),
+      exitCode: output.exitCode,
+    };
   }
 
-  async json(args: string[], options: ShellOptions = {}): Promise<unknown> {
-    const result = await this.exec(args, options);
-    if (result.exitCode !== 0) {
-      throw new RigError("SHELL_ERROR", "Command failed before JSON could be parsed.", result);
-    }
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    command: string[],
+  ): Promise<T> {
+    let timer!: NodeJS.Timeout;
     try {
-      return JSON.parse(result.stdout);
-    } catch (error) {
-      throw new RigError("SHELL_ERROR", "Command stdout was not valid JSON.", { result, error });
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new RigError("SHELL_ERROR", `Command timed out after ${timeoutMs}ms.`, { command }),
+            );
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
     }
+  }
+
+  private rawTemplate(command: string): TemplateStringsArray {
+    return Object.assign([command], { raw: [command] }) as unknown as TemplateStringsArray;
+  }
+
+  private interpolationTemplate(): TemplateStringsArray {
+    return Object.assign(["", ""], { raw: ["", ""] }) as unknown as TemplateStringsArray;
+  }
+
+  private bun(): BunShellGlobal | undefined {
+    const candidate = this.bunProvider();
+    return typeof candidate?.$ === "function" ? (candidate as BunShellGlobal) : undefined;
   }
 
   private renderTemplateCommand(strings: TemplateStringsArray, values: unknown[]): string {

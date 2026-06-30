@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { type ConfigOptions } from "../config/config";
 import { RigPaths } from "../config/paths";
 import { ToolListService } from "../tools/list";
@@ -26,6 +26,20 @@ export type AgentInstructionSyncResult = {
 
 const StartMarker = "<!-- rig:agent-instructions:start -->";
 const EndMarker = "<!-- rig:agent-instructions:end -->";
+
+export const AgentInstructionSyncLocations = {
+  projectFiles: ["AGENTS.md", "CLAUDE.md"],
+  projectClaudeDirectories: [".claude"],
+  homeFiles: [
+    [".agents", "AGENTS.md"],
+    [".pi", "agent", "AGENTS.md"],
+  ],
+  homeClaudeDirectories: [[".claude"]],
+  openCodeConfigFiles: [
+    [".config", "opencode", "opencode.json"],
+    [".opencode", "opencode.json"],
+  ],
+} as const;
 
 export class AgentInstructionSyncService {
   private readonly cwd: string;
@@ -60,13 +74,24 @@ export class AgentInstructionSyncService {
 
     await Promise.all(
       this.projectDirectories().flatMap((directory) => [
-        this.addExistingFile(targets, join(directory, "AGENTS.md")),
-        this.addExistingFile(targets, join(directory, "CLAUDE.md")),
-        this.addClaudeDirectoryTarget(targets, join(directory, ".claude")),
+        ...AgentInstructionSyncLocations.projectFiles.map((file) =>
+          this.addExistingFile(targets, join(directory, file)),
+        ),
+        ...AgentInstructionSyncLocations.projectClaudeDirectories.map((directoryName) =>
+          this.addClaudeDirectoryTarget(targets, join(directory, directoryName)),
+        ),
       ]),
     );
 
-    await this.addClaudeDirectoryTarget(targets, join(this.paths.homeDir, ".claude"));
+    await Promise.all([
+      ...AgentInstructionSyncLocations.homeClaudeDirectories.map((path) =>
+        this.addClaudeDirectoryTarget(targets, join(this.paths.homeDir, ...path)),
+      ),
+      ...AgentInstructionSyncLocations.homeFiles.map((path) =>
+        this.addExistingFile(targets, join(this.paths.homeDir, ...path)),
+      ),
+      this.addOpenCodeInstructionTargets(targets),
+    ]);
 
     return [...targets.values()].toSorted((left, right) => left.path.localeCompare(right.path));
   }
@@ -92,7 +117,7 @@ ${EndMarker}`;
     targets: Map<string, AgentInstructionTarget>,
     path: string,
   ): Promise<void> {
-    if (await this.isFile(path)) targets.set(path, { path, existed: true });
+    if (await this.isFile(path)) await this.setTarget(targets, path, true);
   }
 
   private async addClaudeDirectoryTarget(
@@ -102,7 +127,67 @@ ${EndMarker}`;
     const path = join(directory, "CLAUDE.md");
     const fileExists = await this.isFile(path);
     const directoryExists = fileExists ? false : await this.isDirectory(directory);
-    if (fileExists || directoryExists) targets.set(path, { path, existed: fileExists });
+    if (fileExists || directoryExists) await this.setTarget(targets, path, fileExists);
+  }
+
+  private async addOpenCodeInstructionTargets(
+    targets: Map<string, AgentInstructionTarget>,
+  ): Promise<void> {
+    await Promise.all(
+      AgentInstructionSyncLocations.openCodeConfigFiles.map((path) =>
+        this.addOpenCodeConfigTargets(targets, join(this.paths.homeDir, ...path)),
+      ),
+    );
+  }
+
+  private async addOpenCodeConfigTargets(
+    targets: Map<string, AgentInstructionTarget>,
+    configPath: string,
+  ): Promise<void> {
+    let raw: string;
+    try {
+      raw = await readFile(configPath, "utf8");
+    } catch {
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    if (!this.isRecord(parsed) || !Array.isArray(parsed.instructions)) return;
+
+    await Promise.all(
+      parsed.instructions.map((instruction) => {
+        if (typeof instruction !== "string") return Promise.resolve();
+        return this.addExistingFile(
+          targets,
+          this.resolveOpenCodeInstructionPath(instruction, dirname(configPath)),
+        );
+      }),
+    );
+  }
+
+  private resolveOpenCodeInstructionPath(path: string, configDir: string): string {
+    if (path === "~" || path.startsWith("~/")) return this.paths.resolve(path);
+    return isAbsolute(path) ? path : resolve(configDir, path);
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private async setTarget(
+    targets: Map<string, AgentInstructionTarget>,
+    path: string,
+    existed: boolean,
+  ): Promise<void> {
+    const key = existed ? await this.realPath(path) : path;
+    const current = targets.get(key);
+    if (!current || path < current.path) targets.set(key, { path, existed });
   }
 
   private async upsertManagedBlock(
@@ -131,6 +216,14 @@ ${EndMarker}`;
 
   private escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  private async realPath(path: string): Promise<string> {
+    try {
+      return await realpath(path);
+    } catch {
+      return path;
+    }
   }
 
   private async isFile(path: string): Promise<boolean> {

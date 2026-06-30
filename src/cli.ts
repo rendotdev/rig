@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { RigAgentInstructions } from "./agents/instructions";
 import { AgentInstructionSyncService } from "./agents/sync";
@@ -18,6 +20,50 @@ import { ToolListService } from "./tools/list";
 import { ToolRunner } from "./tools/run";
 import { ToolRuntimeCommentSyncService } from "./tools/runtime-comment";
 import { ToolTypecheckService } from "./tools/typecheck";
+
+type BunRuntimeSpawn = (
+  command: string,
+  args: string[],
+  options: Parameters<typeof spawnSync>[2],
+) => SpawnSyncReturns<Buffer>;
+
+export class BunRuntimeBootstrap {
+  constructor(
+    private readonly packageRoot = RigPackageRoot.find(import.meta.url),
+    private readonly spawn: BunRuntimeSpawn = spawnSync,
+    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly bunGlobal = () => (globalThis as typeof globalThis & { Bun?: unknown }).Bun,
+  ) {}
+
+  run(metaUrl: string, argv: string[]): number | undefined {
+    if (!this.shouldBootstrap()) return undefined;
+    const bunPath = this.resolveBunPath();
+    if (!bunPath) return undefined;
+    const result = this.spawn(bunPath, [fileURLToPath(metaUrl), ...argv.slice(2)], {
+      stdio: "inherit",
+      env: { ...this.env, RIG_BUN_BOOTSTRAPPED: "1" },
+    });
+    return result.status ?? 1;
+  }
+
+  shouldBootstrap(): boolean {
+    return (
+      this.bunGlobal() === undefined &&
+      this.env.RIG_BUN_BOOTSTRAPPED !== "1" &&
+      this.env.RIG_DISABLE_BUN_BOOTSTRAP !== "1"
+    );
+  }
+
+  resolveBunPath(): string | undefined {
+    const configured = this.env.RIG_BUN_PATH;
+    const candidates = [
+      configured,
+      join(this.packageRoot, "node_modules", "bun", "bin", "bun.exe"),
+      join(this.packageRoot, "node_modules", ".bin", "bun"),
+    ].filter((value): value is string => Boolean(value));
+    return candidates.find((candidate) => existsSync(candidate));
+  }
+}
 
 export class CliApplication {
   private readonly program = new Command();
@@ -54,12 +100,12 @@ export class CliApplication {
     this.configureTypecheckCommand();
     this.configureDevCommands();
     this.program
-      .command("llm.txt")
+      .command("help")
       .argument("[target]", "Tool name or command id (<tool>.<command>.)")
-      .description("Print Rig instructions or tool docs for LLMs.")
+      .description("Print Rig instructions or tool docs.")
       .action(async (target?: string) => {
         if (target) console.log(await new ToolHelpService(this.pathOptions()).render(target));
-        else console.log(this.llmText());
+        else console.log(this.helpText());
       });
   }
 
@@ -298,8 +344,8 @@ export class CliApplication {
     for (const file of result.files) console.log(`  ${file}`);
     console.log(`\nEdit: ${result.toolPath}`);
     console.log("\nTry:");
-    console.log(`  rig llm.txt ${result.name}`);
-    console.log(`  rig llm.txt ${result.id}`);
+    console.log(`  rig help ${result.name}`);
+    console.log(`  rig help ${result.id}`);
     console.log(`  rig run ${result.id} test`);
   }
 
@@ -322,7 +368,7 @@ export class CliApplication {
     console.log("\nStatus: OK");
   }
 
-  private llmText(): string {
+  private helpText(): string {
     return RigAgentInstructions;
   }
 
@@ -386,7 +432,9 @@ export function isCliEntrypoint(metaUrl: string, argvPath = process.argv[1]): bo
   return metaUrl === pathToFileURL(argvPath).href;
 }
 
-/* v8 ignore next 3 */
+/* v8 ignore next 5 */
 if (isCliEntrypoint(import.meta.url)) {
+  const bootstrapped = new BunRuntimeBootstrap().run(import.meta.url, process.argv);
+  if (bootstrapped !== undefined) process.exit(bootstrapped);
   await new CliApplication().run(process.argv);
 }
