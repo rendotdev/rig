@@ -238,7 +238,6 @@ export class ToolRunner {
         input: inputResult.data,
         env: process.env,
         cwd: process.cwd(),
-        shell: rig.shell,
         rig,
       });
 

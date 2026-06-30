@@ -9,17 +9,11 @@ import type { SuccessEnvelope } from "../runtime/envelope";
 import { BunRigShell } from "../runtime/shell";
 import {
   CommandIds,
-  RigSchemaRoleSymbol,
-  type AnyRigInputSchema,
-  type AnyRigOutputSchema,
   type CommandDefinition,
   type RigArgBuilder,
-  type RigInputSchema,
-  type RigOutputSchema,
   type RigPathHelper,
   type RigRunOptions,
   type RigSchema,
-  type RigSchemaRole,
   type RigToolKit,
   type ToolDefinition,
   type ToolFactory,
@@ -117,11 +111,9 @@ class RigToolKitFactory {
     return {
       z,
       defineTool: <T extends ToolDefinition>(definition: T) => definition,
-      command: <Input extends AnyRigInputSchema, Output extends AnyRigOutputSchema>(
-        definition: CommandDefinition<Input, Output>,
+      defineCommand: <I extends RigSchema, O extends RigSchema>(
+        definition: CommandDefinition<I, O>,
       ) => definition,
-      input: (value: z.ZodTypeAny | z.ZodRawShape) => this.schema(value, "input"),
-      output: (value: z.ZodTypeAny | z.ZodRawShape) => this.schema(value, "output"),
       run: <T = unknown>(options: RigRunOptions) =>
         new RigCommandRunnerRuntime(this.options).run<T>(options),
       $: (strings: TemplateStringsArray, ...values: unknown[]) => shell.$(strings, ...values),
@@ -129,29 +121,6 @@ class RigToolKitFactory {
       paths: new RigPathRuntime(),
       shell,
     } as RigToolKit;
-  }
-
-  private schema(value: z.ZodTypeAny | z.ZodRawShape, role: "input"): RigInputSchema;
-  private schema(value: z.ZodTypeAny | z.ZodRawShape, role: "output"): RigOutputSchema;
-  private schema(value: z.ZodTypeAny | z.ZodRawShape, role: RigSchemaRole): RigSchema {
-    const schema = this.isZodSchema(value) ? value : z.object(value as z.ZodRawShape);
-    const existingRole = (schema as unknown as Record<symbol, unknown>)[RigSchemaRoleSymbol];
-    if (existingRole === role) return schema as RigSchema;
-    Object.defineProperty(schema, RigSchemaRoleSymbol, {
-      value: role,
-      configurable: false,
-      enumerable: false,
-      writable: false,
-    });
-    return schema as RigSchema;
-  }
-
-  private isZodSchema(value: unknown): value is z.ZodTypeAny {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      typeof (value as { safeParse?: unknown }).safeParse === "function"
-    );
   }
 }
 
@@ -163,9 +132,7 @@ export function defineTool(value: ToolModuleDefault): ToolModuleDefault {
   return typeof value === "function" ? value : rig.defineTool(value);
 }
 
-export const command = rig.command;
-export const input = rig.input;
-export const output = rig.output;
+export const defineCommand = rig.defineCommand;
 export const run = rig.run;
 export const args = rig.args;
 export const paths = rig.paths;

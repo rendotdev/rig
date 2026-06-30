@@ -1,26 +1,5 @@
 import type { z } from "zod";
 
-export const RigSchemaRoleSymbol = Symbol.for("rig.schemaRole");
-export type RigSchemaRole = "input" | "output";
-export declare const RigInputSchemaBrand: unique symbol;
-export declare const RigOutputSchemaBrand: unique symbol;
-
-export type RigInputSchema<T extends z.ZodTypeAny = z.ZodTypeAny> = T & {
-  readonly [RigInputSchemaBrand]: T;
-  readonly [RigSchemaRoleSymbol]?: "input";
-};
-
-export type RigOutputSchema<T extends z.ZodTypeAny = z.ZodTypeAny> = T & {
-  readonly [RigOutputSchemaBrand]: T;
-  readonly [RigSchemaRoleSymbol]?: "output";
-};
-
-export type RigSchema<T = any> = RigInputSchema<z.ZodType<T>> | RigOutputSchema<z.ZodType<T>>;
-export type AnyRigInputSchema = RigInputSchema<z.ZodTypeAny>;
-export type AnyRigOutputSchema = RigOutputSchema<z.ZodTypeAny>;
-export type RigInputData<T extends AnyRigInputSchema> = z.output<T>;
-export type RigOutputData<T extends AnyRigOutputSchema> = z.output<T>;
-export type RigOutputCandidate<T extends AnyRigOutputSchema> = z.input<T>;
 export type MaybePromise<T> = T | Promise<T>;
 
 export type ShellOptions = {
@@ -59,12 +38,6 @@ export type RigArgBuilder = {
   toArray(): string[];
 };
 
-export type SchemaFromValue<T extends z.ZodTypeAny | z.ZodRawShape> = T extends z.ZodTypeAny
-  ? T
-  : T extends z.ZodRawShape
-    ? z.ZodObject<T>
-    : never;
-
 export type RigRunOptions = {
   tool?: string;
   command: string;
@@ -73,26 +46,12 @@ export type RigRunOptions = {
   dryRun?: boolean;
 };
 
-export type RigToolKit = {
-  z: typeof z;
-  defineTool<T extends ToolDefinition>(definition: T): T;
-  command<I extends AnyRigInputSchema, O extends AnyRigOutputSchema>(
-    definition: CommandDefinition<I, O>,
-  ): CommandDefinition<I, O>;
-  input<T extends z.ZodTypeAny | z.ZodRawShape>(value: T): RigInputSchema<SchemaFromValue<T>>;
-  output<T extends z.ZodTypeAny | z.ZodRawShape>(value: T): RigOutputSchema<SchemaFromValue<T>>;
-  run<T = unknown>(options: RigRunOptions): Promise<T>;
-  $(strings: TemplateStringsArray, ...values: unknown[]): Promise<ShellResult>;
-  args(): RigArgBuilder;
-  paths: RigPathHelper;
-  shell: RigShell;
-};
+export type RigSchema = z.ZodTypeAny;
 
 export type ToolRunContext<Input> = {
   input: Input;
   env: NodeJS.ProcessEnv;
   cwd: string;
-  shell: RigShell;
   rig: RigToolKit;
 };
 
@@ -104,8 +63,8 @@ export type ToolExample<Input = any, Output = any> = {
 };
 
 export type CommandDefinition<
-  Input extends AnyRigInputSchema = AnyRigInputSchema,
-  Output extends AnyRigOutputSchema = AnyRigOutputSchema,
+  Input extends RigSchema = RigSchema,
+  Output extends RigSchema = RigSchema,
 > = {
   description: string;
   input: Input;
@@ -122,6 +81,19 @@ export type ToolDefinition = {
 
 export type ToolFactory = (rig: RigToolKit) => ToolDefinition | Promise<ToolDefinition>;
 export type ToolModuleDefault = ToolDefinition | ToolFactory;
+
+export type RigToolKit = {
+  z: typeof z;
+  defineTool<T extends ToolDefinition>(definition: T): T;
+  defineCommand<I extends RigSchema, O extends RigSchema>(
+    definition: CommandDefinition<I, O>,
+  ): CommandDefinition<I, O>;
+  run<T = unknown>(options: RigRunOptions): Promise<T>;
+  $(strings: TemplateStringsArray, ...values: unknown[]): Promise<ShellResult>;
+  args(): RigArgBuilder;
+  paths: RigPathHelper;
+  shell: RigShell;
+};
 
 export type LoadedTool = {
   name: string;

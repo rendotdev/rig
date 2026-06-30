@@ -83,10 +83,10 @@ describe("tool commands", () => {
   name: "bad-output",
   description: "Bad output test tool.",
   commands: {
-    example: rig.command({
+    example: rig.defineCommand({
       description: "Return the wrong output type.",
-      input: rig.input({ text: rig.z.string() }),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object({ text: rig.z.string() }),
+      output: rig.z.object({ text: rig.z.string() }),
       run: async ({ input }) => ({ text: 123 }),
     }),
   },
@@ -128,10 +128,10 @@ export default tool;
   name: "caller",
   description: "Tool runner test tool.",
   commands: {
-    call: rig.command({
+    call: rig.defineCommand({
       description: "Call another Rig tool.",
-      input: rig.input({ text: rig.z.string() }),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object({ text: rig.z.string() }),
+      output: rig.z.object({ text: rig.z.string() }),
       run: async (context) => {
         const result = await context.rig.run({
           command: "sample.example",
@@ -179,10 +179,10 @@ export default tool;
   name: "writer",
   description: "Writer test tool.",
   commands: {
-    save: rig.command({
+    save: rig.defineCommand({
       description: "Save text.",
-      input: rig.input({ text: rig.z.string() }),
-      output: rig.output({ ok: rig.z.boolean() }),
+      input: rig.z.object({ text: rig.z.string() }),
+      output: rig.z.object({ ok: rig.z.boolean() }),
       run: async () => {
         throw new Error("dry-run should not execute command code");
       },
@@ -222,10 +222,10 @@ export default tool;
   name: "large",
   description: "Large output test tool.",
   commands: {
-    dump: rig.command({
+    dump: rig.defineCommand({
       description: "Dump large text.",
-      input: rig.input({}),
-      output: rig.output({ text: rig.z.string() }),
+      input: rig.z.object({}),
+      output: rig.z.object({ text: rig.z.string() }),
       run: async () => ({ text: "x".repeat(60 * 1024) }),
     }),
   },
@@ -256,7 +256,7 @@ export default tool;
     expect(fullOutput.length).toBeGreaterThan(60 * 1024);
   });
 
-  test("rejects unbranded Zod schemas that bypass rig.input and rig.output", async () => {
+  test("accepts raw Zod schemas without rig.input/output wrappers", async () => {
     const home = await homes.create();
     const toolDir = join(home, ".rig", "tools", "raw-schema");
     await mkdir(toolDir, { recursive: true });
@@ -268,8 +268,8 @@ export default RigTool.define({
   name: "raw-schema",
   description: "Raw schema test tool.",
   commands: {
-    bad: {
-      description: "Bypass Rig schema helpers.",
+    echo: {
+      description: "Echo using raw z.object.",
       input: z.object({ text: z.string() }),
       output: z.object({ text: z.string() }),
       run: async ({ input }) => ({ text: input.text }),
@@ -280,24 +280,15 @@ export default RigTool.define({
       "utf8",
     );
 
-    const result = await new ToolRunner({ homeDir: home }).run("raw-schema", "bad", {
+    const result = await new ToolRunner({ homeDir: home }).run("raw-schema", "echo", {
       homeDir: home,
       input: '{"text":"Agent"}',
     });
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
     expect(result.envelope).toMatchObject({
-      data: null,
-      errors: [
-        {
-          code: "TOOL_INVALID",
-          message: "Command raw-schema.bad needs a Rig input schema.",
-          details: {
-            expected: "rig.input(...)",
-            actual: "unbranded Zod schema",
-          },
-        },
-      ],
+      data: { text: "Agent" },
+      errors: [],
     });
   });
 
