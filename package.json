@@ -1,6 +1,6 @@
 {
   "name": "@rendotdev/rig",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "Local typed command runtime for agents.",
   "homepage": "https://github.com/rendotdev/rig#readme",
   "bugs": {
