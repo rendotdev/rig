@@ -45,8 +45,6 @@ Review the conversations available to you from the history of the last two weeks
 
 List the best candidates with this information:
 
-```
-
 **Workflow name**
 
 - Evidence from recent conversations
@@ -54,8 +52,6 @@ List the best candidates with this information:
 - Inputs
 - Outputs
 - Why it should be automated
-
-```
 
 Do not implement anything yet. Ask the user which workflow they want to implement first.
 ```
