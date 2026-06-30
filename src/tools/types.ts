@@ -38,7 +38,9 @@ export type ShellResult = {
 };
 
 export type RigShell = {
+  $(strings: TemplateStringsArray, ...values: unknown[]): Promise<ShellResult>;
   exec(args: string[], options?: ShellOptions): Promise<ShellResult>;
+  bash(command: string, options?: ShellOptions): Promise<ShellResult>;
   json(args: string[], options?: ShellOptions): Promise<unknown>;
 };
 
@@ -73,6 +75,7 @@ export type RigToolKit = {
   output<T extends z.ZodTypeAny | z.ZodRawShape>(value: T): RigOutputSchema<SchemaFromValue<T>>;
   args(): RigArgBuilder;
   paths: RigPathHelper;
+  shell: RigShell;
 };
 
 export type ToolRunContext<Input> = {

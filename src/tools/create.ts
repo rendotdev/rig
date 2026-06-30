@@ -72,9 +72,9 @@ export class ToolCreator {
           output: { text: "custom" },
         },
       ],
-      run: async ({ input }) => {
+      run: async (context) => {
         return {
-          text: input.text,
+          text: context.input.text,
         };
       },
     }),

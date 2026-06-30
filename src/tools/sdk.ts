@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
+import { BunRigShell } from "../runtime/shell";
 import {
   RigSchemaRoleSymbol,
   type AnyRigInputSchema,
@@ -82,6 +83,7 @@ class RigToolKitFactory {
       output: (value: z.ZodTypeAny | z.ZodRawShape) => this.schema(value, "output"),
       args: () => new RigArgsRuntime(),
       paths: new RigPathRuntime(),
+      shell: new BunRigShell(),
     } as RigToolKit;
   }
 

@@ -1,32 +1,68 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rendotdev/rig/main/assets/rig-logo.svg" alt="Rig logo" width="320">
+  <img src="https://raw.githubusercontent.com/rendotdev/rig/main/assets/rig-logo.svg" alt="rig logo" width="320">
 </p>
 
-# Rig
+# rig
 
-(Hey, an actual human wrote this README, it's short and gets to the point.)
+(Hey, an actual human wrote this README. It is short and gets to the point.)
 
-> There are many CLIs out there, this one is yours.
+> There are many CLIs out there; this one is yours (but it's in alpha).
 
-Rig is a minimalist command runtime for AI agents.
+rig is your deterministic command runtime for AI agents.
 
-It allows agents (and humans too) to create fully typed reusable commands with strict input and output validateion which agents can discover, inspect, and run predictably.
+It lets agents, and you, turn deterministic workflows into typed CLI commands. Each command has explicit input and output schemas, so agents can discover, inspect, and run tools predictably and very easily.
 
+If you keep asking agents to repeat the same shell commands, MCP calls, browser steps, API calls, or CLI pipelines, rig creates a foundation for those workflows which you can continue to iterate on overtime as things changes.
+
+rig also considers your tools as context. So, everytime rig runs, it keeps `AGENTS.md` and `CLAUDE.md` files updated with your current list of commands, so agents always know the tools they can use during sessions.
+
+If you are not sure why you would want rig, here are some of my personal use cases:
+
+- Monitor PR status in a loop.
+- Pull data from the Jira, Slack, and GitHub CLIs, then feed it to an LLM to summarize my latest work for standup.
+- Generate a polished HTML docs using my employer's colors with Tailwind Typography from a Markdown string, convert them to a clean PDF, and drop the PDF in my Downloads folder.
+
+*-> I'll keep adding more of my tools as I keep automating my workflows...*
 
 ## Install
-
-Rig requires Node.js 20 or newer.
 
 ```bash
 $ npm install -g @rendotdev/rig
 $ rig
 ```
 
+## Install prompt
+
+Give this prompt to an agent to ask it to install rig for you:
+
+```text
+
+Read the README from this repo: `https://github.com/rendotdev/rig`.
+
+Then, install rig globally with `npm install -g @rendotdev/rig`, then run `rig` to initialize it.
+
+Review the conversations available to you from the history of the last two weeks. Look for deterministic, repeatable workflows that could be automated as rig tools, especially workflows that involve shell commands, local files, browser steps, MCPs, API calls, or CLI pipelines.
+
+List the best candidates in a list with this information: 
+
+```
+**Workflow name**
+
+- Evidence from recent conversations
+- Proposed rig tool
+- Inputs
+- Outputs
+- Why it should be automated
+```
+
+Do not implement anything yet. Ask the user which workflow they want to implement first.
+```
+
 ## Agent?
 
-> Are you an AI agent looking for how to use Rig ? Assume the following:
+> Are you an AI agent looking for how to use rig? Assume the following:
 
-The `rig` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
+The `rig` CLI is installed on this machine. It allows you to write, run, and own local tools and scripts in a typed runtime.
 
 - To discover available tools, run `rig list`.
 - To learn about a tool's usage, run `rig llm.txt <tool>`.
@@ -34,6 +70,8 @@ The `rig` CLI is installed on this machine. It allows you to write, run and own 
 - To create a new tool, run `rig create <tool>`.
 - To edit an existing tool, run `rig edit <tool>` and open the printed file path.
 - To remove an existing tool, run `rig remove <tool>`.
+
+When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output. It also keeps each tool file prefixed with a generated rig runtime reference for agents editing the TypeScript source.
 
 ## Feedback?
 

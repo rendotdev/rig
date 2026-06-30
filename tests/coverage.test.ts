@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { z } from "zod";
+import { RigAgentInstructions } from "../src/agents/instructions";
+import { AgentInstructionSyncService } from "../src/agents/sync";
 import { RigConfigStore } from "../src/config/config";
 import { RigPaths } from "../src/config/paths";
 import { RigConfigDefaults } from "../src/config/schema";
@@ -22,6 +24,7 @@ import { ToolHelpRenderer, ToolHelpService } from "../src/tools/help";
 import { ToolInspector } from "../src/tools/inspect";
 import { ToolDefinitionValidator, ToolLoader } from "../src/tools/loader";
 import { ToolRunner } from "../src/tools/run";
+import { ToolRuntimeCommentSyncService } from "../src/tools/runtime-comment";
 import { SchemaRenderer } from "../src/tools/schema";
 import {
   args,
@@ -40,6 +43,7 @@ class TempWorkspaceStore {
   private readonly paths: string[] = [];
   private readonly originalEnv = { ...process.env };
   private readonly originalArgv = [...process.argv];
+  private readonly originalCwd = process.cwd();
   private readonly originalExecPath = process.execPath;
 
   async create(prefix = "rig-coverage-"): Promise<string> {
@@ -49,6 +53,7 @@ class TempWorkspaceStore {
   }
 
   async cleanup(): Promise<void> {
+    process.chdir(this.originalCwd);
     process.env = { ...this.originalEnv };
     process.argv.splice(0, process.argv.length, ...this.originalArgv);
     Object.defineProperty(process, "execPath", {
@@ -93,6 +98,109 @@ function simpleToolSource(name: string, command = "echo") {
 }
 
 describe("coverage support", () => {
+  test("syncs generated runtime comments into tool files", async () => {
+    const home = await workspaces.create();
+    const created = await new ToolCreator({ homeDir: home }).create("sample");
+    const service = new ToolRuntimeCommentSyncService({ homeDir: home });
+
+    expect(service.renderPrefix()).toContain("rig.shell.$");
+    expect(service.upsertPrefix("#!/usr/bin/env bun\nconsole.log(1);\n")).toMatch(
+      /^#!\/usr\/bin\/env bun\n\/\/ rig:runtime-reference:start/,
+    );
+    expect(service.upsertPrefix("")).toContain("Rig tool runtime");
+
+    const first = await service.sync();
+    expect(first.tools).toEqual([{ name: "sample", path: created.toolPath, changed: true }]);
+    const synced = await readFile(created.toolPath, "utf8");
+    expect(synced).toMatch(/^\/\/ rig:runtime-reference:start/);
+    expect(synced).toContain("Rig tool runtime");
+    expect(synced).toContain("bash execution");
+
+    const second = await service.sync();
+    expect(second.tools).toEqual([{ name: "sample", path: created.toolPath, changed: false }]);
+
+    await writeFile(created.toolPath, synced.replace("Rig tool runtime", "Stale runtime"), "utf8");
+    const third = await service.sync();
+    expect(third.tools).toEqual([{ name: "sample", path: created.toolPath, changed: true }]);
+    expect(await readFile(created.toolPath, "utf8")).not.toContain("Stale runtime");
+
+    const emptyHome = await workspaces.create("rig-coverage-empty-tools-");
+    await expect(new ToolRuntimeCommentSyncService({ homeDir: emptyHome }).sync()).resolves.toEqual(
+      { tools: [] },
+    );
+  });
+
+  test("syncs agent instructions, managed blocks, and target discovery", async () => {
+    const home = await workspaces.create();
+    const project = join(home, "project");
+    const nested = join(project, "src");
+    const packageProject = join(home, "package-project");
+    const packageNested = join(packageProject, "app");
+    await mkdir(join(project, ".git"), { recursive: true });
+    await mkdir(join(nested, ".claude"), { recursive: true });
+    await mkdir(join(home, ".claude"), { recursive: true });
+    await mkdir(packageNested, { recursive: true });
+    await writeFile(join(project, "AGENTS.md"), "# Root agent notes\n", "utf8");
+    await writeFile(join(nested, "CLAUDE.md"), "# Nested Claude notes\n", "utf8");
+    await writeFile(join(nested, "package.json"), "{}\n", "utf8");
+    await writeFile(join(packageProject, "package.json"), "{}\n", "utf8");
+    await writeFile(join(packageProject, "AGENTS.md"), "# Package notes\n", "utf8");
+    await new ToolCreator({ homeDir: home }).create("sample");
+
+    const service = new AgentInstructionSyncService({ homeDir: home, cwd: nested });
+    expect(service.renderBlock("No tools found.")).toContain(RigAgentInstructions);
+    expect((await service.discoverTargets()).map((target) => target.path)).toEqual([
+      join(home, ".claude", "CLAUDE.md"),
+      join(project, "AGENTS.md"),
+      join(nested, ".claude", "CLAUDE.md"),
+      join(nested, "CLAUDE.md"),
+    ]);
+
+    const first = await service.sync();
+    expect(first).toMatchObject({ skipped: false });
+    expect(first.targets.every((target) => target.changed)).toBe(true);
+    expect(await readFile(join(project, "AGENTS.md"), "utf8")).toContain(
+      "$ rig llm.txt sample.example # Example command",
+    );
+    expect(await readFile(join(nested, ".claude", "CLAUDE.md"), "utf8")).toContain(
+      "<!-- rig:agent-instructions:start -->",
+    );
+
+    const second = await service.sync();
+    expect(second.targets.every((target) => target.changed)).toBe(false);
+
+    await writeFile(
+      join(project, "AGENTS.md"),
+      (await readFile(join(project, "AGENTS.md"), "utf8")).replace(
+        "sample.example",
+        "stale.example",
+      ),
+      "utf8",
+    );
+    const third = await service.sync();
+    expect(third.targets.find((target) => target.path.endsWith("AGENTS.md"))?.changed).toBe(true);
+
+    expect(
+      (
+        await new AgentInstructionSyncService({
+          homeDir: home,
+          cwd: packageNested,
+        }).discoverTargets()
+      ).map((target) => target.path),
+    ).toContain(join(packageProject, "AGENTS.md"));
+
+    process.env.RIG_AGENT_SYNC = "0";
+    await expect(service.sync()).resolves.toEqual({ skipped: true, targets: [] });
+    delete process.env.RIG_AGENT_SYNC;
+
+    const emptyHome = await workspaces.create("rig-coverage-empty-");
+    const empty = join(emptyHome, "empty");
+    await mkdir(empty);
+    await expect(
+      new AgentInstructionSyncService({ homeDir: emptyHome, cwd: empty }).sync(),
+    ).resolves.toMatchObject({ skipped: false, targets: [] });
+  });
+
   test("exercises config reads, writes, defaults, and path helpers", async () => {
     const home = await workspaces.create();
     const pathsForHome = new RigPaths({ homeDir: home });
@@ -292,6 +400,19 @@ describe("coverage support", () => {
     });
     expect(success).toMatchObject({ exitCode: 0, stdout: "hello\n" });
 
+    await expect(shell.$`echo ${"tagged ok"}`).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "tagged ok\n",
+    });
+    await expect(shell.$`printf '%s\n' ${["safe", "two words"]}`).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "safe\ntwo words\n",
+    });
+    await expect(shell.bash("echo bash-ok")).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "bash-ok\n",
+    });
+
     const trimmed = await shell.exec([
       "bun",
       "-e",
@@ -334,6 +455,9 @@ describe("coverage support", () => {
     const support = new RuntimeSupport({ homeDir: home });
     await support.ensure([registry]);
     expect(await readFile(join(registry, "tsconfig.json"), "utf8")).toContain("Generated by Rig");
+    const runtimeTypes = await readFile(new RigPaths({ homeDir: home }).runtimeTypesPath, "utf8");
+    expect(runtimeTypes).toContain("$(strings: TemplateStringsArray");
+    expect(runtimeTypes).toContain("shell: RigShell");
     await writeFile(join(registry, "tsconfig.json"), "{}\n", "utf8");
     await support.ensure([registry]);
     expect(await readFile(join(registry, "tsconfig.json"), "utf8")).toBe("{}\n");

@@ -2,6 +2,8 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
+import { RigAgentInstructions } from "./agents/instructions";
+import { AgentInstructionSyncService } from "./agents/sync";
 import { RigConfigStore } from "./config/config";
 import { RigPaths, type PathOptions } from "./config/paths";
 import { DevLinkService } from "./dev/dev-link";
@@ -14,6 +16,7 @@ import { ToolHelpService } from "./tools/help";
 import { ToolInspector } from "./tools/inspect";
 import { ToolListService } from "./tools/list";
 import { ToolRunner } from "./tools/run";
+import { ToolRuntimeCommentSyncService } from "./tools/runtime-comment";
 import { ToolTypecheckService } from "./tools/typecheck";
 
 export class CliApplication {
@@ -27,6 +30,7 @@ export class CliApplication {
       } else {
         await this.program.parseAsync(argv);
       }
+      await this.syncGeneratedFiles();
     } catch (error) {
       this.printError(error);
     }
@@ -319,15 +323,24 @@ export class CliApplication {
   }
 
   private llmText(): string {
-    return `The \`rig\` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
+    return RigAgentInstructions;
+  }
 
-- To discover available tools, run \`rig list\`.
-- To learn about a tool's usage, run \`rig llm.txt <tool>\`.
-- To run a tool, use \`rig run <tool>.<command> [args]\`.
-- To create a new tool, run \`rig create <tool>\`.
-- To edit an existing tool, run \`rig edit <tool>\` and open the printed file path.
-- To remove an existing tool, run \`rig remove <tool>\`.
-`;
+  private async syncGeneratedFiles(): Promise<void> {
+    await this.ignoreSyncErrors(async () => {
+      await new ToolRuntimeCommentSyncService(this.pathOptions()).sync();
+    });
+    await this.ignoreSyncErrors(async () => {
+      await new AgentInstructionSyncService(this.pathOptions()).sync();
+    });
+  }
+
+  private async ignoreSyncErrors(sync: () => Promise<void>): Promise<void> {
+    try {
+      await sync();
+    } catch {
+      // Generated file sync should never block the requested Rig command.
+    }
   }
 
   private commandTarget(commandId: string): { tool: string; command: string } {

@@ -9,6 +9,7 @@ import { ToolCreator } from "../src/tools/create";
 class CliWorkspaceStore {
   private readonly paths: string[] = [];
   private readonly originalEnv = { ...process.env };
+  private readonly originalCwd = process.cwd();
   private readonly originalExitCode = process.exitCode;
 
   async create(prefix = "rig-cli-"): Promise<string> {
@@ -18,6 +19,7 @@ class CliWorkspaceStore {
   }
 
   async cleanup(): Promise<void> {
+    process.chdir(this.originalCwd);
     process.env = { ...this.originalEnv };
     process.exitCode = this.originalExitCode;
     vi.restoreAllMocks();
@@ -31,7 +33,10 @@ class CliHarness {
   readonly logs: string[] = [];
   readonly errors: string[] = [];
 
-  constructor(private readonly homeDir?: string) {
+  constructor(
+    private readonly homeDir?: string,
+    private readonly agentSync = false,
+  ) {
     vi.spyOn(console, "log").mockImplementation((...values) => {
       this.logs.push(values.map(String).join(" "));
     });
@@ -44,6 +49,8 @@ class CliHarness {
     process.exitCode = undefined;
     if (this.homeDir) process.env.RIG_HOME = this.homeDir;
     else delete process.env.RIG_HOME;
+    if (this.agentSync) delete process.env.RIG_AGENT_SYNC;
+    else process.env.RIG_AGENT_SYNC = "0";
     await new CliApplication().run(["node", "rig", ...args]);
     return this.output;
   }
@@ -107,6 +114,45 @@ describe("cli application", () => {
     );
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
     expect(await cli.run(["list"])).toContain("No tools found.");
+  });
+
+  test("syncs agent instruction files after commands", async () => {
+    const home = await workspaces.create();
+    const project = join(home, "project");
+    await mkdir(join(project, ".git"), { recursive: true });
+    await writeFile(join(project, "AGENTS.md"), "# Agent notes\n", "utf8");
+    process.chdir(project);
+
+    const cli = new CliHarness(home, true);
+    expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
+
+    const syncedTool = await readFile(
+      join(home, ".rig", "tools", "sample", "index.rig.ts"),
+      "utf8",
+    );
+    expect(syncedTool).toContain("// rig:runtime-reference:start");
+
+    const synced = await readFile(join(project, "AGENTS.md"), "utf8");
+    expect(synced).toContain("<!-- rig:agent-instructions:start -->");
+    expect(synced).toContain("The `rig` CLI is installed on this machine.");
+    expect(synced).toContain("$ rig llm.txt sample.example # Example command");
+
+    expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
+    const updated = await readFile(join(project, "AGENTS.md"), "utf8");
+    expect(updated).toContain("No tools found.");
+    expect(updated).not.toContain("sample.example");
+  });
+
+  test("ignores agent instruction sync failures", async () => {
+    const home = await workspaces.create();
+    const project = join(home, "project");
+    await mkdir(join(project, ".git"), { recursive: true });
+    await mkdir(join(home, ".rig", "tools", "broken"), { recursive: true });
+    await writeFile(join(project, "AGENTS.md"), "# Agent notes\n", "utf8");
+    await writeFile(join(home, ".rig", "tools", "broken", "index.rig.ts"), "nope", "utf8");
+    process.chdir(project);
+
+    expect(await new CliHarness(home, true).run(["config", "path"])).toContain(".rig/rig.json");
   });
 
   test("runs and typechecks tools", async () => {

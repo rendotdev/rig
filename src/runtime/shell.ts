@@ -5,6 +5,10 @@ import type { RigShell, ShellOptions, ShellResult } from "../tools/types";
 export class BunRigShell implements RigShell {
   constructor(private readonly defaults: ShellOptions = {}) {}
 
+  async $(strings: TemplateStringsArray, ...values: unknown[]): Promise<ShellResult> {
+    return this.bash(this.renderTemplateCommand(strings, values));
+  }
+
   async exec(args: string[], options: ShellOptions = {}): Promise<ShellResult> {
     this.validateArgs(args);
     const timeoutMs = options.timeoutMs ?? this.defaults.timeoutMs ?? 30_000;
@@ -45,6 +49,10 @@ export class BunRigShell implements RigShell {
     }
   }
 
+  async bash(command: string, options: ShellOptions = {}): Promise<ShellResult> {
+    return this.exec(["bash", "-lc", command], options);
+  }
+
   async json(args: string[], options: ShellOptions = {}): Promise<unknown> {
     const result = await this.exec(args, options);
     if (result.exitCode !== 0) {
@@ -55,6 +63,23 @@ export class BunRigShell implements RigShell {
     } catch (error) {
       throw new RigError("SHELL_ERROR", "Command stdout was not valid JSON.", { result, error });
     }
+  }
+
+  private renderTemplateCommand(strings: TemplateStringsArray, values: unknown[]): string {
+    return strings.reduce((command, part, index) => {
+      const value = index < values.length ? this.renderTemplateValue(values[index]) : "";
+      return `${command}${part}${value}`;
+    }, "");
+  }
+
+  private renderTemplateValue(value: unknown): string {
+    if (Array.isArray(value)) return value.map((item) => this.shellQuote(String(item))).join(" ");
+    return this.shellQuote(String(value));
+  }
+
+  private shellQuote(value: string): string {
+    if (/^[A-Za-z0-9_./:=@%+,-]+$/.test(value)) return value;
+    return `'${value.replaceAll("'", "'\\''")}'`;
   }
 
   private async readStream(stream: NodeJS.ReadableStream): Promise<string> {
