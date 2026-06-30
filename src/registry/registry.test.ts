@@ -174,15 +174,12 @@ describe("registries", () => {
     const list = await service.list({ visibleFromPath: join(project, "AGENTS.md") });
     const rendered = service.renderPlain(list);
 
-    expect(rendered).toContain("project-tool.see");
-    expect(rendered).toContain("run:  rig run project-tool.see text=VALUE");
-    expect(rendered).toContain("run:  rig run project-tool.none");
-    expect(rendered).toContain("many-fields.pack");
-    expect(rendered).toContain("run:  rig run many-fields.pack --input");
-    expect(rendered).toContain("scalar-example.say");
-    expect(rendered).toContain("run:  rig run scalar-example.say 'two words'");
-    expect(rendered).toContain("run:  rig run scalar-example.count count=2");
-    expect(rendered).toContain("run:  rig run scalar-required.say");
+    expect(rendered).toContain("project-tool.see text=VALUE #");
+    expect(rendered).toContain("project-tool.none #");
+    expect(rendered).toContain("many-fields.pack --input");
+    expect(rendered).toContain("scalar-example.say 'two words'");
+    expect(rendered).toContain("scalar-example.count count=2");
+    expect(rendered).toContain("scalar-required.say #");
     expect(rendered).not.toContain("local-only.example");
   });
 

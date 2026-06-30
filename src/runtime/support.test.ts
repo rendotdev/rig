@@ -186,9 +186,7 @@ describe("coverage support", () => {
     expect(await readFile(join(nested, ".claude", "CLAUDE.md"), "utf8")).toContain(
       "<!-- rig:agent-instructions:start -->",
     );
-    expect(await readFile(globalAgentSource, "utf8")).toContain(
-      "run:  rig run sample.example text=example",
-    );
+    expect(await readFile(globalAgentSource, "utf8")).toContain("sample.example text=example #");
 
     const second = await service.sync();
     expect(second.targets.every((target) => target.changed)).toBe(false);

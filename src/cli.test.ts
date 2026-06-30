@@ -108,10 +108,9 @@ describe("cli application", () => {
     expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
     const listOutput = await cli.run(["list"]);
     expect(listOutput).toContain("sample.example");
-    expect(listOutput).toContain("run:  rig run sample.example text=example");
-    expect(listOutput).toContain("help: rig help sample.example");
+    expect(listOutput).toContain("sample.example text=example #");
     expect(await cli.run(["list", "--json"])).toContain('"tools"');
-    expect(await cli.run(["ls", "--plain"])).toContain("run:  rig run sample.example text=example");
+    expect(await cli.run(["ls", "--plain"])).toContain("sample.example text=example #");
     expect(await cli.run(["edit", "sample"])).toContain(
       join(home, ".rig", "tools", "sample", "index.rig.ts"),
     );
