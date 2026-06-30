@@ -114,16 +114,12 @@ class ToolListPlainRenderer {
   }
 
   private renderToolHeader(tool: ListedTool): string {
-    return `${tool.name}\n  ${tool.description}`;
+    return `${tool.name} # ${tool.description}`;
   }
 
   private renderCommand(command: ListedCommand): string {
-    return [
-      `  ${command.id}`,
-      `    run:  ${command.runExample}`,
-      `    help: ${command.helpExample}`,
-      `    ${command.description}`,
-    ].join("\n");
+    const args = command.runExample.replace(`rig run ${command.id}`, "").trim();
+    return `  ${command.id}${args ? ` ${args}` : ""} # ${command.description}`;
   }
 }
 

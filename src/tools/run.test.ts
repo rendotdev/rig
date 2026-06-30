@@ -165,9 +165,7 @@ export default tool;
     const list = await service.list();
 
     const rendered = service.renderPlain(list);
-    expect(rendered).toContain("sample.example");
-    expect(rendered).toContain("run:  rig run sample.example text=example");
-    expect(rendered).toContain("help: rig help sample.example");
+    expect(rendered).toContain("sample.example text=example #");
   });
 
   test("dry-runs a command without execution", async () => {
