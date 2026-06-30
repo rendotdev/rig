@@ -289,24 +289,23 @@ export class CliApplication {
       .command("update")
       .description("Update rig to the latest published version.")
       .action(async () => {
+        const $ = (globalThis as typeof globalThis & { Bun: { $: unknown } }).Bun.$;
         const currentVersion = this.version();
         console.log(`Current version: ${currentVersion}`);
         console.log("Checking for updates...");
-        const result = spawnSync("npm", ["install", "-g", "@rendotdev/rig@latest", "--force"], {
-          stdio: "pipe",
-        });
-        if (result.status !== 0) {
+        const result = await $`npm install -g @rendotdev/rig@latest --force`.quiet().nothrow();
+        if (result.exitCode !== 0) {
           console.error("Update failed.");
           process.exit(1);
         }
-        const check = spawnSync("rig", ["--version"], { encoding: "utf8", stdio: "pipe" });
-        const newVersion = check.stdout?.trim() ?? "unknown";
+        const check = await $`rig --version`.quiet().text();
+        const newVersion = check.trim();
         if (newVersion === currentVersion) {
           console.log(`Already on the latest version (${currentVersion}).`);
         } else {
           console.log(`Updated: ${currentVersion} -> ${newVersion}`);
         }
-        spawnSync("rig", ["init"], { stdio: "inherit" });
+        await $`rig init`;
       });
   }
 
