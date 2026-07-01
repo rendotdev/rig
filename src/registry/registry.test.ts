@@ -183,6 +183,34 @@ describe("registries", () => {
     expect(rendered).not.toContain("local-only.example");
   });
 
+  test("renders plain list entries without embedded line breaks", async () => {
+    const rendered = new ToolListService().renderPlain({
+      tools: [
+        {
+          name: "wrapped",
+          description: "First line\n\nsecond\tline.",
+          registryKind: "base",
+          registryPath: "/tmp/registry",
+          toolPath: "/tmp/registry/wrapped/index.rig.ts",
+          commands: [
+            {
+              name: "say",
+              id: "wrapped.say",
+              description: "Command line\r\ncontinues.",
+              runExample: "rig run wrapped.say text='hello\nworld'",
+              helpExample: "rig help wrapped.say",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(rendered.split("\n")).toEqual([
+      "wrapped # First line second line.",
+      "  wrapped.say text='hello\\nworld' # Command line continues.",
+    ]);
+  });
+
   test("detects duplicate tool names across registries", async () => {
     const home = await homes.create();
     await new ToolCreator({ homeDir: home }).create("sample");
