@@ -75,6 +75,10 @@ export class RigPaths {
     return join(this.rigDir, "update-check.json");
   }
 
+  get migrationPromptStatePath(): string {
+    return join(this.rigDir, "migration-prompts.json");
+  }
+
   get defaultBaseRegistryDir(): string {
     return "~/rig/tools";
   }
