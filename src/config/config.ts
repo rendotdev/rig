@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { RigError } from "../errors/RigError";
 import { RuntimeSupport } from "../runtime/support";
+import { RigDirectoryMigrationService, type RigDirectoryMigrationResult } from "./migration";
 import { RigPaths, type PathOptions } from "./paths";
 import { RigConfigDefaults, RigConfigSchema, type RigConfig } from "./schema";
 
@@ -16,13 +17,19 @@ export type RegistryEntry = {
 export class RigConfigStore {
   private readonly paths: RigPaths;
   private readonly runtimeSupport: RuntimeSupport;
+  private migration?: RigDirectoryMigrationResult;
 
   constructor(options: ConfigOptions = {}) {
     this.paths = new RigPaths(options);
     this.runtimeSupport = new RuntimeSupport(options);
   }
 
+  migrationResult(): RigDirectoryMigrationResult | undefined {
+    return this.migration;
+  }
+
   async ensure(): Promise<RigConfig> {
+    this.migration = await new RigDirectoryMigrationService(this.paths).migrateIfNeeded();
     await mkdir(this.paths.rigDir, { recursive: true });
     if (!existsSync(this.paths.configPath)) {
       await this.write(RigConfigDefaults.create());

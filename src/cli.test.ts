@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BunRuntimeBootstrap, CliApplication, isCliEntrypoint } from "./cli";
+import { RigPaths } from "./config/paths";
 import { ToolCreator } from "./tools/create";
 
 class CliWorkspaceStore {
@@ -37,6 +38,7 @@ class CliHarness {
   constructor(
     private readonly homeDir?: string,
     private readonly agentSync = false,
+    private readonly updateCheck = false,
   ) {
     vi.spyOn(console, "log").mockImplementation((...values) => {
       this.logs.push(values.map(String).join(" "));
@@ -52,7 +54,8 @@ class CliHarness {
     else delete process.env.RIG_HOME;
     if (this.agentSync) delete process.env.RIG_AGENT_SYNC;
     else process.env.RIG_AGENT_SYNC = "0";
-    process.env.RIG_UPDATE_CHECK = "0";
+    if (this.updateCheck) delete process.env.RIG_UPDATE_CHECK;
+    else process.env.RIG_UPDATE_CHECK = "0";
     await new CliApplication().run(["node", "rig", ...args]);
     return this.output;
   }
@@ -77,9 +80,84 @@ describe("cli application", () => {
     const home = await workspaces.create();
     const cli = new CliHarness(home);
 
-    expect(await cli.run([])).toContain("Rig is ready.");
-    expect(await cli.run(["init"])).toContain("Rig is ready.");
+    const defaultStatus = await cli.run([]);
+    expect(defaultStatus).toContain("Rig is ready.");
+    expect(defaultStatus).toMatch(/Version:\s+\d+\.\d+\.\d+/);
+
+    const initStatus = await cli.run(["init"]);
+    expect(initStatus).toContain("Rig is ready.");
+    expect(initStatus).toMatch(/Version:\s+\d+\.\d+\.\d+/);
     expect(await cli.run(["doctor"])).toContain("Status: OK");
+  });
+
+  test("prints update notices from default status", async () => {
+    const home = await workspaces.create();
+    const paths = new RigPaths({ homeDir: home });
+    await mkdir(paths.rigDir, { recursive: true });
+    await writeFile(
+      paths.updateCheckCachePath,
+      `${JSON.stringify({ checkedAt: Date.now(), latestVersion: "999.0.0" })}\n`,
+      "utf8",
+    );
+
+    const output = await new CliHarness(home, false, true).run([]);
+
+    expect(output).toContain("Version:");
+    expect(output).toContain("Rig update available: @rendotdev/rig");
+    expect(output).toContain("-> 999.0.0");
+  });
+
+  test("prints rig home folder migration notices", async () => {
+    const migratedHome = await workspaces.create();
+    await mkdir(join(migratedHome, ".rig", "tools", "legacy"), { recursive: true });
+    await writeFile(
+      join(migratedHome, ".rig", "rig.json"),
+      `${JSON.stringify({ version: 1, baseRegistryDir: "~/.rig/tools", customRegistries: [] })}\n`,
+      "utf8",
+    );
+
+    const migratedOutput = await new CliHarness(migratedHome).run([]);
+
+    expect(migratedOutput).toContain("Rig moved its home folder:");
+    expect(migratedOutput).toContain(`From: ${join(migratedHome, ".rig")}`);
+    expect(migratedOutput).toContain("Updated base registry: ~/rig/tools");
+
+    const unchangedHome = await workspaces.create();
+    await mkdir(join(unchangedHome, ".rig", "tools", "legacy"), { recursive: true });
+    await writeFile(
+      join(unchangedHome, ".rig", "rig.json"),
+      `${JSON.stringify({ version: 1, baseRegistryDir: "~/custom-tools", customRegistries: [] })}\n`,
+      "utf8",
+    );
+
+    const unchangedOutput = await new CliHarness(unchangedHome).run([]);
+
+    expect(unchangedOutput).toContain("Rig moved its home folder:");
+    expect(unchangedOutput).not.toContain("Updated base registry: ~/rig/tools");
+
+    const manualHome = await workspaces.create();
+    await mkdir(join(manualHome, ".rig", "tools", "legacy"), { recursive: true });
+    await writeFile(
+      join(manualHome, ".rig", "rig.json"),
+      `${JSON.stringify({ version: 1, baseRegistryDir: "~/.rig/tools", customRegistries: [] })}\n`,
+      "utf8",
+    );
+    await mkdir(join(manualHome, "rig", "tools", "current"), { recursive: true });
+    await writeFile(
+      join(manualHome, "rig", "rig.json"),
+      `${JSON.stringify({
+        version: 1,
+        baseRegistryDir: "~/rig/tools",
+        customRegistries: [],
+        cronJobs: [],
+      })}\n`,
+      "utf8",
+    );
+
+    const manualOutput = await new CliHarness(manualHome).run(["doctor"]);
+
+    expect(manualOutput).toContain("Rig home folder migration needs your attention:");
+    expect(manualOutput).toContain("Rig found data in both the old and new folders.");
   });
 
   test("prints config and manages registries", async () => {
