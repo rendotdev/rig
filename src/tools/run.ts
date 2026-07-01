@@ -3,10 +3,11 @@ import type { ConfigOptions } from "../config/config";
 import { RigError, RigErrors } from "../errors/RigError";
 import { EnvelopeFactory } from "../runtime/envelope";
 import { RigOutputTruncator } from "../runtime/truncation";
+import { ToolDatabaseService, UnavailableToolDatabaseFactory } from "./db";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
 import { createRigToolKit } from "./sdk";
-import { CommandIds, type CommandDefinition } from "./types";
+import { CommandIds, type CommandDefinition, type RigToolDatabase } from "./types";
 
 export type RunCommandOptions = ConfigOptions & {
   input?: string;
@@ -37,8 +38,12 @@ class RunInputReader {
     }
 
     if (options.inputFile) {
-      const raw = await readFile(options.inputFile, "utf8");
-      return { value: JSON.parse(raw), source: `--input-file ${options.inputFile}` };
+      /* v8 ignore next 3 */
+      const value =
+        typeof Bun !== "undefined"
+          ? await Bun.file(options.inputFile).json()
+          : JSON.parse(await readFile(options.inputFile, "utf8"));
+      return { value, source: `--input-file ${options.inputFile}` };
     }
 
     if (options.input) {
@@ -188,9 +193,11 @@ class DryRunPresenter {
 }
 
 export class ToolRunner {
+  private readonly databases = new ToolDatabaseService();
   private readonly loader: ToolLoader;
   private readonly inputReader = new RunInputReader();
   private readonly outputTruncator = new RigOutputTruncator();
+  private readonly unavailableDatabases = new UnavailableToolDatabaseFactory();
 
   constructor(private readonly options: ConfigOptions = {}) {
     this.loader = new ToolLoader(options);
@@ -201,8 +208,9 @@ export class ToolRunner {
     commandName: string,
     options: RunCommandOptions = {},
   ): Promise<RunCommandResult> {
+    let db: RigToolDatabase | undefined;
     try {
-      const { command } = await this.loader.loadCommand(toolName, commandName);
+      const { tool, command } = await this.loader.loadCommand(toolName, commandName);
       const input = await this.inputReader.read(command, options);
 
       const inputResult = command.input.safeParse(input.value);
@@ -230,11 +238,13 @@ export class ToolRunner {
       }
 
       const rig = createRigToolKit(this.options);
+      db = await this.databases.setup(tool);
       const data = await command.run({
         input: inputResult.data,
-        env: process.env,
+        env: tool.env,
+        processEnv: process.env,
         cwd: process.cwd(),
-        shell: rig.shell,
+        db: db ?? this.unavailableDatabases.create(toolName),
         rig,
       });
 
@@ -263,6 +273,16 @@ export class ToolRunner {
         }),
         exitCode: 1,
       };
+    } finally {
+      this.closeDatabase(db);
+    }
+  }
+
+  private closeDatabase(db: RigToolDatabase | undefined): void {
+    try {
+      db?.close(false);
+    } catch {
+      // The command already finished. Ignore close failures so they do not mask command results.
     }
   }
 

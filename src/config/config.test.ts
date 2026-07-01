@@ -31,8 +31,8 @@ afterEach(async () => {
 describe("config", () => {
   test("expands tilde paths", async () => {
     const home = await homes.create();
-    expect(new RigPaths({ homeDir: home }).expandTilde("~/.rig/tools")).toBe(
-      join(home, ".rig/tools"),
+    expect(new RigPaths({ homeDir: home }).expandTilde("~/rig/tools")).toBe(
+      join(home, "rig/tools"),
     );
   });
 
@@ -42,9 +42,9 @@ describe("config", () => {
     const config = await new RigConfigStore({ homeDir: home }).ensure();
     expect(config.version).toBe(1);
     expect(existsSync(paths.configPath)).toBe(true);
-    expect(existsSync(join(home, ".rig/tools"))).toBe(true);
-    expect(existsSync(join(home, ".rig/tools/tsconfig.json"))).toBe(true);
-    expect(existsSync(join(home, ".rig/runtime/sdk.ts"))).toBe(true);
-    expect(existsSync(join(home, ".rig/runtime/globals.d.ts"))).toBe(true);
+    expect(existsSync(join(home, "rig/tools"))).toBe(true);
+    expect(existsSync(join(home, "rig/tools/tsconfig.json"))).toBe(true);
+    expect(existsSync(join(home, "rig/runtime/sdk.ts"))).toBe(true);
+    expect(existsSync(join(home, "rig/runtime/globals.d.ts"))).toBe(true);
   });
 });

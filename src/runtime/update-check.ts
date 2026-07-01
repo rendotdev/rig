@@ -130,8 +130,11 @@ export class NpmUpdateCheckService {
 
   private async readCache(): Promise<UpdateCheckCache | undefined> {
     try {
-      const raw = await readFile(this.paths.updateCheckCachePath, "utf8");
-      const data = JSON.parse(raw);
+      /* v8 ignore next 3 */
+      const data =
+        typeof Bun !== "undefined"
+          ? await Bun.file(this.paths.updateCheckCachePath).json()
+          : JSON.parse(await readFile(this.paths.updateCheckCachePath, "utf8"));
       if (!this.isRecord(data) || typeof data.checkedAt !== "number") return undefined;
       return {
         checkedAt: data.checkedAt,
@@ -144,7 +147,10 @@ export class NpmUpdateCheckService {
 
   private async writeCache(cache: UpdateCheckCache): Promise<void> {
     await mkdir(dirname(this.paths.updateCheckCachePath), { recursive: true });
-    await writeFile(this.paths.updateCheckCachePath, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+    const content = `${JSON.stringify(cache, null, 2)}\n`;
+    /* v8 ignore next 3 */
+    if (typeof Bun !== "undefined") await Bun.write(this.paths.updateCheckCachePath, content);
+    else await writeFile(this.paths.updateCheckCachePath, content, "utf8");
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

@@ -28,7 +28,7 @@ export class RigPaths {
   }
 
   get rigDir(): string {
-    return join(this.homeDir, ".rig");
+    return join(this.homeDir, "rig");
   }
 
   get configPath(): string {
@@ -55,12 +55,20 @@ export class RigPaths {
     return join(this.runtimeDir, "tsconfig.tools.json");
   }
 
+  get cronDir(): string {
+    return join(this.rigDir, "cron");
+  }
+
+  cronWorkerPath(name: string): string {
+    return join(this.cronDir, `${name}.ts`);
+  }
+
   get updateCheckCachePath(): string {
     return join(this.rigDir, "update-check.json");
   }
 
   get defaultBaseRegistryDir(): string {
-    return "~/.rig/tools";
+    return "~/rig/tools";
   }
 
   parentDir(pathValue: string): string {
