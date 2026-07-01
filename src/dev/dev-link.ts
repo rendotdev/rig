@@ -46,7 +46,9 @@ export class DevLinkService {
     }
 
     await mkdir(binDir, { recursive: true });
-    await writeFile(shimPath, this.shimSource(repoRoot), "utf8");
+    /* v8 ignore next 3 */
+    if (typeof Bun !== "undefined") await Bun.write(shimPath, this.shimSource(repoRoot));
+    else await writeFile(shimPath, this.shimSource(repoRoot), "utf8");
     await chmod(shimPath, 0o755);
     return this.status(options);
   }
@@ -132,7 +134,7 @@ export class DevLinkService {
     return `#!/usr/bin/env bash
 # Rig dev shim. Safe to overwrite with \`rig dev link\`.
 RIG_DEV_REPO=${JSON.stringify(repoRoot)}
-exec bun run "$RIG_DEV_REPO/src/cli.ts" "$@"
+exec bun --install=fallback run "$RIG_DEV_REPO/src/cli.ts" "$@"
 `;
   }
 
@@ -142,7 +144,11 @@ exec bun run "$RIG_DEV_REPO/src/cli.ts" "$@"
     if (!existsSync(shimPath)) return { exists: false, isRigDevShim: false, content: "" };
     const stat = await lstat(shimPath);
     if (!stat.isFile()) return { exists: true, isRigDevShim: false, content: "" };
-    const content = await readFile(shimPath, "utf8");
+    /* v8 ignore next 2 */
+    const content =
+      typeof Bun !== "undefined"
+        ? await Bun.file(shimPath).text()
+        : await readFile(shimPath, "utf8");
     return {
       exists: true,
       isRigDevShim: content.includes("Rig dev shim"),

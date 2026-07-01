@@ -8,6 +8,8 @@ import type { PathOptions } from "./config/paths";
 import { RigError, RigErrors } from "./errors/RigError";
 import { RigPackageRoot } from "./runtime/package-root";
 
+export { RigCronWorker } from "./tools/cron";
+
 type BunRuntimeSpawn = (
   command: string,
   args: string[],
@@ -29,10 +31,14 @@ export class BunRuntimeBootstrap {
     if (!this.shouldBootstrap()) return undefined;
     const bunPath = this.resolveBunPath();
     if (!bunPath) return undefined;
-    const result = this.spawn(bunPath, [fileURLToPath(metaUrl), ...argv.slice(2)], {
-      stdio: "inherit",
-      env: { ...this.env, RIG_BUN_BOOTSTRAPPED: "1" },
-    });
+    const result = this.spawn(
+      bunPath,
+      [this.autoInstallFlag(), fileURLToPath(metaUrl), ...argv.slice(2)],
+      {
+        stdio: "inherit",
+        env: { ...this.env, RIG_BUN_BOOTSTRAPPED: "1" },
+      },
+    );
     return result.status ?? 1;
   }
 
@@ -52,6 +58,10 @@ export class BunRuntimeBootstrap {
       join(this.packageRoot, "node_modules", ".bin", "bun"),
     ].filter((value): value is string => Boolean(value));
     return candidates.find((candidate) => existsSync(candidate));
+  }
+
+  autoInstallFlag(): string {
+    return "--install=fallback";
   }
 }
 
@@ -92,6 +102,7 @@ export class CliApplication {
     this.configureEditCommand();
     this.configureRemoveCommand();
     this.configureRunCommand();
+    this.configureCronCommands();
     this.configureTypecheckCommand();
     this.configureDevCommands();
     this.configureUpdateCommand();
@@ -102,11 +113,13 @@ export class CliApplication {
       .action(async (target?: string) => {
         if (!target) {
           const readmePath = join(fileURLToPath(import.meta.url), "..", "..", "README.md");
-          console.log(
-            existsSync(readmePath)
-              ? readFileSync(readmePath, "utf8")
-              : /* v8 ignore next */ this.program.helpInformation(),
-          );
+          /* v8 ignore else */
+          if (existsSync(readmePath)) {
+            console.log(readFileSync(readmePath, "utf8"));
+          } else {
+            /* v8 ignore next */
+            console.log(this.program.helpInformation());
+          }
           return;
         }
         this.requestGeneratedSync();
@@ -267,6 +280,68 @@ export class CliApplication {
           await this.runToolCommand(commandId, args, commandOptions);
         },
       );
+  }
+
+  private configureCronCommands(): void {
+    const cronCommand = this.program
+      .command("cron")
+      .description("Manage scheduled Rig tool commands.");
+
+    cronCommand
+      .command("list")
+      .description("List scheduled Rig tool commands as JSON.")
+      .action(async () => {
+        const { RigCronService } = await import("./tools/cron");
+        this.printJson(await new RigCronService(this.pathOptions()).list());
+      });
+
+    cronCommand
+      .command("add")
+      .argument("<name>", "Unique job name, using letters, numbers, hyphens, or underscores.")
+      .argument("<command>", "Command id, formatted as <tool>.<command>.")
+      .argument("<schedule>", "Cron expression or nickname, such as @weekly.")
+      .description("Schedule a Rig tool command with fixed JSON input.")
+      .option("--input <json>", "JSON input string.")
+      .option("--input-file <path>", "Read JSON input from a file.")
+      .action(
+        async (
+          name: string,
+          commandId: string,
+          schedule: string,
+          commandOptions: { input?: string; inputFile?: string },
+        ) => {
+          const { cronModuleUrl, RigCronService } = await import("./tools/cron");
+          const result = await new RigCronService(this.pathOptions()).add({
+            name,
+            command: commandId,
+            schedule,
+            input: commandOptions.input,
+            inputFile: commandOptions.inputFile,
+            moduleUrl: cronModuleUrl(import.meta.url),
+          });
+          this.printJson(result);
+        },
+      );
+
+    cronCommand
+      .command("remove")
+      .argument("<name>", "Cron job name.")
+      .description("Remove a scheduled Rig tool command.")
+      .action(async (name: string) => {
+        const { RigCronService } = await import("./tools/cron");
+        this.printJson(await new RigCronService(this.pathOptions()).remove(name));
+      });
+
+    cronCommand
+      .command("run")
+      .argument("<name>", "Cron job name.")
+      .description("Run a scheduled Rig tool command now.")
+      .action(async (name: string) => {
+        const { RigCronService } = await import("./tools/cron");
+        const result = await new RigCronService(this.pathOptions()).run(name);
+        this.printJson(result.envelope);
+        process.exitCode = result.exitCode;
+      });
   }
 
   private configureTypecheckCommand(): void {
