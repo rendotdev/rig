@@ -26,14 +26,7 @@ import { ToolDefinitionValidator, ToolLoader } from "../tools/loader";
 import { ToolRunner } from "../tools/run";
 import { ToolRuntimeCommentSyncService } from "../tools/runtime-comment";
 import { SchemaRenderer } from "../tools/schema";
-import {
-  args,
-  createRigToolKit,
-  defineTool,
-  paths,
-  RigTool,
-  rig,
-} from "../tools/sdk";
+import { args, createRigToolKit, defineTool, paths, RigTool, rig } from "../tools/sdk";
 import { CommandIds } from "../tools/types";
 import { ToolTypecheckService } from "../tools/typecheck";
 
