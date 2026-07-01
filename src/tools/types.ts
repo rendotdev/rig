@@ -54,12 +54,36 @@ export type RigToolDatabase = Database & {
   migrate(version: number, name: string, sql: string): void;
 };
 
+export type RigToolKvStore = {
+  readonly path: string;
+  get<T = unknown>(key: string): T | undefined;
+  set(key: string, value: unknown): void;
+};
+
+export type RigLogMethod = {
+  (message: string): void;
+  (bindings: Record<string, unknown>, message?: string): void;
+  (error: Error, message?: string): void;
+};
+
+export type RigToolLogger = {
+  trace: RigLogMethod;
+  debug: RigLogMethod;
+  info: RigLogMethod;
+  warn: RigLogMethod;
+  error: RigLogMethod;
+  fatal: RigLogMethod;
+  child(bindings: Record<string, unknown>): RigToolLogger;
+};
+
 export type ToolRunContext<Input, Env = unknown> = {
   input: Input;
   env: Env;
   processEnv: NodeJS.ProcessEnv;
   cwd: string;
   db: RigToolDatabase;
+  kv: RigToolKvStore;
+  log: RigToolLogger;
   rig: RigToolKit;
 };
 
