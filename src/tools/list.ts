@@ -99,7 +99,24 @@ class CommandRunExampleRenderer {
   }
 }
 
+class ToolListPlainTextFormatter {
+  description(value: string): string {
+    return value.replace(/\s+/g, " ").trim();
+  }
+
+  example(value: string): string {
+    return value
+      .replace(/\r\n/g, "\\n")
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t")
+      .trim();
+  }
+}
+
 class ToolListPlainRenderer {
+  private readonly formatter = new ToolListPlainTextFormatter();
+
   render(data: ToolListData): string {
     if (data.tools.length === 0) return "No Rig tools found.";
 
@@ -114,12 +131,13 @@ class ToolListPlainRenderer {
   }
 
   private renderToolHeader(tool: ListedTool): string {
-    return `${tool.name} # ${tool.description}`;
+    return `${tool.name} # ${this.formatter.description(tool.description)}`;
   }
 
   private renderCommand(command: ListedCommand): string {
-    const args = command.runExample.replace(`rig run ${command.id}`, "").trim();
-    return `  ${command.id}${args ? ` ${args}` : ""} # ${command.description}`;
+    const args = this.formatter.example(command.runExample.replace(`rig run ${command.id}`, ""));
+    const description = this.formatter.description(command.description);
+    return `  ${command.id}${args ? ` ${args}` : ""} # ${description}`;
   }
 }
 
