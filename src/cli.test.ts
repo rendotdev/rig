@@ -136,6 +136,28 @@ describe("cli application", () => {
     expect(unchangedOutput).toContain("Rig moved its home folder:");
     expect(unchangedOutput).not.toContain("Updated base registry: ~/rig/tools");
 
+    const defaultManualHome = await workspaces.create();
+    await mkdir(join(defaultManualHome, ".rig", "tools", "legacy"), { recursive: true });
+    await writeFile(
+      join(defaultManualHome, ".rig", "rig.json"),
+      `${JSON.stringify({ version: 1, baseRegistryDir: "~/.rig/tools", customRegistries: [] })}\n`,
+      "utf8",
+    );
+    await mkdir(join(defaultManualHome, "rig", "tools", "current"), { recursive: true });
+    await writeFile(
+      join(defaultManualHome, "rig", "rig.json"),
+      `${JSON.stringify({
+        version: 1,
+        baseRegistryDir: "~/rig/tools",
+        customRegistries: [],
+        cronJobs: [],
+      })}\n`,
+      "utf8",
+    );
+
+    const defaultManualOutput = await new CliHarness(defaultManualHome).run([]);
+    expect(defaultManualOutput).toContain("Rig home folder migration needs your attention:");
+
     const manualHome = await workspaces.create();
     await mkdir(join(manualHome, ".rig", "tools", "legacy"), { recursive: true });
     await writeFile(
@@ -155,10 +177,17 @@ describe("cli application", () => {
       "utf8",
     );
 
-    const manualOutput = await new CliHarness(manualHome).run(["doctor"]);
+    const manualCli = new CliHarness(manualHome);
+    const manualOutput = await manualCli.run(["doctor"]);
 
     expect(manualOutput).toContain("Rig home folder migration needs your attention:");
     expect(manualOutput).toContain("Rig found data in both the old and new folders.");
+    expect(manualOutput).toContain("This migration prompt is versioned");
+
+    manualCli.logs.length = 0;
+    const repeatedOutput = await manualCli.run(["doctor"]);
+    expect(repeatedOutput).not.toContain("Rig home folder migration needs your attention:");
+    expect(repeatedOutput).toContain("Status: OK");
   });
 
   test("prints config and manages registries", async () => {
