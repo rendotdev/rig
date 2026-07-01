@@ -32,11 +32,19 @@ Rig tool runtime:
 - \`rig.$\` runs a Bun Shell tagged template command with escaped interpolations. Docs: https://bun.com/docs/runtime/shell
 - \`rig.args()\` builds argv arrays with \`.raw()\`, \`.flag()\`, \`.value()\`, \`.values()\`, and \`.toArray()\`.
 - \`rig.paths.home()\`, \`rig.paths.resolve(cwd, path)\`, \`rig.paths.ensureParent(path)\`, and \`rig.paths.size(path)\` cover common path work.
+- Add \`env: rig.z.object({ KEY: rig.z.string() })\` to validate a \`.env\` file beside the tool entry file and receive parsed values on \`context.env\`.
+
+Tool SQLite database:
+- Add \`setupDb: (db) => { db.migrate(1, "create table", "create table ..."); }\` when a tool needs persistent state.
+- Rig stores the database beside the tool entry file as \`index.sqlite\` and runs \`setupDb\` before every command.
+- \`db\` is Bun SQLite with \`strict: true\`, WAL mode, and an extra \`db.migrate(version, name, sql)\` helper. Docs: https://bun.com/docs/runtime/sqlite
 
 Command run context:
 - \`context.input\` is already validated by the input schema.
-- \`context.env\` is the process environment.
+- \`context.env\` is already validated by the tool env schema when defined.
+- \`context.processEnv\` is the process environment.
 - \`context.cwd\` is the current working directory.
+- \`context.db\` is available when the tool defines \`setupDb\`.
 - \`context.rig\` is the toolkit (same as the factory \`rig\` arg, useful for nested tool calls).
 - Return a value that matches the output schema.
 `;

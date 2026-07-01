@@ -152,11 +152,7 @@ ${EndMarker}`;
   ): Promise<void> {
     let parsed: unknown;
     try {
-      /* v8 ignore next 3 */
-      parsed =
-        typeof Bun !== "undefined"
-          ? await Bun.file(configPath).json()
-          : JSON.parse(await readFile(configPath, "utf8"));
+      parsed = JSON.parse(await this.readText(configPath));
     } catch {
       return;
     }
@@ -221,11 +217,7 @@ ${EndMarker}`;
     target: AgentInstructionTarget,
     block: string,
   ): Promise<boolean> {
-    const existing = target.existed
-      ? /* v8 ignore next */ typeof Bun !== "undefined"
-        ? await Bun.file(target.path).text()
-        : await readFile(target.path, "utf8")
-      : "";
+    const existing = target.existed ? await this.readText(target.path) : "";
     const nextBody = this.managedBlockPattern().test(existing)
       ? existing.replace(this.managedBlockPattern(), block)
       : this.appendBlock(existing, block);
@@ -233,10 +225,42 @@ ${EndMarker}`;
 
     if (next === existing) return false;
 
-    /* v8 ignore next 3 */
-    if (typeof Bun !== "undefined") await Bun.write(target.path, next);
-    else await writeFile(target.path, next, "utf8");
+    await this.writeText(target.path, next);
     return true;
+  }
+
+  private async readText(path: string): Promise<string> {
+    const bun = this.bunFileApi();
+    /* v8 ignore next */
+    if (bun) return bun.file(path).text();
+    return readFile(path, "utf8");
+  }
+
+  private async writeText(path: string, content: string): Promise<void> {
+    const bun = this.bunFileApi();
+    /* v8 ignore next 4 */
+    if (bun) {
+      await bun.write(path, content);
+      return;
+    }
+    await writeFile(path, content, "utf8");
+  }
+
+  private bunFileApi():
+    | {
+        file(path: string): { text(): Promise<string> };
+        write(path: string, content: string): Promise<number>;
+      }
+    | undefined {
+    const candidate = (
+      globalThis as typeof globalThis & {
+        Bun?: { file?: unknown; write?: unknown };
+      }
+    ).Bun;
+    /* v8 ignore next */
+    if (typeof candidate?.file === "function" && typeof candidate.write === "function")
+      return candidate as never;
+    return undefined;
   }
 
   private appendBlock(existing: string, block: string): string {

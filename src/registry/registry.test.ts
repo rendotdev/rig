@@ -43,7 +43,7 @@ describe("registries", () => {
 
   test("discovers index.rig.tsx entry files", async () => {
     const home = await homes.create();
-    const toolDir = join(home, ".rig", "tools", "view-tool");
+    const toolDir = join(home, "rig", "tools", "view-tool");
     await mkdir(toolDir, { recursive: true });
     await writeFile(join(toolDir, "index.rig.tsx"), "export default {};\n", "utf8");
 
@@ -59,7 +59,7 @@ describe("registries", () => {
 
   test("rejects legacy tool.ts entry files", async () => {
     const home = await homes.create();
-    const toolDir = join(home, ".rig", "tools", "legacy");
+    const toolDir = join(home, "rig", "tools", "legacy");
     await mkdir(toolDir, { recursive: true });
     await writeFile(join(toolDir, "tool.ts"), "export default {};\n", "utf8");
 
