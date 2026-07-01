@@ -101,7 +101,14 @@ type DatabaseConstructor = new (
   options?: { create?: boolean; strict?: boolean },
 ) => Database;
 
-class BunSqliteModuleLoader {
+export class BunSqliteModuleLoader {
+  available(): boolean {
+    return Boolean(
+      (globalThis as typeof globalThis & { rigSqliteDatabaseForTests?: DatabaseConstructor })
+        .rigSqliteDatabaseForTests || (globalThis as typeof globalThis & { Bun?: unknown }).Bun,
+    );
+  }
+
   async database(): Promise<DatabaseConstructor> {
     const database = (
       globalThis as typeof globalThis & { rigSqliteDatabaseForTests?: DatabaseConstructor }

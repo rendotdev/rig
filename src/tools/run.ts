@@ -2,12 +2,19 @@ import { readFile } from "node:fs/promises";
 import type { ConfigOptions } from "../config/config";
 import { RigError, RigErrors } from "../errors/RigError";
 import { EnvelopeFactory } from "../runtime/envelope";
+import { RigLoggerFactory } from "../runtime/logger";
 import { RigOutputTruncator } from "../runtime/truncation";
 import { ToolDatabaseService, UnavailableToolDatabaseFactory } from "./db";
+import { ToolKvStoreService } from "./kv";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
 import { createRigToolKit } from "./sdk";
-import { CommandIds, type CommandDefinition, type RigToolDatabase } from "./types";
+import {
+  CommandIds,
+  type CommandDefinition,
+  type RigToolDatabase,
+  type RigToolKvStore,
+} from "./types";
 
 export type RunCommandOptions = ConfigOptions & {
   input?: string;
@@ -194,6 +201,8 @@ class DryRunPresenter {
 
 export class ToolRunner {
   private readonly databases = new ToolDatabaseService();
+  private readonly kvStores = new ToolKvStoreService();
+  private readonly loggerFactory: RigLoggerFactory;
   private readonly loader: ToolLoader;
   private readonly inputReader = new RunInputReader();
   private readonly outputTruncator = new RigOutputTruncator();
@@ -201,6 +210,7 @@ export class ToolRunner {
 
   constructor(private readonly options: ConfigOptions = {}) {
     this.loader = new ToolLoader(options);
+    this.loggerFactory = new RigLoggerFactory(options);
   }
 
   async run(
@@ -209,6 +219,8 @@ export class ToolRunner {
     options: RunCommandOptions = {},
   ): Promise<RunCommandResult> {
     let db: RigToolDatabase | undefined;
+    let kv: RigToolKvStore | undefined;
+    const log = this.loggerFactory.tool(toolName, commandName);
     try {
       const { tool, command } = await this.loader.loadCommand(toolName, commandName);
       const input = await this.inputReader.read(command, options);
@@ -239,12 +251,16 @@ export class ToolRunner {
 
       const rig = createRigToolKit(this.options);
       db = await this.databases.setup(tool);
+      kv = await this.kvStores.setup(tool);
+      log.info("Tool command started.");
       const data = await command.run({
         input: inputResult.data,
         env: tool.env,
         processEnv: process.env,
         cwd: process.cwd(),
         db: db ?? this.unavailableDatabases.create(toolName),
+        kv,
+        log,
         rig,
       });
 
@@ -257,6 +273,7 @@ export class ToolRunner {
         );
       }
 
+      log.info("Tool command finished.");
       return {
         envelope: EnvelopeFactory.success({
           data: await this.outputTruncator.truncateData(outputResult.data),
@@ -265,6 +282,7 @@ export class ToolRunner {
       };
     } catch (error) {
       const rigError = this.asInputAwareRigError(error);
+      log.error({ err: rigError }, "Tool command failed.");
       return {
         envelope: EnvelopeFactory.error({
           code: rigError.code,
@@ -274,7 +292,16 @@ export class ToolRunner {
         exitCode: 1,
       };
     } finally {
+      this.closeKv(kv);
       this.closeDatabase(db);
+    }
+  }
+
+  private closeKv(kv: RigToolKvStore | undefined): void {
+    try {
+      (kv as { close?: (throwOnError?: boolean) => void } | undefined)?.close?.(false);
+    } catch {
+      // The command already finished. Ignore close failures so they do not mask command results.
     }
   }
 

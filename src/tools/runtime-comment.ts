@@ -34,6 +34,11 @@ Rig tool runtime:
 - \`rig.paths.home()\`, \`rig.paths.resolve(cwd, path)\`, \`rig.paths.ensureParent(path)\`, and \`rig.paths.size(path)\` cover common path work.
 - Add \`env: rig.z.object({ KEY: rig.z.string() })\` to validate a \`.env\` file beside the tool entry file and receive parsed values on \`context.env\`.
 
+Tool logging and key-value state:
+- Use \`context.log.info(...)\`, \`context.log.warn(...)\`, or another Pino-style method for structured logs with a default \`tool:<tool>.<command>\` prefix.
+- Rig writes app and tool logs to \`~/rig/.logs\`, rolls files by size, and keeps logs for seven days by default.
+- Use \`context.kv.set(key, value)\` and \`context.kv.get(key)\` for lightweight JSON state stored beside the tool entry file as \`kv.sqlite\`.
+
 Tool SQLite database:
 - Add \`setupDb: (db) => { db.migrate(1, "create table", "create table ..."); }\` when a tool needs persistent state.
 - Rig stores the database beside the tool entry file as \`index.sqlite\` and runs \`setupDb\` before every command.
@@ -45,6 +50,8 @@ Command run context:
 - \`context.processEnv\` is the process environment.
 - \`context.cwd\` is the current working directory.
 - \`context.db\` is available when the tool defines \`setupDb\`.
+- \`context.kv\` is always available for lightweight JSON key-value state.
+- \`context.log\` is a structured Pino logger for this tool command.
 - \`context.rig\` is the toolkit (same as the factory \`rig\` arg, useful for nested tool calls).
 - Return a value that matches the output schema.
 `;
