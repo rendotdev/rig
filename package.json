@@ -24,7 +24,7 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "bun --watch run src/cli.ts",
+    "dev": "bun --install=fallback --watch run src/cli.ts",
     "build": "bun run scripts/build.ts",
     "bench": "bun run scripts/bench.ts",
     "release": "bun run scripts/release.ts",

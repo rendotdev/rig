@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ToolDiscoveryService, type DiscoveredTool } from "../registry/discover";
 import { RigError } from "../errors/RigError";
@@ -47,6 +50,16 @@ export class ToolDefinitionValidator {
       throw new RigError("TOOL_INVALID", `Tool ${value.name} needs a description.`, {
         expected: "non-empty string",
       });
+    }
+
+    if (value.setupDb !== undefined && typeof value.setupDb !== "function") {
+      throw new RigError("TOOL_INVALID", `Tool ${value.name} setupDb must be a function.`, {
+        expected: "function",
+      });
+    }
+
+    if (value.env !== undefined) {
+      this.validateSchema(value.env, "env", value.name);
     }
 
     if (!this.isRecord(value.commands)) {
@@ -139,9 +152,109 @@ export class ToolDefinitionValidator {
   }
 }
 
+class ToolEnvFileParser {
+  parse(source: string, path: string): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const [index, line] of source.split(/\r?\n/).entries()) {
+      const parsed = this.parseLine(line, path, index + 1);
+      if (parsed) env[parsed.key] = parsed.value;
+    }
+    return env;
+  }
+
+  private parseLine(
+    line: string,
+    path: string,
+    lineNumber: number,
+  ): { key: string; value: string } | undefined {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return undefined;
+
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(trimmed);
+    if (!match) {
+      throw new RigError("TOOL_INVALID", "Invalid .env line.", {
+        path,
+        line: lineNumber,
+      });
+    }
+
+    return { key: match[1]!, value: this.parseValue(match[2]!) };
+  }
+
+  private parseValue(value: string): string {
+    const trimmed = value.trim();
+    if (trimmed.length < 2) return trimmed;
+
+    const quote = trimmed[0];
+    if ((quote !== '"' && quote !== "'") || trimmed.at(-1) !== quote) return trimmed;
+
+    const inner = trimmed.slice(1, -1);
+    if (quote === "'") return inner;
+    return inner
+      .replaceAll("\\n", "\n")
+      .replaceAll("\\r", "\r")
+      .replaceAll("\\t", "\t")
+      .replaceAll('\\"', '"')
+      .replaceAll("\\\\", "\\");
+  }
+}
+
+class ToolEnvLoader {
+  private readonly parser = new ToolEnvFileParser();
+
+  async load(tool: DiscoveredTool, definition: ToolDefinition): Promise<unknown> {
+    const envPath = join(dirname(tool.toolPath), ".env");
+    const fileExists = await this.exists(envPath);
+
+    if (!definition.env) {
+      if (fileExists) {
+        throw new RigError("TOOL_INVALID", `Tool ${definition.name} has .env but no env schema.`, {
+          path: envPath,
+        });
+      }
+      return {};
+    }
+
+    const rawEnv = fileExists ? this.parser.parse(await this.readText(envPath), envPath) : {};
+    const result = definition.env.safeParse(rawEnv);
+    if (!result.success) {
+      throw new RigError("TOOL_INVALID", `Tool ${definition.name} env is invalid.`, {
+        path: envPath,
+        errors: result.error.flatten(),
+      });
+    }
+    return result.data;
+  }
+
+  private async exists(path: string): Promise<boolean> {
+    const bunFile = this.bunFile();
+    /* v8 ignore next 3 */
+    if (bunFile) {
+      return bunFile(path).exists();
+    }
+    return existsSync(path);
+  }
+
+  private async readText(path: string): Promise<string> {
+    const bunFile = this.bunFile();
+    /* v8 ignore next */
+    if (bunFile) return bunFile(path).text();
+    return readFile(path, "utf8");
+  }
+
+  private bunFile():
+    | ((path: string) => { exists(): Promise<boolean>; text(): Promise<string> })
+    | undefined {
+    const candidate = (globalThis as typeof globalThis & { Bun?: { file?: unknown } }).Bun?.file;
+    /* v8 ignore next */
+    return typeof candidate === "function" ? (candidate as never) : undefined;
+  }
+}
+
 export class ToolLoader {
   private readonly discovery: ToolDiscoveryService;
   private readonly validator: ToolDefinitionValidator;
+  private readonly envLoader = new ToolEnvLoader();
 
   constructor(options: ConfigOptions = {}) {
     this.discovery = new ToolDiscoveryService(options);
@@ -171,7 +284,8 @@ export class ToolLoader {
     const moduleRecord = moduleValue as { default?: unknown };
     const definitionValue = await this.evaluateModuleDefault(moduleRecord.default, tool.name);
     const definition = this.validator.validateToolDefinition(definitionValue, tool.name);
-    return { name: definition.name, path: tool.toolPath, definition };
+    const env = await this.envLoader.load(tool, definition);
+    return { name: definition.name, path: tool.toolPath, env, definition };
   }
 
   private async evaluateModuleDefault(value: unknown, toolName: string): Promise<unknown> {

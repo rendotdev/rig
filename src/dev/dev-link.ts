@@ -134,7 +134,7 @@ export class DevLinkService {
     return `#!/usr/bin/env bash
 # Rig dev shim. Safe to overwrite with \`rig dev link\`.
 RIG_DEV_REPO=${JSON.stringify(repoRoot)}
-exec bun run "$RIG_DEV_REPO/src/cli.ts" "$@"
+exec bun --install=fallback run "$RIG_DEV_REPO/src/cli.ts" "$@"
 `;
   }
 

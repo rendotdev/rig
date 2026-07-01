@@ -23,6 +23,7 @@ class CliWorkspaceStore {
     process.env = { ...this.originalEnv };
     process.exitCode = this.originalExitCode;
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     await Promise.all(
       this.paths.splice(0).map((path) => rm(path, { recursive: true, force: true })),
     );
@@ -84,7 +85,7 @@ describe("cli application", () => {
   test("prints config and manages registries", async () => {
     const home = await workspaces.create();
     const noHomeCli = new CliHarness();
-    expect(await noHomeCli.run(["config", "path"])).toContain(".rig/rig.json");
+    expect(await noHomeCli.run(["config", "path"])).toContain("rig/rig.json");
     vi.restoreAllMocks();
 
     const cli = new CliHarness(home);
@@ -103,6 +104,7 @@ describe("cli application", () => {
 
     expect(await cli.run(["help"])).toContain("# rig");
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
+    expect(await cli.run(["help"])).toContain("The `rig` CLI is installed on this machine.");
     expect(await cli.run(["help", "sample"])).toContain("# sample");
     expect(await cli.run(["help", "sample.example"])).toContain("Tool: sample");
     expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
@@ -112,7 +114,7 @@ describe("cli application", () => {
     expect(await cli.run(["list", "--json"])).toContain('"tools"');
     expect(await cli.run(["ls", "--plain"])).toContain("sample.example text=example #");
     expect(await cli.run(["edit", "sample"])).toContain(
-      join(home, ".rig", "tools", "sample", "index.rig.ts"),
+      join(home, "rig", "tools", "sample", "index.rig.ts"),
     );
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
     expect(await cli.run(["list"])).toContain("No Rig tools found.");
@@ -128,10 +130,7 @@ describe("cli application", () => {
     const cli = new CliHarness(home, true);
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
 
-    const syncedTool = await readFile(
-      join(home, ".rig", "tools", "sample", "index.rig.ts"),
-      "utf8",
-    );
+    const syncedTool = await readFile(join(home, "rig", "tools", "sample", "index.rig.ts"), "utf8");
     expect(syncedTool).toContain("// rig:runtime-reference:start");
 
     const synced = await readFile(join(project, "AGENTS.md"), "utf8");
@@ -150,12 +149,12 @@ describe("cli application", () => {
     const home = await workspaces.create();
     const project = join(home, "project");
     await mkdir(join(project, ".git"), { recursive: true });
-    await mkdir(join(home, ".rig", "tools", "broken"), { recursive: true });
+    await mkdir(join(home, "rig", "tools", "broken"), { recursive: true });
     await writeFile(join(project, "AGENTS.md"), "# Agent notes\n", "utf8");
-    await writeFile(join(home, ".rig", "tools", "broken", "index.rig.ts"), "nope", "utf8");
+    await writeFile(join(home, "rig", "tools", "broken", "index.rig.ts"), "nope", "utf8");
     process.chdir(project);
 
-    expect(await new CliHarness(home, true).run(["config", "path"])).toContain(".rig/rig.json");
+    expect(await new CliHarness(home, true).run(["config", "path"])).toContain("rig/rig.json");
   });
 
   test("runs and typechecks tools", async () => {
@@ -171,6 +170,42 @@ describe("cli application", () => {
     );
     expect(await cli.run(["typecheck", "sample"])).toContain('"ok": true');
     expect(process.exitCode).toBe(0);
+  });
+
+  test("manages cron jobs", async () => {
+    const home = await workspaces.create();
+    const originalBun = (globalThis as typeof globalThis & { Bun?: unknown }).Bun;
+    const cron = Object.assign(
+      vi.fn<(path: string, schedule: string, title: string) => Promise<void>>(() =>
+        Promise.resolve(),
+      ),
+      {
+        parse: vi.fn<(expression: string) => Date | null>(
+          () => new Date("2026-07-01T00:00:00.000Z"),
+        ),
+        remove: vi.fn<(title: string) => Promise<void>>(() => Promise.resolve()),
+      },
+    );
+    vi.stubGlobal("Bun", { ...(originalBun as Record<string, unknown>), cron });
+    await new ToolCreator({ homeDir: home }).create("sample");
+    const cli = new CliHarness(home);
+
+    expect(await cli.run(["cron", "list"])).toContain('"cronJobs": []');
+    expect(
+      await cli.run([
+        "cron",
+        "add",
+        "weekly-jira",
+        "sample.example",
+        "@weekly",
+        "--input",
+        '{"text":"Jira"}',
+      ]),
+    ).toContain('"name": "weekly-jira"');
+    expect(await cli.run(["cron", "run", "weekly-jira"])).toContain('"text": "Jira"');
+    expect(await cli.run(["cron", "remove", "weekly-jira"])).toContain('"removed": true');
+    expect(cron).toHaveBeenCalledWith(expect.any(String), "@weekly", "weekly-jira");
+    expect(cron.remove).toHaveBeenCalledWith("weekly-jira");
   });
 
   test("manages dev links", async () => {
@@ -209,9 +244,10 @@ describe("cli application", () => {
     expect(bootstrap.resolveBunPath()).toBe(bunPath);
     expect(bootstrap.shouldBootstrap()).toBe(true);
     expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig", "list"])).toBe(7);
+    expect(bootstrap.autoInstallFlag()).toBe("--install=fallback");
     expect(calls[0]).toMatchObject({
       command: bunPath,
-      args: [entrypoint, "list"],
+      args: ["--install=fallback", entrypoint, "list"],
       env: { RIG_BUN_BOOTSTRAPPED: "1" },
     });
     expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig"])).toBe(1);

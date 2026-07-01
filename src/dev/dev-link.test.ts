@@ -50,7 +50,9 @@ describe("dev link", () => {
     expect(linked.isRigDevShim).toBe(true);
     expect(linked.pointsToCurrentRepo).toBe(true);
     expect(existsSync(linked.shimPath)).toBe(true);
-    expect(await readFile(linked.shimPath, "utf8")).toContain("Rig dev shim");
+    const shim = await readFile(linked.shimPath, "utf8");
+    expect(shim).toContain("Rig dev shim");
+    expect(shim).toContain("bun --install=fallback run");
 
     const unlinked = await service.unlink();
     expect(unlinked.exists).toBe(false);
