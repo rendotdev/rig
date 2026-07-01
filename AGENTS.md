@@ -6,6 +6,7 @@
 - Keep `./src/agents/instructions.ts`, the README.md "Agent?" section, and this file's instructions block in sync when editing any of them.
 
 <!-- rig:agent-instructions:start -->
+
 ## Rig local tools
 
 The `rig` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
@@ -31,4 +32,5 @@ The `rig` CLI is installed on this machine. It allows you to write, run and own 
 ```text
 No Rig tools found.
 ```
+
 <!-- rig:agent-instructions:end -->
