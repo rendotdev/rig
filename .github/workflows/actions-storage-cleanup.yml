@@ -1,0 +1,68 @@
+name: Actions storage cleanup
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      keep_days:
+        description: "Keep workflow logs newer than this many days."
+        required: true
+        default: "1"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  cleanup:
+    name: Delete Actions storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Delete artifacts, caches, and old logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          KEEP_DAYS: ${{ inputs.keep_days || '1' }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$KEEP_DAYS" =~ ^[0-9]+$ ]] || [[ "$KEEP_DAYS" -lt 1 ]]; then
+            echo "keep_days must be a positive integer." >&2
+            exit 1
+          fi
+
+          cutoff="$(date -u -d "${KEEP_DAYS} days ago" +%s)"
+
+          echo "Deleting all Actions artifacts."
+          gh api --paginate "repos/${REPO}/actions/artifacts?per_page=100" --jq '.artifacts[] | [.id, .name] | @tsv' \
+            | while IFS=$'\t' read -r artifact_id artifact_name; do
+                echo "Deleting artifact ${artifact_name} (${artifact_id})."
+                gh api -X DELETE "repos/${REPO}/actions/artifacts/${artifact_id}" >/dev/null || true
+              done
+
+          echo "Deleting all Actions caches."
+          gh api --paginate "repos/${REPO}/actions/caches?per_page=100" --jq '.actions_caches[] | [.id, .key] | @tsv' \
+            | while IFS=$'\t' read -r cache_id cache_key; do
+                echo "Deleting cache ${cache_key} (${cache_id})."
+                gh api -X DELETE "repos/${REPO}/actions/caches/${cache_id}" >/dev/null || true
+              done
+
+          echo "Deleting completed workflow logs older than ${KEEP_DAYS} day(s)."
+          gh api --paginate "repos/${REPO}/actions/runs?per_page=100" --jq '.workflow_runs[] | [.id, .created_at, .status, .name] | @tsv' \
+            | while IFS=$'\t' read -r run_id created_at status run_name; do
+                if [[ "$run_id" == "$GITHUB_RUN_ID" || "$status" != "completed" ]]; then
+                  continue
+                fi
+
+                created="$(date -u -d "$created_at" +%s)"
+                if [[ "$created" -lt "$cutoff" ]]; then
+                  echo "Deleting logs for ${run_name} (${run_id})."
+                  gh api -X DELETE "repos/${REPO}/actions/runs/${run_id}/logs" >/dev/null || true
+                fi
+              done
