@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Command } from "commander";
+import type { RigDirectoryMigrationResult } from "./config/migration";
 import type { PathOptions } from "./config/paths";
 import { RigError, RigErrors } from "./errors/RigError";
 import { RigPackageRoot } from "./runtime/package-root";
@@ -460,15 +461,18 @@ export class CliApplication {
     const config = await configStore.ensure();
     const tools = await new ToolDiscoveryService(options).discover();
     const registries = configStore.registryEntries(config);
+    const currentVersion = this.version();
 
+    this.printMigrationNotice(configStore.migrationResult());
     console.log("Rig is ready.\n");
+    console.log(`Version:       ${currentVersion}`);
     console.log(`Config:        ${paths.configPath}`);
     console.log(`Base registry: ${registries[0]?.path}`);
     console.log(`Tools found:   ${tools.length}`);
     console.log("\nNext steps:");
     console.log("  rig list");
     console.log('\nRun "rig doctor" if you want to verify your setup.');
-    await this.printUpdateNotice();
+    await this.printUpdateNotice(currentVersion);
   }
 
   private async createTool(name: string): Promise<void> {
@@ -496,6 +500,7 @@ export class CliApplication {
     const paths = new RigPaths(options);
     const configStore = new RigConfigStore(options);
     const config = await configStore.ensure();
+    this.printMigrationNotice(configStore.migrationResult());
     const registries = configStore.registryEntries(config);
     const tools = await new ToolDiscoveryService(options).discover();
 
@@ -508,13 +513,33 @@ export class CliApplication {
     }
     console.log(`Tools:         ${tools.length}`);
     console.log("\nStatus: OK");
-    await this.printUpdateNotice();
+    await this.printUpdateNotice(this.version());
   }
 
-  private async printUpdateNotice(): Promise<void> {
+  private printMigrationNotice(migration: RigDirectoryMigrationResult | undefined): void {
+    if (!migration) return;
+
+    if (migration.status === "migrated") {
+      console.log("Rig moved its home folder:");
+      console.log(`  From: ${migration.legacyDir}`);
+      console.log(`  To:   ${migration.currentDir}`);
+      if (migration.configUpdated) console.log("  Updated base registry: ~/rig/tools");
+      console.log("");
+      return;
+    }
+
+    console.log("Rig home folder migration needs your attention:");
+    console.log(`  Old folder: ${migration.legacyDir}`);
+    console.log(`  New folder: ${migration.currentDir}`);
+    console.log(`  Reason: ${migration.reason}`);
+    console.log("Move the files you want to keep into the new folder, then remove the old folder.");
+    console.log("");
+  }
+
+  private async printUpdateNotice(currentVersion: string): Promise<void> {
     await this.ignoreSyncErrors(async () => {
       const { NpmUpdateCheckService } = await import("./runtime/update-check");
-      const notice = await new NpmUpdateCheckService(this.pathOptions()).check(this.version());
+      const notice = await new NpmUpdateCheckService(this.pathOptions()).check(currentVersion);
       /* v8 ignore next */
       if (notice) console.log(`\n${notice.message}`);
     });
