@@ -150,16 +150,9 @@ ${EndMarker}`;
     targets: Map<string, AgentInstructionTarget>,
     configPath: string,
   ): Promise<void> {
-    let raw: string;
-    try {
-      raw = await readFile(configPath, "utf8");
-    } catch {
-      return;
-    }
-
     let parsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(await this.readText(configPath));
     } catch {
       return;
     }
@@ -224,7 +217,7 @@ ${EndMarker}`;
     target: AgentInstructionTarget,
     block: string,
   ): Promise<boolean> {
-    const existing = target.existed ? await readFile(target.path, "utf8") : "";
+    const existing = target.existed ? await this.readText(target.path) : "";
     const nextBody = this.managedBlockPattern().test(existing)
       ? existing.replace(this.managedBlockPattern(), block)
       : this.appendBlock(existing, block);
@@ -232,8 +225,42 @@ ${EndMarker}`;
 
     if (next === existing) return false;
 
-    await writeFile(target.path, next, "utf8");
+    await this.writeText(target.path, next);
     return true;
+  }
+
+  private async readText(path: string): Promise<string> {
+    const bun = this.bunFileApi();
+    /* v8 ignore next */
+    if (bun) return bun.file(path).text();
+    return readFile(path, "utf8");
+  }
+
+  private async writeText(path: string, content: string): Promise<void> {
+    const bun = this.bunFileApi();
+    /* v8 ignore next 4 */
+    if (bun) {
+      await bun.write(path, content);
+      return;
+    }
+    await writeFile(path, content, "utf8");
+  }
+
+  private bunFileApi():
+    | {
+        file(path: string): { text(): Promise<string> };
+        write(path: string, content: string): Promise<number>;
+      }
+    | undefined {
+    const candidate = (
+      globalThis as typeof globalThis & {
+        Bun?: { file?: unknown; write?: unknown };
+      }
+    ).Bun;
+    /* v8 ignore next */
+    if (typeof candidate?.file === "function" && typeof candidate.write === "function")
+      return candidate as never;
+    return undefined;
   }
 
   private appendBlock(existing: string, block: string): string {
