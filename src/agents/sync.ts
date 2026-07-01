@@ -101,6 +101,7 @@ export class AgentInstructionSyncService {
 
   renderBlock(toolList: string): string {
     return `${StartMarker}
+
 ## Rig local tools
 
 ${RigAgentInstructions}
@@ -109,6 +110,7 @@ ${RigAgentInstructions}
 \`\`\`text
 ${toolList}
 \`\`\`
+
 ${EndMarker}`;
   }
 

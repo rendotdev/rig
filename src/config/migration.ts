@@ -3,7 +3,10 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { join } from "node:path";
 import { RigPaths } from "./paths";
 
+export const RigHomeDirectoryMigrationPromptId = "v0.0.19-home-directory";
+
 export type RigDirectoryMigrationResult = {
+  promptId: string;
   status: "migrated" | "manual";
   legacyDir: string;
   currentDir: string;
@@ -11,8 +14,64 @@ export type RigDirectoryMigrationResult = {
   reason?: string;
 };
 
-export class RigDirectoryMigrationService {
+type RigMigrationPromptState = {
+  version: 1;
+  prompts: Record<string, { shownAt: string }>;
+};
+
+export class RigMigrationPromptStore {
   constructor(private readonly paths: RigPaths) {}
+
+  async hasPrompted(promptId: string): Promise<boolean> {
+    const state = await this.read();
+    return state.prompts[promptId] !== undefined;
+  }
+
+  async markPrompted(promptId: string): Promise<void> {
+    const state = await this.read();
+    state.prompts[promptId] ??= { shownAt: new Date().toISOString() };
+    await this.write(state);
+  }
+
+  private async read(): Promise<RigMigrationPromptState> {
+    try {
+      const parsed = JSON.parse(await readFile(this.paths.migrationPromptStatePath, "utf8"));
+      if (!this.isState(parsed)) return this.emptyState();
+      return parsed;
+    } catch {
+      return this.emptyState();
+    }
+  }
+
+  private async write(state: RigMigrationPromptState): Promise<void> {
+    await mkdir(this.paths.rigDir, { recursive: true });
+    const tmpPath = `${this.paths.migrationPromptStatePath}.tmp-${process.pid}`;
+    await writeFile(tmpPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    await rename(tmpPath, this.paths.migrationPromptStatePath);
+  }
+
+  private emptyState(): RigMigrationPromptState {
+    return { version: 1, prompts: {} };
+  }
+
+  private isState(value: unknown): value is RigMigrationPromptState {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      (value as { version?: unknown }).version === 1 &&
+      typeof (value as { prompts?: unknown }).prompts === "object" &&
+      (value as { prompts?: unknown }).prompts !== null &&
+      !Array.isArray((value as { prompts?: unknown }).prompts)
+    );
+  }
+}
+
+export class RigDirectoryMigrationService {
+  constructor(
+    private readonly paths: RigPaths,
+    private readonly promptStore = new RigMigrationPromptStore(paths),
+  ) {}
 
   async migrateIfNeeded(): Promise<RigDirectoryMigrationResult | undefined> {
     const legacyDir = this.paths.legacyRigDir;
@@ -22,7 +81,9 @@ export class RigDirectoryMigrationService {
 
     const currentExists = existsSync(currentDir);
     if (currentExists && !(await this.canReplaceCurrentDirectory(currentDir))) {
+      if (await this.promptStore.hasPrompted(RigHomeDirectoryMigrationPromptId)) return undefined;
       return {
+        promptId: RigHomeDirectoryMigrationPromptId,
         status: "manual",
         legacyDir,
         currentDir,
@@ -36,6 +97,7 @@ export class RigDirectoryMigrationService {
     await rename(legacyDir, currentDir);
 
     return {
+      promptId: RigHomeDirectoryMigrationPromptId,
       status: "migrated",
       legacyDir,
       currentDir,
@@ -96,7 +158,14 @@ export class RigDirectoryMigrationService {
   private async hasOnlyGeneratedCurrentEntries(currentDir: string): Promise<boolean> {
     const entries = await this.visibleEntries(currentDir);
     return entries.every((entry) =>
-      ["rig.json", "runtime", "tools", "update-check.json", "cron"].includes(entry),
+      [
+        "rig.json",
+        "runtime",
+        "tools",
+        "update-check.json",
+        "cron",
+        "migration-prompts.json",
+      ].includes(entry),
     );
   }
 

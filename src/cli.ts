@@ -467,7 +467,9 @@ export class CliApplication {
     new RigLoggerFactory(options)
       .app("cli")
       .info({ version: currentVersion, tools: tools.length }, "Default status rendered.");
-    this.printMigrationNotice(configStore.migrationResult());
+    if (this.printMigrationNotice(configStore.migrationResult())) {
+      await configStore.acknowledgeMigrationPrompt();
+    }
     console.log("Rig is ready.\n");
     console.log(`Version:       ${currentVersion}`);
     console.log(`Config:        ${paths.configPath}`);
@@ -504,7 +506,9 @@ export class CliApplication {
     const paths = new RigPaths(options);
     const configStore = new RigConfigStore(options);
     const config = await configStore.ensure();
-    this.printMigrationNotice(configStore.migrationResult());
+    if (this.printMigrationNotice(configStore.migrationResult())) {
+      await configStore.acknowledgeMigrationPrompt();
+    }
     const registries = configStore.registryEntries(config);
     const tools = await new ToolDiscoveryService(options).discover();
 
@@ -523,8 +527,8 @@ export class CliApplication {
     await this.printUpdateNotice(this.version());
   }
 
-  private printMigrationNotice(migration: RigDirectoryMigrationResult | undefined): void {
-    if (!migration) return;
+  private printMigrationNotice(migration: RigDirectoryMigrationResult | undefined): boolean {
+    if (!migration) return false;
 
     if (migration.status === "migrated") {
       console.log("Rig moved its home folder:");
@@ -532,7 +536,7 @@ export class CliApplication {
       console.log(`  To:   ${migration.currentDir}`);
       if (migration.configUpdated) console.log("  Updated base registry: ~/rig/tools");
       console.log("");
-      return;
+      return false;
     }
 
     console.log("Rig home folder migration needs your attention:");
@@ -540,7 +544,9 @@ export class CliApplication {
     console.log(`  New folder: ${migration.currentDir}`);
     console.log(`  Reason: ${migration.reason}`);
     console.log("Move the files you want to keep into the new folder, then remove the old folder.");
+    console.log("This migration prompt is versioned; Rig will not show it again after this run.");
     console.log("");
+    return true;
   }
 
   private async printUpdateNotice(currentVersion: string): Promise<void> {

@@ -3,7 +3,11 @@ import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { RigError } from "../errors/RigError";
 import { RuntimeSupport } from "../runtime/support";
-import { RigDirectoryMigrationService, type RigDirectoryMigrationResult } from "./migration";
+import {
+  RigDirectoryMigrationService,
+  RigMigrationPromptStore,
+  type RigDirectoryMigrationResult,
+} from "./migration";
 import { RigPaths, type PathOptions } from "./paths";
 import { RigConfigDefaults, RigConfigSchema, type RigConfig } from "./schema";
 
@@ -26,6 +30,11 @@ export class RigConfigStore {
 
   migrationResult(): RigDirectoryMigrationResult | undefined {
     return this.migration;
+  }
+
+  async acknowledgeMigrationPrompt(): Promise<void> {
+    if (this.migration?.status !== "manual") return;
+    await new RigMigrationPromptStore(this.paths).markPrompted(this.migration.promptId);
   }
 
   async ensure(): Promise<RigConfig> {
