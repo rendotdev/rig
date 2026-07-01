@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import type { z } from "zod";
 
 export type MaybePromise<T> = T | Promise<T>;
@@ -48,10 +49,17 @@ export type RigRunOptions = {
 
 export type RigSchema = z.ZodTypeAny;
 
-export type ToolRunContext<Input> = {
+export type RigToolDatabase = Database & {
+  readonly path: string;
+  migrate(version: number, name: string, sql: string): void;
+};
+
+export type ToolRunContext<Input, Env = unknown> = {
   input: Input;
-  env: NodeJS.ProcessEnv;
+  env: Env;
+  processEnv: NodeJS.ProcessEnv;
   cwd: string;
+  db: RigToolDatabase;
   rig: RigToolKit;
 };
 
@@ -65,18 +73,21 @@ export type ToolExample<Input = any, Output = any> = {
 export type CommandDefinition<
   Input extends RigSchema = RigSchema,
   Output extends RigSchema = RigSchema,
+  Env = unknown,
 > = {
   description: string;
   input: Input;
   output: Output;
   examples?: ToolExample<z.input<Input>, z.output<Output>>[];
-  run: (ctx: ToolRunContext<z.output<Input>>) => MaybePromise<z.input<Output>>;
+  run: (ctx: ToolRunContext<z.output<Input>, Env>) => MaybePromise<z.input<Output>>;
 };
 
-export type ToolDefinition = {
+export type ToolDefinition<Env extends RigSchema = RigSchema> = {
   name: string;
   description: string;
-  commands: Record<string, CommandDefinition>;
+  env?: Env;
+  setupDb?: (db: RigToolDatabase) => MaybePromise<void>;
+  commands: Record<string, CommandDefinition<RigSchema, RigSchema, z.output<Env>>>;
 };
 
 export type ToolFactory = (rig: RigToolKit) => ToolDefinition | Promise<ToolDefinition>;
@@ -98,6 +109,7 @@ export type RigToolKit = {
 export type LoadedTool = {
   name: string;
   path: string;
+  env: unknown;
   definition: ToolDefinition;
 };
 
