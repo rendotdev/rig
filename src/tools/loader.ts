@@ -3,12 +3,7 @@ import { ToolDiscoveryService, type DiscoveredTool } from "../registry/discover"
 import { RigError } from "../errors/RigError";
 import type { ConfigOptions } from "../config/config";
 import { createRigToolKit } from "./sdk";
-import {
-  CommandIds,
-  type CommandDefinition,
-  type LoadedTool,
-  type ToolDefinition,
-} from "./types";
+import { CommandIds, type CommandDefinition, type LoadedTool, type ToolDefinition } from "./types";
 
 export class ToolDefinitionValidator {
   validateToolName(name: string): void {
@@ -101,7 +96,6 @@ export class ToolDefinitionValidator {
       });
     }
   }
-
 
   private validateExamples(value: unknown, path: string): void {
     if (value === undefined) return;
