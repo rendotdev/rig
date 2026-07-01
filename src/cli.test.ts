@@ -56,6 +56,7 @@ class CliHarness {
     else process.env.RIG_AGENT_SYNC = "0";
     if (this.updateCheck) delete process.env.RIG_UPDATE_CHECK;
     else process.env.RIG_UPDATE_CHECK = "0";
+    process.env.RIG_LOG = "0";
     await new CliApplication().run(["node", "rig", ...args]);
     return this.output;
   }
