@@ -31,6 +31,10 @@ export class RigPaths {
     return join(this.homeDir, "rig");
   }
 
+  get legacyRigDir(): string {
+    return join(this.homeDir, ".rig");
+  }
+
   get configPath(): string {
     return join(this.rigDir, "rig.json");
   }
@@ -69,6 +73,10 @@ export class RigPaths {
 
   get defaultBaseRegistryDir(): string {
     return "~/rig/tools";
+  }
+
+  get legacyDefaultBaseRegistryDir(): string {
+    return "~/.rig/tools";
   }
 
   parentDir(pathValue: string): string {
