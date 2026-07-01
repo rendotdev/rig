@@ -63,6 +63,10 @@ export class RigPaths {
     return join(this.rigDir, "cron");
   }
 
+  get logsDir(): string {
+    return join(this.rigDir, ".logs");
+  }
+
   cronWorkerPath(name: string): string {
     return join(this.cronDir, `${name}.ts`);
   }

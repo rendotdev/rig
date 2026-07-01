@@ -13,5 +13,7 @@ export const RigAgentInstructions = `The \`rig\` CLI is installed on this machin
 - To remove an existing tool, run \`rig remove <tool>\`.
 - To list tool registries, run \`rig registry list\`.
 - To add a registry, run \`rig registry create [path]\` (defaults to current directory).
-- If a tool needs persistent state, define \`setupDb\` and use \`context.db\`; Rig stores that SQLite database beside the tool entry file as \`index.sqlite\`.
+- Use \`context.log\` for structured Pino logs with a default tool command prefix; Rig writes logs to \`~/rig/.logs\`, rolls files by size, and keeps seven days.
+- Use \`context.kv.set(key, value)\` and \`context.kv.get(key)\` for lightweight JSON state in \`kv.sqlite\` beside the tool entry file.
+- If a tool needs relational persistent state, define \`setupDb\` and use \`context.db\`; Rig stores that SQLite database beside the tool entry file as \`index.sqlite\`.
 `;

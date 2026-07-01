@@ -574,6 +574,8 @@ describe("coverage support", () => {
     expect(runtimeTypes).toContain("processEnv: NodeJS.ProcessEnv");
     expect(runtimeTypes).toContain("env?: Env");
     expect(runtimeTypes).toContain("setupDb?: (db: RigToolDatabase)");
+    expect(runtimeTypes).toContain("kv: RigToolKvStore");
+    expect(runtimeTypes).toContain("log: RigToolLogger");
     expect(runtimeTypes).toContain("shell: RigShell");
     await writeFile(join(registry, "tsconfig.json"), "{}\n", "utf8");
     await support.ensure([registry]);

@@ -7,6 +7,7 @@ import { ToolCreator } from "./create";
 import { ToolDatabaseService } from "./db";
 import { ToolHelpService } from "./help";
 import { ToolInspector } from "./inspect";
+import { ToolKvStoreService } from "./kv";
 import { ToolListService } from "./list";
 import { ToolRunner } from "./run";
 import { ToolTypecheckService } from "./typecheck";
@@ -29,6 +30,7 @@ class TestHomeStore {
 }
 
 class FakeSqliteStore {
+  readonly kv = new Map<string, string>();
   readonly migrations = new Map<number, { name: string; checksum: string }>();
   readonly notes: string[] = [];
   setupRuns = 0;
@@ -43,6 +45,10 @@ class FakeSqliteStatement {
   get(params?: unknown): unknown {
     if (this.sql.includes("from _rig_migrations")) {
       return this.store.migrations.get(Number(params)) ?? null;
+    }
+    if (this.sql.includes("from _rig_kv")) {
+      const valueJson = this.store.kv.get(String(params));
+      return valueJson === undefined ? null : { value_json: valueJson };
     }
     if (this.sql.includes("count(*) as count from setup_runs")) {
       return { count: this.store.setupRuns };
@@ -62,6 +68,10 @@ class FakeSqliteStatement {
     if (this.sql.includes("into setup_runs")) {
       this.store.setupRuns++;
       return { lastInsertRowid: this.store.setupRuns, changes: 1 };
+    }
+    if (this.sql.includes("into _rig_kv")) {
+      this.store.kv.set(String(record.key), String(record.valueJson));
+      return { lastInsertRowid: this.store.kv.size, changes: 1 };
     }
     if (this.sql.includes("into notes")) {
       this.store.notes.push(String(record.text));
@@ -543,6 +553,95 @@ export default (rig) => rig.defineTool({
       envelope: { data: { id: 2, setupRuns: 2, dbPath } },
     });
     expect(existsSync(dbPath)).toBe(true);
+  });
+
+  test("provides tool loggers and sqlite-backed key-value state", async () => {
+    new FakeSqliteEnvironment().install();
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "stateful");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(
+      join(toolDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "stateful",
+  description: "KV and logger test tool.",
+  commands: {
+    write: rig.defineCommand({
+      description: "Write lightweight state.",
+      input: rig.z.object({ key: rig.z.string(), value: rig.z.string() }),
+      output: rig.z.object({ previous: rig.z.string().optional(), current: rig.z.string(), kvPath: rig.z.string() }),
+      run: async (context) => {
+        const previous = context.kv.get(context.input.key);
+        context.kv.set(context.input.key, context.input.value);
+        context.log.info({ key: context.input.key }, "Stored key-value state.");
+        return {
+          previous,
+          current: context.kv.get(context.input.key),
+          kvPath: context.kv.path,
+        };
+      },
+    }),
+    bad: rig.defineCommand({
+      description: "Reject bad state.",
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async (context) => {
+        context.kv.set("bad", undefined);
+        return { ok: true };
+      },
+    }),
+  },
+});
+`,
+      "utf8",
+    );
+
+    const runner = new ToolRunner({ homeDir: home });
+    const first = await runner.run("stateful", "write", {
+      homeDir: home,
+      args: ["key=name", "value=one"],
+    });
+    const second = await runner.run("stateful", "write", {
+      homeDir: home,
+      args: ["key=name", "value=two"],
+    });
+    const bad = await runner.run("stateful", "bad", { homeDir: home });
+    const kvPath = join(toolDir, "kv.sqlite");
+
+    expect(new ToolKvStoreService().kvPathForToolPath(join(toolDir, "index.rig.ts"))).toBe(kvPath);
+    expect(first).toMatchObject({
+      exitCode: 0,
+      envelope: { data: { current: "one", kvPath } },
+    });
+    expect(second).toMatchObject({
+      exitCode: 0,
+      envelope: { data: { previous: "one", current: "two", kvPath } },
+    });
+    expect(bad).toMatchObject({
+      exitCode: 1,
+      envelope: { errors: [{ code: "INPUT_ERROR" }] },
+    });
+    expect(existsSync(kvPath)).toBe(true);
+
+    const logOutput = await readFile(join(home, "rig", ".logs", "rig.log"), "utf8");
+    expect(logOutput).toContain('"prefix":"tool:stateful.write"');
+    expect(logOutput).toContain("Stored key-value state.");
+
+    const kv = await new ToolKvStoreService().setup({
+      path: join(toolDir, "index.rig.ts"),
+    } as never);
+    expect(() => kv.get("")).toThrow("context.kv keys must be non-empty strings.");
+    (kv as unknown as { close(): void }).close();
+
+    new FakeSqliteEnvironment().uninstall();
+    const unavailable = await new ToolKvStoreService().setup({
+      path: join(home, "unavailable", "index.rig.ts"),
+    } as never);
+    expect(unavailable.path).toBe(join(home, "unavailable", "kv.sqlite"));
+    expect(() => unavailable.get("key")).toThrow("context.kv requires the Bun SQLite runtime");
+    expect(() => unavailable.set("key", "value")).toThrow(
+      "context.kv requires the Bun SQLite runtime",
+    );
   });
 
   test("returns changed migration errors as envelopes", async () => {
