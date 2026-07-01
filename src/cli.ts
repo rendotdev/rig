@@ -7,6 +7,7 @@ import type { Command } from "commander";
 import type { RigDirectoryMigrationResult } from "./config/migration";
 import type { PathOptions } from "./config/paths";
 import { RigError, RigErrors } from "./errors/RigError";
+import { RigLoggerFactory } from "./runtime/logger";
 import { RigPackageRoot } from "./runtime/package-root";
 
 export { RigCronWorker } from "./tools/cron";
@@ -463,6 +464,9 @@ export class CliApplication {
     const registries = configStore.registryEntries(config);
     const currentVersion = this.version();
 
+    new RigLoggerFactory(options)
+      .app("cli")
+      .info({ version: currentVersion, tools: tools.length }, "Default status rendered.");
     this.printMigrationNotice(configStore.migrationResult());
     console.log("Rig is ready.\n");
     console.log(`Version:       ${currentVersion}`);
@@ -504,6 +508,9 @@ export class CliApplication {
     const registries = configStore.registryEntries(config);
     const tools = await new ToolDiscoveryService(options).discover();
 
+    new RigLoggerFactory(options)
+      .app("doctor")
+      .info({ registries: registries.length, tools: tools.length }, "Doctor check completed.");
     console.log("Rig doctor\n");
     console.log(`Config:        OK ${paths.configPath}`);
     console.log(`Runtime SDK:   OK ${paths.runtimeSdkPath}`);
