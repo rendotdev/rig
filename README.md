@@ -10,7 +10,7 @@
 
 rig is *your* deterministic CLI for *your* AI agents.
 
-It lets agents, and you, turn deterministic workflows into typed CLI commands. Each command has explicit input and output schemas, so agents can discover, inspect, and run tools predictably and very easily.
+It lets agents, and you, turn deterministic workflows into type-safe CLI commands. Each command has explicit input and output schemas, so agents can discover, inspect, and run tools predictably and easily.
 
 If you keep asking agents to repeat the same shell commands, MCP calls, browser steps, API calls, or CLI pipelines, rig creates a foundation for those workflows that you can continue to iterate on over time as things change.
 
