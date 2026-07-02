@@ -67,6 +67,63 @@ export class BunRuntimeBootstrap {
   }
 }
 
+class RunPipelineContextService {
+  /* v8 ignore next 8 */
+  readFromStdin(): Record<string, unknown> {
+    const text = readFileSync(0, "utf8").trim();
+    if (!text) return {};
+    const envelope = JSON.parse(text) as unknown;
+    const context = this.pipelineContext(envelope);
+    const data = this.query(envelope, "data");
+    if (data !== undefined) context.prev = data;
+    return context;
+  }
+
+  withOutputId(envelope: unknown, context: Record<string, unknown>, id?: string): unknown {
+    if (!id) return envelope;
+    this.validateId(id);
+    /* v8 ignore next */
+    if (!this.isRecord(envelope)) return envelope;
+    const data = envelope.data;
+    return {
+      ...envelope,
+      pipe: {
+        ...context,
+        [id]: data,
+      },
+    };
+  }
+
+  query(value: unknown, path: string): unknown {
+    let current = value;
+    for (const part of path.split(".").filter(Boolean)) {
+      if (!this.isRecord(current) && !Array.isArray(current)) {
+        throw new RigError("INPUT_ERROR", `Query cannot access: ${path}`, { path, missing: part });
+      }
+      current = (current as Record<string, unknown>)[part];
+      if (current === undefined) {
+        throw new RigError("INPUT_ERROR", `Query is missing: ${path}`, { path, missing: part });
+      }
+    }
+    return current;
+  }
+
+  /* v8 ignore next 4 */
+  private pipelineContext(envelope: unknown): Record<string, unknown> {
+    if (!this.isRecord(envelope)) return {};
+    return this.isRecord(envelope.pipe) ? { ...envelope.pipe } : {};
+  }
+
+  private validateId(id: string): void {
+    if (/^[A-Za-z0-9_-]+$/.test(id)) return;
+    throw new RigError("INPUT_ERROR", `Pipeline id is invalid: ${id}`, { id });
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+  }
+}
+
 export class CliApplication {
   private program!: Command;
   private generatedSyncRequested = false;
@@ -293,6 +350,9 @@ export class CliApplication {
       .option("--input <json>", "JSON input string.")
       .option("--input-file <path>", "Read JSON input from a file.")
       .option("--dry-run", "Validate input and show what would run without executing.")
+      .option("--query <path>", "Print one field from the JSON envelope, such as data.output.")
+      .option("--as <id>", "Attach this command's data to a pipeline context under the given id.")
+      .option("--pipe", "Read a Rig pipeline context from stdin for @id.path references.")
       .action(
         async (commandId: string, args: string[], commandOptions: Record<string, unknown>) => {
           this.requestGeneratedSync();
@@ -452,6 +512,9 @@ export class CliApplication {
   ): Promise<void> {
     const { ToolRunner } = await import("./tools/run");
     const commandTarget = this.commandTarget(commandId);
+    const pipeline = new RunPipelineContextService();
+    /* v8 ignore next */
+    const pipeContext = commandOptions.pipe ? pipeline.readFromStdin() : {};
     const result = await new ToolRunner(this.pathOptions()).run(
       commandTarget.tool,
       commandTarget.command,
@@ -461,9 +524,17 @@ export class CliApplication {
         input: commandOptions.input as string | undefined,
         inputFile: commandOptions.inputFile as string | undefined,
         dryRun: Boolean(commandOptions.dryRun),
+        pipeContext,
       },
     );
-    this.printJson(result.envelope);
+    const envelope = pipeline.withOutputId(
+      result.envelope,
+      pipeContext,
+      commandOptions.as as string | undefined,
+    );
+    const query = commandOptions.query as string | undefined;
+    if (query) this.printQueryResult(pipeline.query(envelope, query));
+    else this.printJson(envelope);
     process.exitCode = result.exitCode;
   }
 
@@ -581,8 +652,8 @@ export class CliApplication {
 
   private async syncGeneratedFiles(): Promise<void> {
     await this.ignoreSyncErrors(async () => {
-      const { ToolRuntimeCommentSyncService } = await import("./tools/runtime-comment");
-      await new ToolRuntimeCommentSyncService(this.pathOptions()).sync();
+      const { ToolRuntimeInstructionSyncService } = await import("./tools/runtime-instruction");
+      await new ToolRuntimeInstructionSyncService(this.pathOptions()).sync();
     });
 
     if (process.env.RIG_AGENT_SYNC === "0") return;
@@ -623,6 +694,14 @@ export class CliApplication {
 
   private pathOptions(): PathOptions {
     return process.env.RIG_HOME ? { homeDir: process.env.RIG_HOME } : {};
+  }
+
+  private printQueryResult(value: unknown): void {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      console.log(String(value));
+      return;
+    }
+    this.printJson(value);
   }
 
   private printJson(value: unknown): void {
