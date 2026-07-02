@@ -28,11 +28,14 @@ Rig tool runtime:
 - \`rig.defineTool(definition)\` defines the tool.
 - \`rig.defineCommand(definition)\` defines one command with \`{ description, input, output, run }\`.
 - Use \`rig.z.object({ ... })\` for input/output schemas.
+- Tools run under Bun with fallback auto-install enabled, so tool files can import npm packages; add explicit package versions when reproducibility matters.
 - \`rig.run({ command: "tool.command", input })\` runs another registered Rig command and returns its data.
 - \`rig.$\` runs a Bun Shell tagged template command with escaped interpolations. Docs: https://bun.com/docs/runtime/shell
 - \`rig.args()\` builds argv arrays with \`.raw()\`, \`.flag()\`, \`.value()\`, \`.values()\`, and \`.toArray()\`.
 - \`rig.paths.home()\`, \`rig.paths.resolve(cwd, path)\`, \`rig.paths.ensureParent(path)\`, and \`rig.paths.size(path)\` cover common path work.
-- Add \`env: rig.z.object({ KEY: rig.z.string() })\` to validate a \`.env\` file beside the tool entry file and receive parsed values on \`context.env\`.
+- Add \`env: rig.z.object({ KEY: rig.z.string() })\` to validate local secrets or settings and receive parsed values on \`context.env\`.
+- Run \`rig env <tool> KEY=VALUE\` to write the tool \`.env\` file; run \`rig env <tool> remove KEY\` to remove a value.
+- To add another registry for tool files, run \`rig registry create [path]\` (defaults to current directory).
 
 Tool logging and key-value state:
 - Use \`context.log.info(...)\`, \`context.log.warn(...)\`, or another Pino-style method for structured logs with a default \`tool:<tool>.<command>\` prefix.

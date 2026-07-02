@@ -103,6 +103,7 @@ export class CliApplication {
     this.configureCreateCommand();
     this.configureEditCommand();
     this.configureRemoveCommand();
+    this.configureEnvCommand();
     this.configureRunCommand();
     this.configureCronCommands();
     this.configureTypecheckCommand();
@@ -264,6 +265,22 @@ export class CliApplication {
         const result = await new ToolRemover(this.pathOptions()).remove(name);
         console.log(`Removed tool ${result.name}`);
         console.log(`Tool directory: ${result.toolDir}`);
+      });
+  }
+
+  private configureEnvCommand(): void {
+    this.program
+      .command("env")
+      .argument("<tool>", "Tool name.")
+      .argument(
+        "[assignments...]",
+        "Use KEY=VALUE to set values, or remove KEY [KEY...] to remove values.",
+      )
+      .description("Show, write, or remove tool .env values using its env schema.")
+      .action(async (target: string, assignments: string[]) => {
+        this.requestGeneratedSync();
+        const { ToolEnvService } = await import("./tools/env");
+        this.printJson(await new ToolEnvService(this.pathOptions()).configure(target, assignments));
       });
   }
 

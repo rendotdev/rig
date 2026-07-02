@@ -1,19 +1,15 @@
 // Keep in sync with README.md "Agent?" section
-export const RigAgentInstructions = `The \`rig\` CLI is installed on this machine. It allows you to write, run and own local tools and scripts in a typed runtime.
+export const RigAgentInstructions = `The \`rig\` CLI is installed on this machine. It lets agents discover, run, and create local typed tools.
 
-- To sync all tools to AGENTS.md and CLAUDE.md, run \`rig\` (or \`rig init\`).
-- To discover available tools, run \`rig list\`.
-- To learn about a tool's usage, run \`rig help <tool>\`.
-- To run a tool, use \`rig run <tool>.<command> [args]\`.
-- Tools run under Bun with fallback auto-install enabled, so tool files can import npm packages; add explicit package versions when reproducibility matters.
-- To schedule a tool command, use \`rig cron add <name> <tool>.<command> <schedule> --input '<json>'\`; use \`rig cron list\`, \`rig cron run <name>\`, and \`rig cron remove <name>\` to manage scheduled runs.
-- If a tool needs local secrets or settings, put them in the tool folder's \`.env\`, add an \`env\` Zod schema to the tool definition, and read validated values from \`context.env\`.
-- To create a new tool, run \`rig create <tool>\`.
-- To edit an existing tool, run \`rig edit <tool>\` and open the printed file path.
-- To remove an existing tool, run \`rig remove <tool>\`.
-- To list tool registries, run \`rig registry list\`.
-- To add a registry, run \`rig registry create [path]\` (defaults to current directory).
-- Use \`context.log\` for structured Pino logs with a default tool command prefix; Rig writes logs to \`~/rig/.logs\`, rolls files by size, and keeps seven days.
-- Use \`context.kv.set(key, value)\` and \`context.kv.get(key)\` for lightweight JSON state in \`kv.sqlite\` beside the tool entry file.
-- If a tool needs relational persistent state, define \`setupDb\` and use \`context.db\`; Rig stores that SQLite database beside the tool entry file as \`index.sqlite\`.
+- Run \`rig\` (or \`rig init\`) to set up or sync rig. This also updates detected AGENTS.md and CLAUDE.md files with available rig tools.
+- Run \`rig create <tool>\` when the user asks you to turn a repeatable workflow into a reusable tool.
+- Run \`rig edit <tool>\` to print the tool file path for editing.
+- Run \`rig remove <tool>\` to remove a local tool.
+- Run \`rig cron --help\` to schedule and manage tool commands.
+- Run \`rig typecheck <tool>\` to validate a tool's TypeScript and runtime types.
+- Run \`rig env <tool> KEY=VALUE\` to configure tool secrets/settings; run \`rig env <tool> remove KEY\` to remove them.
+- Run \`rig list\` to discover tools and available \`rig run ...\` commands.
+- Run \`rig help <tool>\` or \`rig help <tool>.<command>\` for usage, inputs, and outputs.
+- Run \`rig run <tool>.<command> [args]\` to execute a tool command.
+- Run \`rig --help\` for other Rig CLI commands.
 `;

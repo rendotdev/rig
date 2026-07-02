@@ -134,9 +134,19 @@ describe("coverage support", () => {
     await mkdir(join(home, ".claude"), { recursive: true });
     await mkdir(join(home, ".pi", "agent"), { recursive: true });
     await mkdir(join(home, ".config", "opencode"), { recursive: true });
-    await mkdir(join(home, "wks"), { recursive: true });
+    await mkdir(join(home, "wks", ".git"), { recursive: true });
     await mkdir(packageNested, { recursive: true });
     await writeFile(join(project, "AGENTS.md"), "# Root agent notes\n", "utf8");
+    await writeFile(
+      join(project, "CLAUDE.md"),
+      "# Ignored Claude notes\n<!-- rig:ignore -->\n",
+      "utf8",
+    );
+    await writeFile(
+      join(home, ".claude", "CLAUDE.md"),
+      "# Ignored home Claude\n<!-- rig:ignore -->\n",
+      "utf8",
+    );
     await writeFile(join(nested, "CLAUDE.md"), "# Nested Claude notes\n", "utf8");
     await writeFile(join(nested, "package.json"), "{}\n", "utf8");
     await writeFile(join(packageProject, "package.json"), "{}\n", "utf8");
@@ -157,27 +167,46 @@ describe("coverage support", () => {
         join(home, "missing"),
       ),
     ).resolves.toBe(join(home, "missing"));
+    await expect(
+      (service as unknown as { isIgnored(path: string): Promise<boolean> }).isIgnored(
+        join(home, "missing"),
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      (service as unknown as { isIgnored(path: string): Promise<boolean> }).isIgnored(
+        join(project, "CLAUDE.md"),
+      ),
+    ).resolves.toBe(true);
     expect(
       (
         service as unknown as { instructionScope(path: string): "all" | "visible" }
       ).instructionScope("/tmp/global-agent.md"),
     ).toBe("visible");
-    expect((await service.discoverTargets()).map((target) => target.path)).toEqual([
-      join(home, ".claude", "CLAUDE.md"),
+    const targets = await service.discoverTargets();
+    expect(targets.map((target) => target.path)).toEqual([
       globalAgentLink,
       join(project, "AGENTS.md"),
       join(nested, ".claude", "CLAUDE.md"),
       join(nested, "CLAUDE.md"),
     ]);
+    expect(targets.find((target) => target.path === globalAgentLink)?.scope).toBe("all");
 
     const first = await service.sync();
     expect(first).toMatchObject({ skipped: false });
     expect(first.targets.every((target) => target.changed)).toBe(true);
     expect(await readFile(join(project, "AGENTS.md"), "utf8")).toContain("No Rig tools found.");
+    expect(await readFile(join(project, "CLAUDE.md"), "utf8")).not.toContain(
+      "<!-- rig:agent-instructions:start -->",
+    );
+    expect(await readFile(join(home, ".claude", "CLAUDE.md"), "utf8")).not.toContain(
+      "<!-- rig:agent-instructions:start -->",
+    );
     expect(await readFile(join(nested, ".claude", "CLAUDE.md"), "utf8")).toContain(
       "<!-- rig:agent-instructions:start -->",
     );
-    expect(await readFile(globalAgentSource, "utf8")).toContain("sample.example text=example #");
+    expect(await readFile(globalAgentSource, "utf8")).toContain(
+      "rig run sample.example text=example #",
+    );
 
     const second = await service.sync();
     expect(second.targets.every((target) => target.changed)).toBe(false);

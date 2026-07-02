@@ -27,6 +27,7 @@ export type AgentInstructionSyncResult = {
 
 const StartMarker = "<!-- rig:agent-instructions:start -->";
 const EndMarker = "<!-- rig:agent-instructions:end -->";
+const IgnoreMarker = "<!-- rig:ignore -->";
 
 export const AgentInstructionSyncLocations = {
   projectFiles: ["AGENTS.md", "CLAUDE.md"],
@@ -124,7 +125,9 @@ ${EndMarker}`;
     path: string,
     scope: AgentInstructionTarget["scope"],
   ): Promise<void> {
-    if (await this.isFile(path)) await this.setTarget(targets, path, true, scope);
+    if ((await this.isFile(path)) && !(await this.isIgnored(path))) {
+      await this.setTarget(targets, path, true, scope);
+    }
   }
 
   private async addClaudeDirectoryTarget(
@@ -134,6 +137,7 @@ ${EndMarker}`;
   ): Promise<void> {
     const path = join(directory, "CLAUDE.md");
     const fileExists = await this.isFile(path);
+    if (fileExists && (await this.isIgnored(path))) return;
     const directoryExists = fileExists ? false : await this.isDirectory(directory);
     if (fileExists || directoryExists) await this.setTarget(targets, path, fileExists, scope);
   }
@@ -210,7 +214,7 @@ ${EndMarker}`;
   ): Promise<void> {
     const key = existed ? await this.realPath(path) : path;
     const current = targets.get(key);
-    const nextScope = current?.scope === "visible" || scope === "visible" ? "visible" : "all";
+    const nextScope = current?.scope === "all" || scope === "all" ? "all" : "visible";
     if (!current || path < current.path) targets.set(key, { path, existed, scope: nextScope });
     else current.scope = nextScope;
   }
@@ -275,6 +279,14 @@ ${EndMarker}`;
 
   private escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  private async isIgnored(path: string): Promise<boolean> {
+    try {
+      return (await this.readText(path)).includes(IgnoreMarker);
+    } catch {
+      return false;
+    }
   }
 
   private async realPath(path: string): Promise<string> {
