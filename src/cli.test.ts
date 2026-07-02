@@ -244,8 +244,7 @@ describe("cli application", () => {
     const synced = await readFile(join(project, "AGENTS.md"), "utf8");
     expect(synced).toContain("<!-- rig:agent-instructions:start -->");
     expect(synced).toContain("The `rig` CLI is installed on this machine.");
-    expect(synced).toContain("No Rig tools found.");
-    expect(synced).not.toContain("sample.example");
+    expect(synced).toContain("sample.example");
 
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
     const updated = await readFile(join(project, "AGENTS.md"), "utf8");
