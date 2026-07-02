@@ -106,7 +106,6 @@ export class ToolDiscoveryService {
   }
   /* v8 ignore stop */
 
-
   private async discoverRegistry(entry: RegistryEntry): Promise<DiscoveredTool[]> {
     if (!existsSync(entry.path)) return [];
     const children = await readdir(entry.path, { withFileTypes: true });
