@@ -53,7 +53,7 @@ class ReleaseOptionsParser {
       "  --dry-run       Print the planned release without changing files.",
       "  --no-push       Commit and tag locally, but do not push or start CI.",
       "  --no-tag        Commit the version bump without creating a git tag or starting publish.yml.",
-      "  --skip-checks   Skip bun run test and bun run build.",
+      "  --skip-checks   Skip bun run check and bun run build.",
       "",
       "Examples:",
       "  npm run release:patch",
@@ -230,7 +230,7 @@ class ReleaseCommand {
   }
 
   private runChecks(): void {
-    this.runner.run(["bun", "run", "test"]);
+    this.runner.run(["bun", "run", "check"]);
     this.runner.run(["bun", "run", "build"]);
   }
 
