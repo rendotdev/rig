@@ -12,17 +12,21 @@ rig is _your_ deterministic CLI for _your_ AI agents.
 
 It lets agents, and you, turn deterministic workflows into type-safe CLI commands. Each command has explicit input and output schemas, so agents can discover, inspect, and run tools predictably and easily.
 
-If you keep asking agents to repeat the same shell commands, API or MCP calls, browser steps, rig essentially creates a foundation for those workflows that you can continue to build upon over time as things change.
+If you keep asking agents to repeat the same shell commands, API or MCP calls, or browser steps, rig creates a foundation for those workflows that you can continue to build upon over time as things change.
 
-rig also considers your tools context. So, every time rig runs, it keeps `AGENTS.md` and `CLAUDE.md` files updated with your current list of commands, so agents always know the tools they can use during sessions.
+rig also treats your tools as first-class context. Every time rig runs, it keeps `AGENTS.md` and `CLAUDE.md` files updated with your current list of commands. That way, your agents always know the tools they can use during sessions.
 
 If you are not sure why you would want rig, here are some of my personal use cases:
 
-- Monitor PR status in a loop.
-- Pull data from the Jira, Slack, and GitHub CLIs, then feed it to an LLM to summarize my latest work for standup.
-- Generate polished HTML docs using my employer's colors with Tailwind Typography from a Markdown string, convert them to a clean PDF, and drop the PDF in my Downloads folder.
+- I have a tool that pulls data from Jira/Slack/GitHub, then feeds it to an LLM to summarize my latest work for standup.
+- I have a tool that takes Markdown/HTML and generates a polished PDF with my employer's colors and typography, then drops it in my Downloads folder.
+- I have a tool that manipulates images (converts, resizes, compresses, removes metadata).
+- I have a tool that converts PDF to text.
+- I have a tool that makes a fetch call and extracts the readable text from a web page.
+- ...
+  _-> I'll keep adding more of my tools as I keep automating my workflows..._
 
-_-> I'll keep adding more of my tools as I keep automating my workflows..._
+rig also has built-in features for tool-scoped shell execution, cron, environment variable management, key-value storage, SQLite databases, logging, command chaining, and more.
 
 ## Install
 
@@ -41,7 +45,7 @@ Read the README from this repo: `https://github.com/rendotdev/rig`.
 
 Then, install rig globally with `npm install -g @rendotdev/rig`, then run `rig` to initialize it.
 
-Review the conversations available to you from the history of the last two weeks. Look for deterministic, repeatable workflows that could be automated as rig tools, especially workflows that involve shell commands, local files, browser steps, MCPs, API calls, or CLI pipelines.
+Review the conversations available to you from the threads of the last two weeks with the user. Look for deterministic, repeatable workflows that could be automated as rig tools, especially workflows that involve shell commands, local files, browser steps, API calls, MCPs, or CLI pipelines.
 
 List the best candidates with this information:
 
