@@ -8,7 +8,7 @@
 
 > There are many CLIs out there; this one is yours (but it's in alpha).
 
-rig is *your* deterministic CLI for *your* AI agents.
+rig is _your_ deterministic CLI for _your_ AI agents.
 
 It lets agents, and you, turn deterministic workflows into type-safe CLI commands. Each command has explicit input and output schemas, so agents can discover, inspect, and run tools predictably and easily.
 
