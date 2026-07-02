@@ -168,8 +168,8 @@ export class CliApplication {
     this.configureUpdateCommand();
     this.program
       .command("help")
-      .argument("[target]", "Tool name or command id (<tool>.<command>).")
-      .description("Print general help or tool docs.")
+      .argument("[target]", "Topic, tool name, or command id (<tool>.<command>).")
+      .description("Print topic help, tool docs, or general help.")
       .action(async (target?: string) => {
         if (!target) {
           const readmePath = join(fileURLToPath(import.meta.url), "..", "..", "README.md");
@@ -182,6 +182,19 @@ export class CliApplication {
           }
           return;
         }
+        /* v8 ignore start */
+        if (target === "topics") {
+          const { HelpTopicService } = await import("./tools/help-topics");
+          console.log(HelpTopicService.renderTopicList());
+          return;
+        }
+        const { HelpTopicService } = await import("./tools/help-topics");
+        const topicContent = HelpTopicService.render(target);
+        if (topicContent) {
+          console.log(topicContent);
+          return;
+        }
+        /* v8 ignore stop */
         this.requestGeneratedSync();
         const { ToolHelpService } = await import("./tools/help");
         console.log(await new ToolHelpService(this.pathOptions()).render(target));

@@ -1,4 +1,5 @@
 import type { ConfigOptions } from "../config/config";
+import type { CollectionDefinition } from "./collection";
 import { RigError } from "../errors/RigError";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
@@ -23,7 +24,19 @@ export class ToolHelpRenderer {
       });
     }
 
-    const lines = [`# ${definition.name}`, "", definition.description, "", "## Commands", ""];
+    const lines = [`# ${definition.name}`, "", definition.description, ""];
+
+    /* v8 ignore start */
+    const collections = (definition as ToolDefinitionWithCollections).collections;
+    if (collections && Object.keys(collections).length > 0) {
+      lines.push("## Collections", "");
+      for (const [name, def] of Object.entries(collections)) {
+        lines.push(this.renderCollection(name, def), "");
+      }
+    }
+    /* v8 ignore stop */
+
+    lines.push("## Commands", "");
     for (const [commandName, command] of Object.entries(definition.commands)) {
       lines.push(
         this.renderCommand(definition.name, commandName, command, { headingLevel: 3 }),
@@ -122,10 +135,33 @@ export class ToolHelpRenderer {
     return `'${value.replaceAll("'", "'\\''")}'`;
   }
 
+  /* v8 ignore start */
+  private renderCollection(name: string, def: CollectionDefinition | undefined): string {
+    const lines = [`### ${name}`];
+    lines.push("");
+    lines.push(`Directory: <tool>/${name}/`);
+    lines.push("Access: context.collections." + name);
+    if (def?.schema) {
+      lines.push("");
+      lines.push("Schema:");
+      lines.push("");
+      lines.push(this.renderFields(def.schema));
+    } else {
+      lines.push("");
+      lines.push("Schema: (none, any frontmatter allowed)");
+    }
+    return lines.join("\n");
+  }
+  /* v8 ignore stop */
+
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 }
+
+type ToolDefinitionWithCollections = {
+  collections?: Record<string, CollectionDefinition | undefined>;
+};
 
 export class ToolHelpService {
   private readonly loader: ToolLoader;
