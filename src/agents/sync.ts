@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { type ConfigOptions } from "../config/config";
@@ -60,6 +60,13 @@ export class AgentInstructionSyncService {
     const targets = await this.discoverTargets();
     if (targets.length === 0) return { skipped: false, targets: [] };
 
+    if (this.canSkipSync(targets)) {
+      return {
+        skipped: false,
+        targets: targets.map((target) => ({ ...target, changed: false })),
+      };
+    }
+
     const updates = await Promise.all(
       targets.map(async (target) => {
         const block = this.renderBlock(await this.renderToolList(target));
@@ -70,7 +77,76 @@ export class AgentInstructionSyncService {
       }),
     );
 
+    this.writeSyncStamp();
     return { skipped: false, targets: updates };
+  }
+
+  private get syncStampPath(): string {
+    return join(this.paths.rigDir, ".agent-sync-stamp");
+  }
+
+  private canSkipSync(targets: AgentInstructionTarget[]): boolean {
+    const stampPath = this.syncStampPath;
+    if (!existsSync(stampPath)) return false;
+
+    const lastSync = parseInt(readFileSync(stampPath, "utf-8").trim(), 10) || 0;
+    if (lastSync === 0) return false;
+
+    if (this.toolsetFingerprint() > lastSync) return false;
+
+    return this.areTargetsUnmodified(targets, lastSync);
+  }
+
+  private areTargetsUnmodified(targets: AgentInstructionTarget[], lastSync: number): boolean {
+    for (const target of targets) {
+      if (!target.existed) return false;
+      try {
+        const mtime = statSync(target.path).mtimeMs;
+        if (mtime > lastSync) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private toolsetFingerprint(): number {
+    const configPath = this.paths.configPath;
+    if (!existsSync(configPath)) return Date.now();
+
+    let newest = 0;
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+      const dirs: string[] = [
+        this.paths.expandTilde(config.baseRegistryDir ?? ""),
+        ...(config.customRegistries ?? []),
+      ].filter(Boolean);
+
+      for (const dir of dirs) {
+        if (!existsSync(dir)) continue;
+        for (const entry of readdirSync(dir)) {
+          const toolFile = join(dir, entry, "index.rig.ts");
+          if (existsSync(toolFile)) {
+            const mtime = statSync(toolFile).mtimeMs;
+            if (mtime > newest) newest = mtime;
+          }
+        }
+      }
+    } catch {
+      return Date.now();
+    }
+
+    return newest;
+  }
+
+  private writeSyncStamp(): void {
+    try {
+      const dir = dirname(this.syncStampPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(this.syncStampPath, String(Date.now()));
+    } catch {
+      // non-critical
+    }
   }
 
   async discoverTargets(): Promise<AgentInstructionTarget[]> {
