@@ -21,6 +21,7 @@ export type RunCommandOptions = ConfigOptions & {
   inputFile?: string;
   args?: string[];
   dryRun?: boolean;
+  pipeContext?: Record<string, unknown>;
 };
 
 export type RunCommandResult = {
@@ -33,7 +34,8 @@ class RunInputReader {
     command: CommandDefinition,
     options: RunCommandOptions,
   ): Promise<{ value: unknown; source: string }> {
-    const args = options.args ?? [];
+    const resolver = new PipelineReferenceResolver(options.pipeContext ?? {});
+    const args = resolver.interpolateStringArray(options.args ?? []);
     const inputSources = [
       Boolean(options.input),
       Boolean(options.inputFile),
@@ -50,11 +52,14 @@ class RunInputReader {
         typeof Bun !== "undefined"
           ? await Bun.file(options.inputFile).json()
           : JSON.parse(await readFile(options.inputFile, "utf8"));
-      return { value, source: `--input-file ${options.inputFile}` };
+      return { value: resolver.interpolate(value), source: `--input-file ${options.inputFile}` };
     }
 
     if (options.input) {
-      return { value: JSON.parse(options.input), source: `--input '${options.input}'` };
+      return {
+        value: resolver.interpolate(JSON.parse(options.input)),
+        source: `--input '${options.input}'`,
+      };
     }
 
     if (args.length > 0) {
@@ -63,6 +68,64 @@ class RunInputReader {
     }
 
     return { value: {}, source: "--input '{}'" };
+  }
+}
+
+class PipelineReferenceResolver {
+  constructor(private readonly context: Record<string, unknown>) {}
+
+  interpolateStringArray(values: string[]): string[] {
+    return values.map((value) => String(this.interpolateString(value)));
+  }
+
+  interpolate(value: unknown): unknown {
+    if (typeof value === "string") return this.interpolateString(value);
+    if (Array.isArray(value)) return value.map((item) => this.interpolate(item));
+    if (this.isRecord(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, this.interpolate(item)]),
+      );
+    }
+    return value;
+  }
+
+  private interpolateString(value: string): unknown {
+    const exact = value.match(/^@([A-Za-z0-9_-]+)(?:\.([A-Za-z0-9_.-]+))?$/);
+    if (exact) return this.lookup(exact[1], exact[2]);
+    return value.replace(/@([A-Za-z0-9_-]+)(?:\.([A-Za-z0-9_.-]+))?/g, (_match, id, path) =>
+      String(this.lookup(id, path)),
+    );
+  }
+
+  private lookup(id: string, path?: string): unknown {
+    if (!(id in this.context)) {
+      throw new RigError("INPUT_ERROR", `Pipeline reference is unknown: @${id}`, {
+        reference: `@${id}`,
+        available: Object.keys(this.context),
+      });
+    }
+
+    let value = this.context[id];
+    for (const part of path?.split(".").filter(Boolean) ?? []) {
+      if (!this.isRecord(value) && !Array.isArray(value)) {
+        throw new RigError("INPUT_ERROR", `Pipeline reference cannot access: @${id}.${path}`, {
+          reference: `@${id}.${path}`,
+          missing: part,
+        });
+      }
+      value = (value as Record<string, unknown>)[part];
+      if (value === undefined) {
+        throw new RigError("INPUT_ERROR", `Pipeline reference is missing: @${id}.${path}`, {
+          reference: `@${id}.${path}`,
+          missing: part,
+        });
+      }
+    }
+    return value;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
   }
 }
 
