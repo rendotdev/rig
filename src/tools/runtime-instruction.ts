@@ -49,6 +49,17 @@ Tool SQLite database:
 - Rig stores the database beside the tool entry file as \`index.sqlite\` and runs \`setupDb\` before every command.
 - \`db\` is Bun SQLite with \`strict: true\`, WAL mode, and an extra \`db.migrate(version, name, sql)\` helper. Docs: https://bun.com/docs/runtime/sqlite
 
+Tool collections:
+- Add \`collections: { name: { schema: rig.z.object({ ... }) } }\` to the tool definition to declare document stores.
+- Each collection is a directory of \`.md\` files (beside the tool entry file) with validated YAML frontmatter and a markdown body.
+- Access via \`context.collections.<name>\` in command run functions.
+- API: \`.create({ id, data, body })\`, \`.getEntry(id)\`, \`.update(id, { data, body })\`, \`.upsert({ id, data, body })\`, \`.remove(id)\`
+- Query: \`.list({ where, sort, limit })\`, \`.search(query, { limit })\`, \`.count(where)\`, \`.getCollection(filterFn)\`, \`.clear()\`
+- A hidden \`.index.sqlite\` with FTS5 is auto-managed for instant full-text search and structured queries on frontmatter fields.
+- Files on disk are the source of truth; hand-edits are reconciled on next access.
+- Optional \`generateId: (data) => string\` derives the filename from entry data; otherwise pass \`id\` explicitly.
+- Schema-less collections (no \`schema\` key) are allowed; FTS still works, no validation on write.
+
 Command run context:
 - \`context.input\` is already validated by the input schema.
 - \`context.env\` is already validated by the tool env schema when defined.
@@ -58,6 +69,7 @@ Command run context:
 - \`context.kv\` is always available for lightweight JSON key-value state.
 - \`context.log\` is a structured Pino logger for this tool command.
 - \`context.rig\` is the toolkit (same as the factory \`rig\` arg, useful for nested tool calls).
+- \`context.collections\` provides handles for each declared collection (empty object if none defined).
 - Return a value that matches the output schema.
 `;
 

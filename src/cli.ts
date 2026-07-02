@@ -562,6 +562,13 @@ export class CliApplication {
     console.log(`Version:       ${currentVersion}`);
     console.log(`Config:        ${paths.configPath}`);
     console.log(`Base registry: ${registries[0]?.path}`);
+    const customRegistries = registries.filter((r) => r.kind === "custom");
+    if (customRegistries.length > 0) {
+      console.log("Custom registries:");
+      for (const reg of customRegistries) {
+        console.log(`  ${reg.path}`);
+      }
+    }
     console.log(`Tools found:   ${tools.length}`);
     console.log("\nNext steps:");
     console.log("  rig list");

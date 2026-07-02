@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { z } from "zod";
+import type { CollectionDefinition, CollectionHandle } from "./collection";
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -76,7 +77,7 @@ export type RigToolLogger = {
   child(bindings: Record<string, unknown>): RigToolLogger;
 };
 
-export type ToolRunContext<Input, Env = unknown> = {
+export type ToolRunContext<Input, Env = unknown, Collections = Record<string, CollectionHandle>> = {
   input: Input;
   env: Env;
   processEnv: NodeJS.ProcessEnv;
@@ -85,6 +86,7 @@ export type ToolRunContext<Input, Env = unknown> = {
   kv: RigToolKvStore;
   log: RigToolLogger;
   rig: RigToolKit;
+  collections: Collections;
 };
 
 export type ToolExample<Input = any, Output = any> = {
@@ -111,6 +113,7 @@ export type ToolDefinition<Env extends RigSchema = RigSchema> = {
   description: string;
   env?: Env;
   setupDb?: (db: RigToolDatabase) => MaybePromise<void>;
+  collections?: Record<string, CollectionDefinition>;
   commands: Record<string, CommandDefinition<RigSchema, RigSchema, z.output<Env>>>;
 };
 

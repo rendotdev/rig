@@ -4,6 +4,7 @@ import { RigError, RigErrors } from "../errors/RigError";
 import { EnvelopeFactory } from "../runtime/envelope";
 import { RigLoggerFactory } from "../runtime/logger";
 import { RigOutputTruncator } from "../runtime/truncation";
+import { ToolCollectionService, type CollectionHandle } from "./collection";
 import { ToolDatabaseService, UnavailableToolDatabaseFactory } from "./db";
 import { ToolKvStoreService } from "./kv";
 import { ToolLoader } from "./loader";
@@ -265,6 +266,7 @@ class DryRunPresenter {
 export class ToolRunner {
   private readonly databases = new ToolDatabaseService();
   private readonly kvStores = new ToolKvStoreService();
+  private readonly collections = new ToolCollectionService();
   private readonly loggerFactory: RigLoggerFactory;
   private readonly loader: ToolLoader;
   private readonly inputReader = new RunInputReader();
@@ -283,6 +285,7 @@ export class ToolRunner {
   ): Promise<RunCommandResult> {
     let db: RigToolDatabase | undefined;
     let kv: RigToolKvStore | undefined;
+    let collectionHandles: Record<string, CollectionHandle<any>> | undefined;
     const log = this.loggerFactory.tool(toolName, commandName);
     try {
       const { tool, command } = await this.loader.loadCommand(toolName, commandName);
@@ -315,6 +318,7 @@ export class ToolRunner {
       const rig = createRigToolKit(this.options);
       db = await this.databases.setup(tool);
       kv = await this.kvStores.setup(tool);
+      collectionHandles = await this.collections.setup(tool);
       log.info("Tool command started.");
       const data = await command.run({
         input: inputResult.data,
@@ -325,6 +329,7 @@ export class ToolRunner {
         kv,
         log,
         rig,
+        collections: collectionHandles ?? {},
       });
 
       const outputResult = command.output.safeParse(data);
@@ -355,6 +360,7 @@ export class ToolRunner {
         exitCode: 1,
       };
     } finally {
+      this.collections.close(collectionHandles);
       this.closeKv(kv);
       this.closeDatabase(db);
     }
