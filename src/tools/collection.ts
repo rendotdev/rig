@@ -738,7 +738,10 @@ export class CollectionHandleImpl<
 
     // Touch the index file so its mtime >= dir mtime for next skip check
     const idxPath = join(this.path, ".index.sqlite");
-    try { const now = new Date(); utimesSync(idxPath, now, now); } catch {}
+    try {
+      const now = new Date();
+      utimesSync(idxPath, now, now);
+    } catch {}
   }
   /* v8 ignore stop */
 
