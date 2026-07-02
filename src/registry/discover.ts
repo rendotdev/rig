@@ -86,7 +86,9 @@ export class ToolDiscoveryService {
   ): RegistryEntry[] {
     if (!visibleFromPath) return entries;
     const projectRoot = this.projectRootFor(visibleFromPath);
-    return entries.filter((entry) => this.pathContains(projectRoot, entry.path));
+    return entries.filter(
+      (entry) => entry.kind === "base" || this.pathContains(projectRoot, entry.path),
+    );
   }
 
   private visibilityStartDirectory(pathValue: string): string {
