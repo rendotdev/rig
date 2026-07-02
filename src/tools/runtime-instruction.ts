@@ -7,14 +7,14 @@ type BunFileApi = {
   write(path: string, content: string): Promise<number>;
 };
 
-export type ToolRuntimeCommentUpdate = {
+export type ToolRuntimeInstructionUpdate = {
   name: string;
   path: string;
   changed: boolean;
 };
 
-export type ToolRuntimeCommentSyncResult = {
-  tools: ToolRuntimeCommentUpdate[];
+export type ToolRuntimeInstructionSyncResult = {
+  tools: ToolRuntimeInstructionUpdate[];
 };
 
 const StartMarker = "// rig:runtime-reference:start";
@@ -28,7 +28,7 @@ Rig tool runtime:
 - \`rig.defineTool(definition)\` defines the tool.
 - \`rig.defineCommand(definition)\` defines one command with \`{ description, input, output, run }\`.
 - Use \`rig.z.object({ ... })\` for input/output schemas.
-- Tools run under Bun with fallback auto-install enabled, so tool files can import npm packages; add explicit package versions when reproducibility matters.
+- Tools run under Bun with fallback auto-install enabled, so tool files can import npm packages; add explicit package versions when reproducibility matters. Example: \`import sharp from "sharp@0.34.4";\`.
 - \`rig.run({ command: "tool.command", input })\` runs another registered Rig command and returns its data.
 - \`rig.$\` runs a Bun Shell tagged template command with escaped interpolations. Docs: https://bun.com/docs/runtime/shell
 - \`rig.args()\` builds argv arrays with \`.raw()\`, \`.flag()\`, \`.value()\`, \`.values()\`, and \`.toArray()\`.
@@ -37,9 +37,11 @@ Rig tool runtime:
 - Run \`rig env <tool> KEY=VALUE\` to write the tool \`.env\` file; run \`rig env <tool> remove KEY\` to remove a value.
 - To add another registry for tool files, run \`rig registry create [path]\` (defaults to current directory).
 
-Tool logging and key-value state:
+Tool logging:
 - Use \`context.log.info(...)\`, \`context.log.warn(...)\`, or another Pino-style method for structured logs with a default \`tool:<tool>.<command>\` prefix.
 - Rig writes app and tool logs to \`~/rig/.logs\`, rolls files by size, and keeps logs for seven days by default.
+
+Tool key-value state:
 - Use \`context.kv.set(key, value)\` and \`context.kv.get(key)\` for lightweight JSON state stored beside the tool entry file as \`kv.sqlite\`.
 
 Tool SQLite database:
@@ -59,14 +61,14 @@ Command run context:
 - Return a value that matches the output schema.
 `;
 
-export class ToolRuntimeCommentSyncService {
+export class ToolRuntimeInstructionSyncService {
   private readonly discovery: ToolDiscoveryService;
 
   constructor(options: ConfigOptions = {}) {
     this.discovery = new ToolDiscoveryService(options);
   }
 
-  async sync(): Promise<ToolRuntimeCommentSyncResult> {
+  async sync(): Promise<ToolRuntimeInstructionSyncResult> {
     const tools = await this.discovery.discover();
     const updates = await Promise.all(
       tools.map(async (tool) => ({

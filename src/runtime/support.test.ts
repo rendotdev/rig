@@ -24,7 +24,7 @@ import { ToolHelpRenderer, ToolHelpService } from "../tools/help";
 import { ToolInspector } from "../tools/inspect";
 import { ToolDefinitionValidator, ToolLoader } from "../tools/loader";
 import { ToolRunner } from "../tools/run";
-import { ToolRuntimeCommentSyncService } from "../tools/runtime-comment";
+import { ToolRuntimeInstructionSyncService } from "../tools/runtime-instruction";
 import { SchemaRenderer } from "../tools/schema";
 import { args, createRigToolKit, defineTool, paths, RigTool, rig } from "../tools/sdk";
 import { CommandIds } from "../tools/types";
@@ -92,7 +92,7 @@ describe("coverage support", () => {
   test("syncs generated runtime comments into tool files", async () => {
     const home = await workspaces.create();
     const created = await new ToolCreator({ homeDir: home }).create("sample");
-    const service = new ToolRuntimeCommentSyncService({ homeDir: home });
+    const service = new ToolRuntimeInstructionSyncService({ homeDir: home });
 
     expect(service.renderPrefix()).toContain("rig.$");
     expect(service.upsertPrefix("#!/usr/bin/env bun\nconsole.log(1);\n")).toMatch(
@@ -116,9 +116,9 @@ describe("coverage support", () => {
     expect(await readFile(created.toolPath, "utf8")).not.toContain("Stale runtime");
 
     const emptyHome = await workspaces.create("rig-coverage-empty-tools-");
-    await expect(new ToolRuntimeCommentSyncService({ homeDir: emptyHome }).sync()).resolves.toEqual(
-      { tools: [] },
-    );
+    await expect(
+      new ToolRuntimeInstructionSyncService({ homeDir: emptyHome }).sync(),
+    ).resolves.toEqual({ tools: [] });
   });
 
   test("syncs agent instructions, managed blocks, and target discovery", async () => {

@@ -252,6 +252,91 @@ export default tool;
     });
   });
 
+  test("resolves pipeline references in command input", async () => {
+    const home = await homes.create();
+    await new ToolCreator({ homeDir: home }).create("sample");
+
+    const result = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+      homeDir: home,
+      args: ["text=@clean.output"],
+      pipeContext: { clean: { output: "image.cleaned.png" } },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.envelope).toMatchObject({
+      data: { text: "image.cleaned.png" },
+      errors: [],
+    });
+
+    const exactId = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+      homeDir: home,
+      args: ["text=@clean"],
+      pipeContext: { clean: "image.cleaned.png" },
+    });
+    expect(exactId.envelope).toMatchObject({
+      data: { text: "image.cleaned.png" },
+      errors: [],
+    });
+
+    const embedded = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+      homeDir: home,
+      args: ["text=output:@clean.output"],
+      pipeContext: { clean: { output: "image.cleaned.png" } },
+    });
+    expect(embedded.envelope).toMatchObject({
+      data: { text: "output:image.cleaned.png" },
+      errors: [],
+    });
+
+    const arrayInput = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+      homeDir: home,
+      input: JSON.stringify({ text: "@names.0", ignored: ["@names.0"] }),
+      pipeContext: { names: ["image.cleaned.png"] },
+    });
+    expect(arrayInput.envelope).toMatchObject({
+      data: { text: "image.cleaned.png" },
+      errors: [],
+    });
+  });
+
+  test("returns pipeline reference errors as envelopes", async () => {
+    const home = await homes.create();
+    await new ToolCreator({ homeDir: home }).create("sample");
+    const runner = new ToolRunner({ homeDir: home });
+
+    const unknown = await runner.run("sample", "example", {
+      homeDir: home,
+      args: ["text=@missing.output"],
+      pipeContext: {},
+    });
+    expect(unknown.envelope).toMatchObject({
+      errors: [{ code: "INPUT_ERROR", message: "Pipeline reference is unknown: @missing" }],
+    });
+
+    const cannotAccess = await runner.run("sample", "example", {
+      homeDir: home,
+      args: ["text=@clean.output.path"],
+      pipeContext: { clean: { output: "image.cleaned.png" } },
+    });
+    expect(cannotAccess.envelope).toMatchObject({
+      errors: [
+        {
+          code: "INPUT_ERROR",
+          message: "Pipeline reference cannot access: @clean.output.path",
+        },
+      ],
+    });
+
+    const missing = await runner.run("sample", "example", {
+      homeDir: home,
+      args: ["text=@clean.missing"],
+      pipeContext: { clean: { output: "image.cleaned.png" } },
+    });
+    expect(missing.envelope).toMatchObject({
+      errors: [{ code: "INPUT_ERROR", message: "Pipeline reference is missing: @clean.missing" }],
+    });
+  });
+
   test("runs registered tools from a tool context", async () => {
     const home = await homes.create();
     await new ToolCreator({ homeDir: home }).create("sample");
