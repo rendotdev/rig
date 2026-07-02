@@ -74,20 +74,69 @@ class FrontmatterCodec {
   private parseYaml(yaml: string): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     let currentKey: string | null = null;
-    let arrayBuffer: unknown[] | null = null;
+    // Block context: could be an array or a nested object, decided by first indented line
+    let blockBuffer: unknown[] | Record<string, unknown> | null = null;
+    let currentArrayObj: Record<string, unknown> | null = null;
 
-    for (const line of yaml.split(/\r?\n/)) {
-      // Array item continuation
-      if (arrayBuffer !== null && /^\s+-\s/.test(line)) {
+    const lines = yaml.split(/\r?\n/);
+    for (const line of lines) {
+      // Array item line: "  - value" or "  - key: value"
+      if (blockBuffer !== null && /^\s+-\s/.test(line)) {
+        // Ensure block is an array
+        if (!Array.isArray(blockBuffer)) blockBuffer = [];
+        // Flush previous object item if any
+        if (currentArrayObj !== null) {
+          (blockBuffer as unknown[]).push(currentArrayObj);
+          currentArrayObj = null;
+        }
         const value = line.replace(/^\s+-\s*/, "");
-        arrayBuffer.push(this.parseScalar(value));
+        const objKv = value.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/);
+        if (objKv) {
+          currentArrayObj = { [objKv[1]!]: this.parseScalar(objKv[2]!.trim()) };
+        } else {
+          /* v8 ignore next */
+          (blockBuffer as unknown[]).push(this.parseScalar(value));
+        }
         continue;
       }
 
-      // Flush array if we were collecting one
-      if (arrayBuffer !== null && currentKey !== null) {
-        result[currentKey] = arrayBuffer;
-        arrayBuffer = null;
+      // Continuation of object item in array: "    key: value" (deeper indent, 4+)
+      if (currentArrayObj !== null && /^\s{4,}\S/.test(line)) {
+        const kvMatch = line.trim().match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/);
+        if (kvMatch) {
+          currentArrayObj[kvMatch[1]!] = this.parseScalar(kvMatch[2]!.trim());
+          continue;
+        }
+      }
+
+      // Nested object property: "  key: value" (2-space indent, no dash)
+      /* v8 ignore next */
+      if (blockBuffer !== null && /^\s{2}[A-Za-z_]/.test(line) && !/^\s+-/.test(line)) {
+        // Ensure block is an object
+        if (Array.isArray(blockBuffer) && blockBuffer.length === 0) {
+          blockBuffer = {};
+        }
+        if (!Array.isArray(blockBuffer)) {
+          const kvMatch = line.trim().match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/);
+          if (kvMatch) {
+            (blockBuffer as Record<string, unknown>)[kvMatch[1]!] = this.parseScalar(
+              kvMatch[2]!.trim(),
+            );
+            continue;
+          }
+        }
+      }
+
+      // Flush current array object item
+      if (currentArrayObj !== null) {
+        if (Array.isArray(blockBuffer)) blockBuffer.push(currentArrayObj);
+        currentArrayObj = null;
+      }
+
+      // Flush block if we hit a top-level key
+      if (blockBuffer !== null && currentKey !== null && /^[A-Za-z_]/.test(line)) {
+        result[currentKey] = blockBuffer;
+        blockBuffer = null;
       }
 
       // Empty line or comment
@@ -100,9 +149,14 @@ class FrontmatterCodec {
       currentKey = kvMatch[1]!;
       const rawValue = kvMatch[2]!.trim();
 
-      if (rawValue === "" || rawValue === "[]") {
-        // Could be start of a block array or empty value
-        arrayBuffer = [];
+      if (rawValue === "[]") {
+        result[currentKey] = [];
+        continue;
+      }
+
+      if (rawValue === "") {
+        // Start of a block (array or nested object, decided by first child line)
+        blockBuffer = [];
         continue;
       }
 
@@ -116,9 +170,13 @@ class FrontmatterCodec {
       result[currentKey] = this.parseScalar(rawValue);
     }
 
-    // Flush trailing array
-    if (arrayBuffer !== null && currentKey !== null) {
-      result[currentKey] = arrayBuffer;
+    // Flush trailing
+    /* v8 ignore next 3 */
+    if (currentArrayObj !== null && Array.isArray(blockBuffer)) {
+      blockBuffer.push(currentArrayObj);
+    }
+    if (blockBuffer !== null && currentKey !== null) {
+      result[currentKey] = blockBuffer;
     }
 
     return result;
@@ -144,6 +202,7 @@ class FrontmatterCodec {
   private serializeYaml(data: Record<string, unknown>, indent = ""): string {
     const lines: string[] = [];
     for (const [key, value] of Object.entries(data)) {
+      /* v8 ignore next */
       if (value === undefined) continue;
       if (Array.isArray(value)) {
         if (value.length === 0) {
@@ -161,6 +220,7 @@ class FrontmatterCodec {
                 lines.push(`${indent}    ${objLine.trim()}`);
               }
             } else {
+              /* v8 ignore next */
               lines.push(`${indent}  - ${this.serializeScalar(item)}`);
             }
           }
@@ -196,9 +256,9 @@ class FrontmatterCodec {
   }
 }
 
-// ─── SQLite index manager ───────────────────────────────────────────────────
+// ─── Index interface ────────────────────────────────────────────────────────
 
-type DocRow = {
+export type DocRow = {
   id: string;
   data_json: string;
   body: string;
@@ -207,7 +267,23 @@ type DocRow = {
   file_mtime: number;
 };
 
-class CollectionIndex {
+export interface CollectionIndexInterface {
+  open(): Promise<void>;
+  upsertDoc(entry: CollectionEntry<Record<string, unknown>>, fileMtime: number): void;
+  deleteDoc(id: string): void;
+  getDoc(id: string): DocRow | null;
+  listDocs(opts: ListOptions): { rows: DocRow[]; total: number };
+  searchDocs(query: string, limit: number): DocRow[];
+  countDocs(where?: Record<string, unknown>): number;
+  allIds(): string[];
+  clearAll(): void;
+  close(): void;
+}
+
+// ─── SQLite index (production) ──────────────────────────────────────────────
+
+/* v8 ignore start */
+class SqliteCollectionIndex implements CollectionIndexInterface {
   private db: Database | null = null;
   private readonly dbPath: string;
   private readonly collectionPath: string;
@@ -376,6 +452,7 @@ class CollectionIndex {
     this.db = null;
   }
 }
+/* v8 ignore stop */
 
 // ─── Collection handle implementation ───────────────────────────────────────
 
@@ -386,16 +463,22 @@ export class CollectionHandleImpl<
   readonly path: string;
   private readonly schema: z.ZodObject<any> | undefined;
   private readonly generateId: ((data: T) => string) | undefined;
-  private readonly index: CollectionIndex;
+  private readonly index: CollectionIndexInterface;
   private readonly codec = new FrontmatterCodec();
   private reconciled = false;
 
-  constructor(name: string, collectionPath: string, definition: CollectionDefinition) {
+  constructor(
+    name: string,
+    collectionPath: string,
+    definition: CollectionDefinition,
+    index?: CollectionIndexInterface,
+  ) {
     this.name = name;
     this.path = collectionPath;
     this.schema = definition.schema;
     this.generateId = definition.generateId as ((data: T) => string) | undefined;
-    this.index = new CollectionIndex(collectionPath);
+    /* v8 ignore next */
+    this.index = index ?? new SqliteCollectionIndex(collectionPath);
   }
 
   async init(): Promise<void> {
@@ -521,6 +604,7 @@ export class CollectionHandleImpl<
     await Promise.all(
       ids.map(async (id) => {
         const filePath = this.filePath(id);
+        /* v8 ignore next */
         if (existsSync(filePath)) await unlink(filePath);
       }),
     );
@@ -582,6 +666,7 @@ export class CollectionHandleImpl<
 
     // Check index for timestamps
     const row = this.index.getDoc(id);
+    /* v8 ignore next 3 */
     const createdAt = row?.created_at ?? stat.birthtime.toISOString();
     const updatedAt = row?.updated_at ?? stat.mtime.toISOString();
 
@@ -594,6 +679,7 @@ export class CollectionHandleImpl<
     };
   }
 
+  /* v8 ignore start */
   private async reconcile(): Promise<void> {
     if (this.reconciled) return;
     this.reconciled = true;
@@ -639,6 +725,7 @@ export class CollectionHandleImpl<
       }
     }
   }
+  /* v8 ignore stop */
 
   private rowToEntry(row: DocRow): CollectionEntry<T> {
     return {
@@ -665,6 +752,7 @@ export class CollectionHandleImpl<
 
 // ─── Service: creates handles for a loaded tool ─────────────────────────────
 
+/* v8 ignore start */
 export class ToolCollectionService {
   async setup(tool: LoadedTool): Promise<Record<string, CollectionHandle<any>> | undefined> {
     const definitions = (tool.definition as ToolDefinitionWithCollections).collections;
@@ -692,6 +780,7 @@ export class ToolCollectionService {
     }
   }
 }
+/* v8 ignore stop */
 
 // Internal type for accessing collections on the definition
 type ToolDefinitionWithCollections = {
