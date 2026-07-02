@@ -194,7 +194,9 @@ describe("coverage support", () => {
     const first = await service.sync();
     expect(first).toMatchObject({ skipped: false });
     expect(first.targets.every((target) => target.changed)).toBe(true);
-    expect(await readFile(join(project, "AGENTS.md"), "utf8")).toContain("No Rig tools found.");
+    expect(await readFile(join(project, "AGENTS.md"), "utf8")).toContain(
+      "rig run sample.example text=example #",
+    );
     expect(await readFile(join(project, "CLAUDE.md"), "utf8")).not.toContain(
       "<!-- rig:agent-instructions:start -->",
     );
@@ -214,7 +216,7 @@ describe("coverage support", () => {
     await writeFile(
       join(project, "AGENTS.md"),
       (await readFile(join(project, "AGENTS.md"), "utf8")).replace(
-        "No Rig tools found.",
+        "sample # Describe what this tool does.",
         "Stale tools.",
       ),
       "utf8",
