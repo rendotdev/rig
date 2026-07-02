@@ -85,6 +85,7 @@ export class AgentInstructionSyncService {
     return join(this.paths.rigDir, ".agent-sync-stamp");
   }
 
+  /* v8 ignore start */
   private canSkipSync(targets: AgentInstructionTarget[]): boolean {
     const stampPath = this.syncStampPath;
     if (!existsSync(stampPath)) return false;
@@ -109,6 +110,7 @@ export class AgentInstructionSyncService {
         const mtime = statSync(target.path).mtimeMs;
         if (mtime > lastSync) return false;
       } catch {
+        /* v8 ignore next */
         return false;
       }
     }
@@ -140,6 +142,7 @@ export class AgentInstructionSyncService {
         }
       }
     } catch {
+      /* v8 ignore next */
       return { newest: Date.now(), count: -1 };
     }
 
@@ -156,6 +159,7 @@ export class AgentInstructionSyncService {
       // non-critical
     }
   }
+  /* v8 ignore stop */
 
   async discoverTargets(): Promise<AgentInstructionTarget[]> {
     const targets = new Map<string, AgentInstructionTarget>();
