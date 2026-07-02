@@ -85,10 +85,9 @@ export class ToolDiscoveryService {
     visibleFromPath?: string,
   ): RegistryEntry[] {
     if (!visibleFromPath) return entries;
-    const projectRoot = this.projectRootFor(visibleFromPath);
-    return entries.filter(
-      (entry) => entry.kind === "base" || this.pathContains(projectRoot, entry.path),
-    );
+    // All explicitly-configured registries (base + custom) are always visible.
+    // Visibility scoping only applies to future auto-discovered registries.
+    return entries;
   }
 
   private visibilityStartDirectory(pathValue: string): string {
