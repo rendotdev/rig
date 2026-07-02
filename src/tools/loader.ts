@@ -8,6 +8,8 @@ import type { ConfigOptions } from "../config/config";
 import { createRigToolKit } from "./sdk";
 import { CommandIds, type CommandDefinition, type LoadedTool, type ToolDefinition } from "./types";
 
+export type LoadedToolDefinition = Omit<LoadedTool, "env">;
+
 export class ToolDefinitionValidator {
   validateToolName(name: string): void {
     if (!name || typeof name !== "string") {
@@ -269,7 +271,11 @@ export class ToolLoader {
     this.validator.validateCommandName(name);
   }
 
-  async loadDiscovered(tool: DiscoveredTool): Promise<LoadedTool> {
+  async loadDefinition(name: string): Promise<LoadedToolDefinition> {
+    return this.loadDefinitionDiscovered(await this.discovery.find(name));
+  }
+
+  async loadDefinitionDiscovered(tool: DiscoveredTool): Promise<LoadedToolDefinition> {
     const url = `${pathToFileURL(tool.toolPath).href}?rig=${Date.now()}`;
     let moduleValue: unknown;
     try {
@@ -284,8 +290,13 @@ export class ToolLoader {
     const moduleRecord = moduleValue as { default?: unknown };
     const definitionValue = await this.evaluateModuleDefault(moduleRecord.default, tool.name);
     const definition = this.validator.validateToolDefinition(definitionValue, tool.name);
-    const env = await this.envLoader.load(tool, definition);
-    return { name: definition.name, path: tool.toolPath, env, definition };
+    return { name: definition.name, path: tool.toolPath, definition };
+  }
+
+  async loadDiscovered(tool: DiscoveredTool): Promise<LoadedTool> {
+    const loaded = await this.loadDefinitionDiscovered(tool);
+    const env = await this.envLoader.load(tool, loaded.definition);
+    return { ...loaded, env };
   }
 
   private async evaluateModuleDefault(value: unknown, toolName: string): Promise<unknown> {

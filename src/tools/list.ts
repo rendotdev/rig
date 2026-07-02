@@ -135,9 +135,9 @@ class ToolListPlainRenderer {
   }
 
   private renderCommand(command: ListedCommand): string {
-    const args = this.formatter.example(command.runExample.replace(`rig run ${command.id}`, ""));
+    const runExample = this.formatter.example(command.runExample);
     const description = this.formatter.description(command.description);
-    return `  ${command.id}${args ? ` ${args}` : ""} # ${description}`;
+    return `  ${runExample} # ${description}`;
   }
 }
 

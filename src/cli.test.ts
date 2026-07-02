@@ -218,9 +218,9 @@ describe("cli application", () => {
     expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
     const listOutput = await cli.run(["list"]);
     expect(listOutput).toContain("sample.example");
-    expect(listOutput).toContain("sample.example text=example #");
+    expect(listOutput).toContain("rig run sample.example text=example #");
     expect(await cli.run(["list", "--json"])).toContain('"tools"');
-    expect(await cli.run(["ls", "--plain"])).toContain("sample.example text=example #");
+    expect(await cli.run(["ls", "--plain"])).toContain("rig run sample.example text=example #");
     expect(await cli.run(["edit", "sample"])).toContain(
       join(home, "rig", "tools", "sample", "index.rig.ts"),
     );
@@ -278,6 +278,40 @@ describe("cli application", () => {
     );
     expect(await cli.run(["typecheck", "sample"])).toContain('"ok": true');
     expect(process.exitCode).toBe(0);
+  });
+
+  test("manages tool env files", async () => {
+    const home = await workspaces.create();
+    const toolDir = join(home, "rig", "tools", "configured");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(
+      join(toolDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "configured",
+  description: "Configured env test tool.",
+  env: rig.z.object({ REMOVE_ME: rig.z.string().optional(), TOKEN: rig.z.string() }),
+  commands: {
+    read: rig.defineCommand({
+      description: "Read env.",
+      input: rig.z.object({}),
+      output: rig.z.object({ token: rig.z.string() }),
+      run: async (context) => ({ token: context.env.TOKEN }),
+    }),
+  },
+});
+`,
+      "utf8",
+    );
+    const cli = new CliHarness(home);
+
+    expect(await cli.run(["env", "configured"])).toContain('"set": false');
+    expect(await cli.run(["env", "configured", "TOKEN=secret", "REMOVE_ME=temp"])).toContain(
+      '"updated": true',
+    );
+    expect(await cli.run(["env", "configured", "remove", "REMOVE_ME"])).toContain(
+      '"removedKeys": [\n    "REMOVE_ME"\n  ]',
+    );
+    expect(await readFile(join(toolDir, ".env"), "utf8")).toBe("TOKEN=secret\n");
   });
 
   test("manages cron jobs", async () => {
