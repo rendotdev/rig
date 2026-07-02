@@ -89,10 +89,15 @@ export class AgentInstructionSyncService {
     const stampPath = this.syncStampPath;
     if (!existsSync(stampPath)) return false;
 
-    const lastSync = parseInt(readFileSync(stampPath, "utf-8").trim(), 10) || 0;
+    const stampData = readFileSync(stampPath, "utf-8").trim();
+    const [timeStr, countStr] = stampData.split(":");
+    const lastSync = parseInt(timeStr, 10) || 0;
+    const lastCount = parseInt(countStr, 10);
     if (lastSync === 0) return false;
 
-    if (this.toolsetFingerprint() > lastSync) return false;
+    const { newest, count } = this.toolsetFingerprint();
+    if (newest > lastSync) return false;
+    if (!Number.isNaN(lastCount) && count !== lastCount) return false;
 
     return this.areTargetsUnmodified(targets, lastSync);
   }
@@ -110,11 +115,12 @@ export class AgentInstructionSyncService {
     return true;
   }
 
-  private toolsetFingerprint(): number {
+  private toolsetFingerprint(): { newest: number; count: number } {
     const configPath = this.paths.configPath;
-    if (!existsSync(configPath)) return Date.now();
+    if (!existsSync(configPath)) return { newest: Date.now(), count: -1 };
 
     let newest = 0;
+    let count = 0;
     try {
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
       const dirs: string[] = [
@@ -127,23 +133,25 @@ export class AgentInstructionSyncService {
         for (const entry of readdirSync(dir)) {
           const toolFile = join(dir, entry, "index.rig.ts");
           if (existsSync(toolFile)) {
+            count++;
             const mtime = statSync(toolFile).mtimeMs;
             if (mtime > newest) newest = mtime;
           }
         }
       }
     } catch {
-      return Date.now();
+      return { newest: Date.now(), count: -1 };
     }
 
-    return newest;
+    return { newest, count };
   }
 
   private writeSyncStamp(): void {
     try {
       const dir = dirname(this.syncStampPath);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(this.syncStampPath, String(Date.now()));
+      const { count } = this.toolsetFingerprint();
+      writeFileSync(this.syncStampPath, `${Date.now()}:${count}`);
     } catch {
       // non-critical
     }
