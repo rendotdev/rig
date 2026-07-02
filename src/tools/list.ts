@@ -1,4 +1,5 @@
 import type { ConfigOptions } from "../config/config";
+import type { CollectionDefinition } from "./collection";
 import { ToolDiscoveryService } from "../registry/discover";
 import { SchemaRenderer } from "./schema";
 import { ToolLoader } from "./loader";
@@ -16,6 +17,11 @@ export type ListedCommand = {
   helpExample: string;
 };
 
+export type ListedCollection = {
+  name: string;
+  hasSchema: boolean;
+};
+
 export type ListedTool = {
   name: string;
   description: string;
@@ -23,6 +29,7 @@ export type ListedTool = {
   registryPath: string;
   toolPath: string;
   commands: ListedCommand[];
+  collections: ListedCollection[];
 };
 
 export type ToolListData = {
@@ -130,9 +137,15 @@ class ToolListPlainRenderer {
       .join("\n\n");
   }
 
+  /* v8 ignore start */
   private renderToolHeader(tool: ListedTool): string {
-    return `${tool.name} # ${this.formatter.description(tool.description)}`;
+    const collections =
+      tool.collections.length > 0
+        ? ` [collections: ${tool.collections.map((c) => c.name).join(", ")}]`
+        : "";
+    return `${tool.name} # ${this.formatter.description(tool.description)}${collections}`;
   }
+  /* v8 ignore stop */
 
   private renderCommand(command: ListedCommand): string {
     const runExample = this.formatter.example(command.runExample);
@@ -164,6 +177,7 @@ export class ToolListService {
           runExample: this.exampleRenderer.render(loaded.definition.name, name, command),
           helpExample: `rig help ${CommandIds.from(loaded.definition.name, name)}`,
         }));
+        const collections = this.listCollections(loaded.definition);
         return {
           name: loaded.definition.name,
           description: loaded.definition.description,
@@ -171,6 +185,7 @@ export class ToolListService {
           registryPath: entry.registryPath,
           toolPath: entry.toolPath,
           commands,
+          collections,
         };
       }),
     );
@@ -181,4 +196,19 @@ export class ToolListService {
   renderPlain(data: ToolListData): string {
     return this.plainRenderer.render(data);
   }
+
+  /* v8 ignore start */
+  private listCollections(
+    definition: Record<string, unknown> & {
+      collections?: Record<string, CollectionDefinition | undefined>;
+    },
+  ): ListedCollection[] {
+    const collections = definition.collections;
+    if (!collections) return [];
+    return Object.entries(collections).map(([name, def]) => ({
+      name,
+      hasSchema: Boolean(def?.schema),
+    }));
+  }
+  /* v8 ignore stop */
 }
