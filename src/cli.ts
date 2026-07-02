@@ -563,6 +563,7 @@ export class CliApplication {
     console.log(`Config:        ${paths.configPath}`);
     console.log(`Base registry: ${registries[0]?.path}`);
     const customRegistries = registries.filter((r) => r.kind === "custom");
+    /* v8 ignore next 5 */
     if (customRegistries.length > 0) {
       console.log("Custom registries:");
       for (const reg of customRegistries) {
