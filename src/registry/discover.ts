@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { RigConfigStore, type ConfigOptions, type RegistryEntry } from "../config/config";
 import { RigPaths } from "../config/paths";
 import { RigError } from "../errors/RigError";
