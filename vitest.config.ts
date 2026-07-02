@@ -19,6 +19,7 @@ export default defineConfig({
         "src/**/*.test.ts",
         "src/tools/collection-memory-index.ts",
         "src/tools/collection.ts",
+        "src/tools/help-topics.ts",
       ],
       reporter: ["text", "json-summary"],
       thresholds: {

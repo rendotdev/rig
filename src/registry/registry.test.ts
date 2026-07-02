@@ -223,6 +223,7 @@ describe("registries", () => {
               helpExample: "rig help wrapped.say",
             },
           ],
+          collections: [],
         },
       ],
     });
