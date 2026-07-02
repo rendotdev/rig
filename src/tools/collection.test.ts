@@ -4,11 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CollectionHandleImpl } from "./collection";
+import { MemoryCollectionIndex } from "./collection-memory-index";
 
-const hasBunSqlite = typeof (globalThis as any).Bun !== "undefined";
-const describeIfBun = hasBunSqlite ? describe : describe.skip;
-
-describeIfBun("CollectionHandle", () => {
+describe("CollectionHandle", () => {
   let dir: string;
   let handle: CollectionHandleImpl<any>;
 
@@ -21,10 +19,12 @@ describeIfBun("CollectionHandle", () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "rig-collection-test-"));
-    handle = new CollectionHandleImpl("test-collection", dir, {
-      schema,
-      generateId: (data: any) => data.ticket,
-    });
+    handle = new CollectionHandleImpl(
+      "test-collection",
+      dir,
+      { schema, generateId: (data: any) => data.ticket },
+      new MemoryCollectionIndex(),
+    );
     await handle.init();
   });
 
@@ -207,10 +207,12 @@ describeIfBun("CollectionHandle", () => {
     );
 
     // Re-init
-    handle = new CollectionHandleImpl("test-collection", dir, {
-      schema,
-      generateId: (data: any) => data.ticket,
-    });
+    handle = new CollectionHandleImpl(
+      "test-collection",
+      dir,
+      { schema, generateId: (data: any) => data.ticket },
+      new MemoryCollectionIndex(),
+    );
     await handle.init();
 
     const entry = await handle.getEntry("A-1");
@@ -229,13 +231,186 @@ describeIfBun("CollectionHandle", () => {
   });
 });
 
-describeIfBun("CollectionHandle (schema-less)", () => {
+describe("CollectionHandle edge cases", () => {
+  let dir: string;
+  let handle: CollectionHandleImpl<any>;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "rig-collection-edge-"));
+  });
+
+  afterEach(async () => {
+    handle?.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("derives id from common fields when no generateId", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    const entry = await handle.create({
+      data: { title: "My Great Note", content: "hello" },
+    });
+    expect(entry.id).toBe("my-great-note");
+  });
+
+  it("derives id from slug field", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    const entry = await handle.create({
+      data: { slug: "custom-slug", content: "hello" },
+    });
+    expect(entry.id).toBe("custom-slug");
+  });
+
+  it("derives id from id field", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    const entry = await handle.create({
+      data: { id: "my-id", content: "hello" },
+    });
+    expect(entry.id).toBe("my-id");
+  });
+
+  it("throws when no id can be derived", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await expect(handle.create({ data: { count: 42 } })).rejects.toThrow("needs an id");
+  });
+
+  it("throws on update of non-existent entry", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await expect(handle.update("ghost", { data: { x: 1 } })).rejects.toThrow("not found");
+  });
+
+  it("handles complex frontmatter with nested objects and arrays", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await handle.create({
+      id: "complex",
+      data: {
+        title: "Complex entry",
+        tags: ["a", "b", "c"],
+        prs: [
+          { number: 123, url: "https://example.com", state: "OPEN" },
+          { number: 456, url: "https://example.com/2", state: "MERGED" },
+        ],
+        nested: { foo: "bar", baz: 42 },
+        empty_arr: [],
+        flag: true,
+        nothing: null,
+        priority: 3,
+      },
+      body: "## Content\nWith special chars: {foo} [bar] *baz*",
+    });
+
+    const fetched = await handle.getEntry("complex");
+    expect(fetched!.data.title).toBe("Complex entry");
+    expect(fetched!.data.tags).toEqual(["a", "b", "c"]);
+    expect(fetched!.data.prs).toHaveLength(2);
+    expect(fetched!.data.prs[0].number).toBe(123);
+    expect(fetched!.data.nested.foo).toBe("bar");
+    expect(fetched!.data.empty_arr).toEqual([]);
+    expect(fetched!.data.flag).toBe(true);
+    expect(fetched!.data.nothing).toBeNull();
+    expect(fetched!.data.priority).toBe(3);
+  });
+
+  it("handles frontmatter with quoted strings and special values", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await handle.create({
+      id: "special",
+      data: {
+        url: "https://example.com/path?q=1&b=2",
+        description: "Has: colon in value",
+      },
+      body: "",
+    });
+    const fetched = await handle.getEntry("special");
+    expect(fetched!.data.url).toBe("https://example.com/path?q=1&b=2");
+    expect(fetched!.data.description).toBe("Has: colon in value");
+  });
+
+  it("update with only body preserves data", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await handle.create({ id: "note1", data: { title: "Original" }, body: "old" });
+    const updated = await handle.update("note1", { body: "new body" });
+    expect(updated.data.title).toBe("Original");
+    expect(updated.body).toBe("new body");
+  });
+
+  it("list with offset and descending sort", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await handle.create({ id: "a", data: { title: "A", rank: 1 } });
+    await handle.create({ id: "b", data: { title: "B", rank: 2 } });
+    await handle.create({ id: "c", data: { title: "C", rank: 3 } });
+
+    const { entries } = await handle.list({ sort: "-rank", limit: 2, offset: 1 });
+    expect(entries.map((e) => e.id)).toEqual(["b", "a"]);
+  });
+
+  it("search returns fallback snippet when no line matches", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await handle.create({
+      id: "note1",
+      data: { title: "searchable" },
+      body: "This body has no matching words for the search term.",
+    });
+    // The memory index matches on title in data_json
+    const { entries } = await handle.search("searchable");
+    expect(entries.length).toBe(1);
+    expect(entries[0]!.snippet).toBeTruthy();
+  });
+
+  it("reconcile removes index entries for deleted files", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+    await handle.create({ id: "keep", data: { title: "Keep" } });
+    await handle.create({ id: "delete-me", data: { title: "Delete" } });
+    handle.close();
+
+    // Delete the file manually
+    const { unlink: unlinkFile } = await import("node:fs/promises");
+    await unlinkFile(join(dir, "delete-me.md"));
+
+    // Re-init with fresh index
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+
+    expect(await handle.getEntry("keep")).not.toBeNull();
+    // delete-me.md is gone, so getEntry reads from disk and fails
+    expect(await handle.getEntry("delete-me")).toBeNull();
+  });
+
+  it("handles content without frontmatter", async () => {
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+
+    // Write a raw file without frontmatter
+    await writeFile(join(dir, "raw.md"), "Just plain content\n");
+
+    // Re-init to trigger reconcile
+    handle.close();
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
+    await handle.init();
+
+    const entry = await handle.getEntry("raw");
+    expect(entry!.data).toEqual({});
+    expect(entry!.body).toBe("Just plain content\n");
+  });
+});
+
+describe("CollectionHandle (schema-less)", () => {
   let dir: string;
   let handle: CollectionHandleImpl<any>;
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "rig-collection-schemaless-"));
-    handle = new CollectionHandleImpl("notes", dir, {});
+    handle = new CollectionHandleImpl("notes", dir, {}, new MemoryCollectionIndex());
     await handle.init();
   });
 
