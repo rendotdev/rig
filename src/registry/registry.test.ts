@@ -174,13 +174,13 @@ describe("registries", () => {
     const list = await service.list({ visibleFromPath: join(project, "AGENTS.md") });
     const rendered = service.renderPlain(list);
 
-    expect(rendered).toContain("project-tool.see text=VALUE #");
-    expect(rendered).toContain("project-tool.none #");
-    expect(rendered).toContain("many-fields.pack --input");
-    expect(rendered).toContain("scalar-example.say 'two words'");
-    expect(rendered).toContain("scalar-example.count count=2");
-    expect(rendered).toContain("scalar-required.say #");
-    expect(rendered).not.toContain("local-only.example");
+    expect(rendered).toContain("rig run project-tool.see text=VALUE #");
+    expect(rendered).toContain("rig run project-tool.none #");
+    expect(rendered).toContain("rig run many-fields.pack --input");
+    expect(rendered).toContain("rig run scalar-example.say 'two words'");
+    expect(rendered).toContain("rig run scalar-example.count count=2");
+    expect(rendered).toContain("rig run scalar-required.say #");
+    expect(rendered).not.toContain("rig run local-only.example");
   });
 
   test("renders plain list entries without embedded line breaks", async () => {
@@ -207,7 +207,7 @@ describe("registries", () => {
 
     expect(rendered.split("\n")).toEqual([
       "wrapped # First line second line.",
-      "  wrapped.say text='hello\\nworld' # Command line continues.",
+      "  rig run wrapped.say text='hello\\nworld' # Command line continues.",
     ]);
   });
 
