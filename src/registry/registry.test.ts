@@ -68,18 +68,39 @@ describe("registries", () => {
     );
   });
 
-  test("lists tools from registries visible to a project path", async () => {
+  test("lists base tools and custom registries visible to a project path", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("local-only");
+    await new ToolCreator({ homeDir: home }).create("base-visible");
 
     const project = join(home, "project");
     const custom = join(project, "rig-tools");
+    const outside = join(home, "outside-tools");
+    const registry = new RegistryConfigService({ homeDir: home });
     await mkdir(join(project, ".git"), { recursive: true });
-    await new RegistryConfigService({ homeDir: home }).add(custom);
+    await registry.add(outside);
+    await registry.add(custom);
+    await mkdir(join(outside, "local-only"), { recursive: true });
     await mkdir(join(custom, "project-tool"), { recursive: true });
     await mkdir(join(custom, "many-fields"), { recursive: true });
     await mkdir(join(custom, "scalar-example"), { recursive: true });
     await mkdir(join(custom, "scalar-required"), { recursive: true });
+    await writeFile(
+      join(outside, "local-only", "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "local-only",
+  description: "Outside custom registry test tool.",
+  commands: {
+    example: rig.defineCommand({
+      description: "Run outside tool.",
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async () => ({ ok: true }),
+    }),
+  },
+});
+`,
+      "utf8",
+    );
     await writeFile(
       join(custom, "project-tool", "index.rig.ts"),
       `export default (rig) => rig.defineTool({
@@ -174,6 +195,7 @@ describe("registries", () => {
     const list = await service.list({ visibleFromPath: join(project, "AGENTS.md") });
     const rendered = service.renderPlain(list);
 
+    expect(rendered).toContain("rig run base-visible.example text=example #");
     expect(rendered).toContain("rig run project-tool.see text=VALUE #");
     expect(rendered).toContain("rig run project-tool.none #");
     expect(rendered).toContain("rig run many-fields.pack --input");
