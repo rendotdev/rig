@@ -11,5 +11,6 @@ export const RigAgentInstructions = `The \`rig\` CLI is installed on this machin
 - Run \`rig list\` to discover tools and available \`rig run ...\` commands.
 - Run \`rig help <tool>\` or \`rig help <tool>.<command>\` for usage, inputs, and outputs.
 - Run \`rig run <tool>.<command> [args]\` to execute a tool command.
-- Run \`rig --help\` for other Rig CLI commands.
+- To chain commands, use \`--as <id>\`, \`--pipe\`, and \`@id.path\` references to pass structured outputs instead of guessing filenames.
+- To learn more, run \`rig --help\` for other Rig CLI commands.
 `;

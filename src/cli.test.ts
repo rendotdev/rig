@@ -437,6 +437,28 @@ describe("cli application", () => {
     );
   });
 
+  test("prints queried run output and pipeline ids", async () => {
+    const home = await workspaces.create();
+    const cli = new CliHarness(home);
+
+    await new ToolCreator({ homeDir: home }).create("sample");
+
+    expect(await cli.run(["run", "sample.example", "text=hello", "--query", "data.text"])).toBe(
+      "hello",
+    );
+
+    cli.logs.length = 0;
+    expect(await cli.run(["run", "sample.example", "text=hello", "--query", "data"])).toContain(
+      '"text": "hello"',
+    );
+
+    cli.logs.length = 0;
+    const output = await cli.run(["run", "sample.example", "text=hello", "--as", "first"]);
+    expect(output).toContain('"pipe"');
+    expect(output).toContain('"first"');
+    expect(output).toContain('"text": "hello"');
+  });
+
   test("handles errors, entrypoint checks, and version fallbacks", async () => {
     const home = await workspaces.create();
     const cli = new CliHarness(home);
@@ -449,6 +471,19 @@ describe("cli application", () => {
     expect(cli.errorOutput).toContain('"name": "missing"');
     await expect(cli.run(["run", "sample", "x"])).rejects.toThrow("exit:1");
     expect(cli.errorOutput).toContain("Command id must use <tool>.<command>: sample");
+    await new ToolCreator({ homeDir: home }).create("sample");
+    await expect(cli.run(["run", "sample.example", "text=x", "--as", "bad.id"])).rejects.toThrow(
+      "exit:1",
+    );
+    expect(cli.errorOutput).toContain("Pipeline id is invalid: bad.id");
+    await expect(
+      cli.run(["run", "sample.example", "text=x", "--query", "data.missing"]),
+    ).rejects.toThrow("exit:1");
+    expect(cli.errorOutput).toContain("Query is missing: data.missing");
+    await expect(
+      cli.run(["run", "sample.example", "text=x", "--query", "data.text.extra"]),
+    ).rejects.toThrow("exit:1");
+    expect(cli.errorOutput).toContain("Query cannot access: data.text.extra");
 
     const app = new CliApplication() as unknown as {
       printError(error: unknown): never;

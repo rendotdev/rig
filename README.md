@@ -8,7 +8,7 @@
 
 > There are many CLIs out there; this one is yours (but it's in alpha).
 
-rig is your deterministic command runtime for AI agents.
+rig is *your* deterministic CLI for *your* AI agents.
 
 It lets agents, and you, turn deterministic workflows into typed CLI commands. Each command has explicit input and output schemas, so agents can discover, inspect, and run tools predictably and very easily.
 
@@ -74,7 +74,8 @@ The `rig` CLI is installed on this machine. It lets agents discover, run, and cr
 - Run `rig list` to discover tools and available `rig run ...` commands.
 - Run `rig help <tool>` or `rig help <tool>.<command>` for usage, inputs, and outputs.
 - Run `rig run <tool>.<command> [args]` to execute a tool command.
-- Run `rig --help` for other Rig CLI commands.
+- To chain commands, use `--as <id>`, `--pipe`, and `@id.path` references to pass structured outputs instead of guessing filenames.
+- To learn more, run `rig --help` for other Rig CLI commands.
 
 When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output.
 
