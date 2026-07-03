@@ -16,7 +16,19 @@ If you keep asking agents to repeat the same shell commands, API or MCP calls, o
 
 rig also treats your tools as first-class context. Every time rig runs, it keeps `AGENTS.md` and `CLAUDE.md` files updated with your current list of commands. That way, your agents always know the tools they can use during sessions.
 
-If you are not sure why you would want rig, here are some of my personal use cases:
+rig also has cool features for your tools like:
+
+- **$ Shell**: run system commands within a tool
+- **Content Collections**: schema-validated markdown document stores with fast-search
+- **cron**: schedule tool commands to run on a schedule
+- **.env**: manage tool secrets and settings
+- **KV**: lightweight key-value storage
+- **DB**: lightweight SQLite powered databases with support for migrations
+- **Log**: structured tool logging
+- **Chaining**: pipe structured outputs between commands
+
+<details>
+<summary>If you are not sure why you would want rig, here are some of my personal use cases:</summary>
 
 - I have a tool that pulls data from Jira/Slack/GitHub, then feeds it to an LLM to summarize my latest work for standup.
 - I have a tool that takes Markdown/HTML and generates a polished PDF with my employer's colors and typography, then drops it in my Downloads folder.
@@ -26,7 +38,9 @@ If you are not sure why you would want rig, here are some of my personal use cas
 - ...
   _-> I'll keep adding more of my tools as I keep automating my workflows..._
 
-rig also has built-in features for tool-scoped shell execution, cron, environment variable management, key-value storage, SQLite databases, logging, command chaining, and more.
+</details>
+
+
 
 ## Install
 
