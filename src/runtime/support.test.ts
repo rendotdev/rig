@@ -265,6 +265,26 @@ describe("coverage support", () => {
     await expect(
       new AgentInstructionSyncService({ homeDir: emptyHome, cwd: empty }).sync(),
     ).resolves.toMatchObject({ skipped: false, targets: [] });
+
+    // Exercise canSkipSync: set up a home with config, tool, and stamp file
+    const skipHome = await workspaces.create("rig-skip-sync-");
+    const skipProject = join(skipHome, "project");
+    await mkdir(join(skipProject, ".git"), { recursive: true });
+    await writeFile(join(skipProject, "AGENTS.md"), "# Notes\n", "utf8");
+    await new ToolCreator({ homeDir: skipHome }).create("skiptool");
+
+    const skipService = new AgentInstructionSyncService({ homeDir: skipHome, cwd: skipProject });
+    const syncResult = await skipService.sync();
+    expect(syncResult.targets.some((t) => t.changed)).toBe(true);
+
+    // Second sync should skip via canSkipSync (stamp exists, no files changed)
+    const skipResult = await skipService.sync();
+    expect(skipResult.targets.every((t) => !t.changed)).toBe(true);
+
+    // Modify target file to invalidate cache
+    await writeFile(join(skipProject, "AGENTS.md"), "# Modified\n", "utf8");
+    const reResult = await skipService.sync();
+    expect(reResult.targets.some((t) => t.changed)).toBe(true);
   });
 
   test("exercises config reads, writes, defaults, and path helpers", async () => {

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { z } from "zod";
@@ -684,6 +684,17 @@ export class CollectionHandleImpl<
     if (this.reconciled) return;
     this.reconciled = true;
 
+    // Skip reconcile if directory hasn't changed since index was last written.
+    // Directory mtime updates when files are added, removed, or renamed.
+    const indexPath = join(this.path, ".index.sqlite");
+    try {
+      const dirMtime = statSync(this.path).mtimeMs;
+      const idxMtime = statSync(indexPath).mtimeMs;
+      if (dirMtime <= idxMtime) return;
+    } catch {
+      // Index or dir missing — proceed with full reconcile
+    }
+
     // Read all .md files and sync with index
     const files = readdirSync(this.path).filter((f) => f.endsWith(".md"));
     const indexedIds = new Set(this.index.allIds());
@@ -724,6 +735,13 @@ export class CollectionHandleImpl<
         this.index.deleteDoc(id);
       }
     }
+
+    // Touch the index file so its mtime >= dir mtime for next skip check
+    const idxPath = join(this.path, ".index.sqlite");
+    try {
+      const now = new Date();
+      utimesSync(idxPath, now, now);
+    } catch {}
   }
   /* v8 ignore stop */
 

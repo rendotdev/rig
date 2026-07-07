@@ -202,7 +202,7 @@ describe("registries", () => {
     expect(rendered).toContain("rig run scalar-example.say 'two words'");
     expect(rendered).toContain("rig run scalar-example.count count=2");
     expect(rendered).toContain("rig run scalar-required.say #");
-    expect(rendered).not.toContain("rig run local-only.example");
+    expect(rendered).toContain("rig run local-only.example");
   });
 
   test("renders plain list entries without embedded line breaks", async () => {

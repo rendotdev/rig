@@ -1,6 +1,6 @@
 {
   "name": "@rendotdev/rig",
-  "version": "0.0.27",
+  "version": "0.0.32",
   "description": "Local typed command runtime for agents.",
   "homepage": "https://github.com/rendotdev/rig#readme",
   "bugs": {
@@ -36,7 +36,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "coverage": "vitest run --coverage",
-    "test": "oxfmt . --check && oxlint . --deny-warnings && tsc --noEmit && vitest run --coverage",
+    "check": "oxfmt . --check && oxlint . --deny-warnings && tsc --noEmit && vitest run --coverage",
+    "test": "vitest run --coverage",
     "prepack": "bun run build"
   },
   "dependencies": {

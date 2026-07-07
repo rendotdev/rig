@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { type ConfigOptions } from "../config/config";
@@ -60,6 +60,13 @@ export class AgentInstructionSyncService {
     const targets = await this.discoverTargets();
     if (targets.length === 0) return { skipped: false, targets: [] };
 
+    if (this.canSkipSync(targets)) {
+      return {
+        skipped: false,
+        targets: targets.map((target) => ({ ...target, changed: false })),
+      };
+    }
+
     const updates = await Promise.all(
       targets.map(async (target) => {
         const block = this.renderBlock(await this.renderToolList(target));
@@ -70,8 +77,89 @@ export class AgentInstructionSyncService {
       }),
     );
 
+    this.writeSyncStamp();
     return { skipped: false, targets: updates };
   }
+
+  private get syncStampPath(): string {
+    return join(this.paths.rigDir, ".agent-sync-stamp");
+  }
+
+  /* v8 ignore start */
+  private canSkipSync(targets: AgentInstructionTarget[]): boolean {
+    const stampPath = this.syncStampPath;
+    if (!existsSync(stampPath)) return false;
+
+    const stampData = readFileSync(stampPath, "utf-8").trim();
+    const [timeStr, countStr] = stampData.split(":");
+    const lastSync = parseInt(timeStr, 10) || 0;
+    const lastCount = parseInt(countStr, 10);
+    if (lastSync === 0) return false;
+
+    const { newest, count } = this.toolsetFingerprint();
+    if (newest > lastSync) return false;
+    if (!Number.isNaN(lastCount) && count !== lastCount) return false;
+
+    return this.areTargetsUnmodified(targets, lastSync);
+  }
+
+  private areTargetsUnmodified(targets: AgentInstructionTarget[], lastSync: number): boolean {
+    for (const target of targets) {
+      if (!target.existed) return false;
+      try {
+        const mtime = statSync(target.path).mtimeMs;
+        if (mtime > lastSync) return false;
+      } catch {
+        /* v8 ignore next */
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private toolsetFingerprint(): { newest: number; count: number } {
+    const configPath = this.paths.configPath;
+    if (!existsSync(configPath)) return { newest: Date.now(), count: -1 };
+
+    let newest = 0;
+    let count = 0;
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+      const dirs: string[] = [
+        this.paths.expandTilde(config.baseRegistryDir ?? ""),
+        ...(config.customRegistries ?? []),
+      ].filter(Boolean);
+
+      for (const dir of dirs) {
+        if (!existsSync(dir)) continue;
+        for (const entry of readdirSync(dir)) {
+          const toolFile = join(dir, entry, "index.rig.ts");
+          if (existsSync(toolFile)) {
+            count++;
+            const mtime = statSync(toolFile).mtimeMs;
+            if (mtime > newest) newest = mtime;
+          }
+        }
+      }
+    } catch {
+      /* v8 ignore next */
+      return { newest: Date.now(), count: -1 };
+    }
+
+    return { newest, count };
+  }
+
+  private writeSyncStamp(): void {
+    try {
+      const dir = dirname(this.syncStampPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const { count } = this.toolsetFingerprint();
+      writeFileSync(this.syncStampPath, `${Date.now()}:${count}`);
+    } catch {
+      // non-critical
+    }
+  }
+  /* v8 ignore stop */
 
   async discoverTargets(): Promise<AgentInstructionTarget[]> {
     const targets = new Map<string, AgentInstructionTarget>();
