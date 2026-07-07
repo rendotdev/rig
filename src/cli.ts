@@ -458,9 +458,14 @@ export class CliApplication {
       .action(async () => {
         const $ = (globalThis as typeof globalThis & { Bun: { $: unknown } }).Bun.$;
         const currentVersion = this.version();
+        const pm = await this.detectPackageManager($);
         console.log(`Current version: ${currentVersion}`);
-        console.log("Checking for updates...");
-        const result = await $`npm install -g @rendotdev/rig@latest --force`.quiet().nothrow();
+        console.log(`Updating via ${pm}...`);
+        const cmd =
+          pm === "bun"
+            ? $`bun install -g @rendotdev/rig@latest`.quiet().nothrow()
+            : $`npm install -g @rendotdev/rig@latest --force`.quiet().nothrow();
+        const result = await cmd;
         if (result.exitCode !== 0) {
           console.error("Update failed.");
           process.exit(1);
@@ -700,6 +705,19 @@ export class CliApplication {
     }
     return { tool: parts[0], command: parts[1] };
   }
+
+  /* v8 ignore start */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async detectPackageManager($: any): Promise<"bun" | "npm"> {
+    try {
+      const rigPath = (await $`which rig`.quiet().nothrow().text()).trim();
+      if (rigPath.includes(".bun")) return "bun";
+    } catch {
+      // fall through
+    }
+    return "npm";
+  }
+  /* v8 ignore stop */
 
   private version(): string {
     try {
