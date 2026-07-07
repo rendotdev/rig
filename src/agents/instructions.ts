@@ -1,5 +1,5 @@
 // Keep in sync with README.md "Agent?" section
-export const RigAgentInstructions = `The \`rig\` CLI is installed on this machine. It lets agents discover, run, and create local typed tools.
+export const RigAgentInstructions = `The \`rig\` CLI is installed on this machine. It is *your* CLI. You own its various tools and commands. Use it to create, edit, and run tools when you need repeatable and determinstic workflows.
 
 - Run \`rig\` (or \`rig init\`) to set up or sync rig. This also updates detected AGENTS.md and CLAUDE.md files with available rig tools.
 - Run \`rig create <tool>\` when the user asks you to turn a repeatable workflow into a reusable tool.
