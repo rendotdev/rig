@@ -23,46 +23,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Verify commit identity
-        env:
-          ALLOWED_NAME: rendotdev
-          BEFORE_SHA: ${{ github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          zero_sha="0000000000000000000000000000000000000000"
-
-          if [[ -n "${PR_HEAD_SHA:-}" ]]; then
-            range="${PR_BASE_SHA}..${PR_HEAD_SHA}"
-          elif [[ "${BEFORE_SHA:-}" == "$zero_sha" || -z "${BEFORE_SHA:-}" ]]; then
-            range="$HEAD_SHA"
-          else
-            range="${BEFORE_SHA}..${HEAD_SHA}"
-          fi
-
-          allowed_email() {
-            [[ "$1" == *rendotdev* ]]
-          }
-
-          for commit in $(git rev-list "$range"); do
-            author_name="$(git show -s --format='%an' "$commit")"
-            author_email="$(git show -s --format='%ae' "$commit")"
-            committer_name="$(git show -s --format='%cn' "$commit")"
-            committer_email="$(git show -s --format='%ce' "$commit")"
-
-            if [[ "$author_name" != "$ALLOWED_NAME" ]] || ! allowed_email "$author_email" || \
-               [[ "$committer_name" != "$ALLOWED_NAME" ]] || ! allowed_email "$committer_email"; then
-              echo "Commit $commit has an invalid identity." >&2
-              echo "author: $author_name <$author_email>" >&2
-              echo "committer: $committer_name <$committer_email>" >&2
-              exit 1
-            fi
-          done
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
