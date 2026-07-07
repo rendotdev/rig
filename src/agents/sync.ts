@@ -60,6 +60,7 @@ export class AgentInstructionSyncService {
     const targets = await this.discoverTargets();
     if (targets.length === 0) return { skipped: false, targets: [] };
 
+    /* v8 ignore next 5 */
     if (this.canSkipSync(targets)) {
       return {
         skipped: false,

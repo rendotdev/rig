@@ -212,7 +212,9 @@ describe("cli application", () => {
 
     expect(await cli.run(["help"])).toContain("# rig");
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
-    expect(await cli.run(["help"])).toContain("The `rig` CLI is installed on this machine.");
+    expect(await cli.run(["help"])).toContain(
+      "The `rig` CLI is installed on this machine. It is _your_ CLI.",
+    );
     expect(await cli.run(["help", "sample"])).toContain("# sample");
     expect(await cli.run(["help", "sample.example"])).toContain("Tool: sample");
     expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
@@ -243,7 +245,7 @@ describe("cli application", () => {
 
     const synced = await readFile(join(project, "AGENTS.md"), "utf8");
     expect(synced).toContain("<!-- rig:agent-instructions:start -->");
-    expect(synced).toContain("The `rig` CLI is installed on this machine.");
+    expect(synced).toContain("The `rig` CLI is installed on this machine. It is *your* CLI.");
     expect(synced).toContain("sample.example");
 
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
