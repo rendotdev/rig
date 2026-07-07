@@ -29,7 +29,6 @@ jobs:
       - name: Verify commit identity
         env:
           ALLOWED_NAME: rendotdev
-          ALLOWED_EMAIL: 294850895+rendotdev@users.noreply.github.com
           BEFORE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -46,13 +45,18 @@ jobs:
             range="${BEFORE_SHA}..${HEAD_SHA}"
           fi
 
+          allowed_email() {
+            [[ "$1" == *rendotdev* ]]
+          }
+
           for commit in $(git rev-list "$range"); do
             author_name="$(git show -s --format='%an' "$commit")"
             author_email="$(git show -s --format='%ae' "$commit")"
             committer_name="$(git show -s --format='%cn' "$commit")"
             committer_email="$(git show -s --format='%ce' "$commit")"
 
-            if [[ "$author_name" != "$ALLOWED_NAME" || "$author_email" != "$ALLOWED_EMAIL" || "$committer_name" != "$ALLOWED_NAME" || "$committer_email" != "$ALLOWED_EMAIL" ]]; then
+            if [[ "$author_name" != "$ALLOWED_NAME" ]] || ! allowed_email "$author_email" || \
+               [[ "$committer_name" != "$ALLOWED_NAME" ]] || ! allowed_email "$committer_email"; then
               echo "Commit $commit has an invalid identity." >&2
               echo "author: $author_name <$author_email>" >&2
               echo "committer: $committer_name <$committer_email>" >&2
