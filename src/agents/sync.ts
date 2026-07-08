@@ -339,7 +339,7 @@ ${EndMarker}`;
   }
 
   /* v8 ignore next 14 */
-  private projectHasRegistry(targetPath: string): boolean {
+  private projectHasRegistry(_targetPath: string): boolean {
     if (!existsSync(this.paths.configPath)) return false;
     const config = JSON.parse(readFileSync(this.paths.configPath, "utf-8"));
     const projectRoot = this.safeRealpath(this.projectRoot());
