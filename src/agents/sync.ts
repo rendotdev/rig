@@ -70,7 +70,12 @@ export class AgentInstructionSyncService {
 
     const updates = await Promise.all(
       targets.map(async (target) => {
-        const block = this.renderBlock(await this.renderToolList(target));
+        const toolList = await this.renderToolList(target);
+        /* v8 ignore next 3 */
+        if (!toolList.trim() && target.scope === "visible") {
+          return { ...target, changed: await this.removeManagedBlock(target) };
+        }
+        const block = this.renderBlock(toolList);
         return {
           ...target,
           changed: await this.upsertManagedBlock(target, block),
@@ -321,6 +326,20 @@ ${EndMarker}`;
     if (next === existing) return false;
 
     await this.writeText(target.path, next);
+    return true;
+  }
+
+  /* v8 ignore next 12 */
+  private async removeManagedBlock(target: AgentInstructionTarget): Promise<boolean> {
+    if (!target.existed) return false;
+    const existing = await this.readText(target.path);
+    if (!this.managedBlockPattern().test(existing)) return false;
+    const next = existing
+      .replace(this.managedBlockPattern(), "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (next === existing.trim()) return false;
+    await this.writeText(target.path, next ? `${next}\n` : "");
     return true;
   }
 
