@@ -1,7 +1,15 @@
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+} from "node:fs";
 import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { type ConfigOptions } from "../config/config";
+import { RigConfigStore, type ConfigOptions } from "../config/config";
 import { RigPaths } from "../config/paths";
 import { ToolListService } from "../tools/list";
 import { RigAgentInstructions } from "./instructions";
@@ -47,11 +55,13 @@ export class AgentInstructionSyncService {
   private readonly cwd: string;
   private readonly paths: RigPaths;
   private readonly listService: ToolListService;
+  private readonly configStore: RigConfigStore;
 
   constructor(options: AgentInstructionSyncOptions = {}) {
     this.cwd = resolve(options.cwd ?? process.cwd());
     this.paths = new RigPaths(options);
     this.listService = new ToolListService(options);
+    this.configStore = new RigConfigStore(options);
   }
 
   async sync(): Promise<AgentInstructionSyncResult> {
@@ -70,12 +80,11 @@ export class AgentInstructionSyncService {
 
     const updates = await Promise.all(
       targets.map(async (target) => {
-        const toolList = await this.renderToolList(target);
         /* v8 ignore next 3 */
-        if (!toolList.trim() && target.scope === "visible") {
+        if (target.scope === "visible" && !this.projectHasRegistry(target.path)) {
           return { ...target, changed: await this.removeManagedBlock(target) };
         }
-        const block = this.renderBlock(toolList);
+        const block = this.renderBlock(await this.renderToolList(target));
         return {
           ...target,
           changed: await this.upsertManagedBlock(target, block),
@@ -327,6 +336,31 @@ ${EndMarker}`;
 
     await this.writeText(target.path, next);
     return true;
+  }
+
+  /* v8 ignore next 14 */
+  private projectHasRegistry(targetPath: string): boolean {
+    if (!existsSync(this.paths.configPath)) return false;
+    const config = JSON.parse(readFileSync(this.paths.configPath, "utf-8"));
+    const projectRoot = this.safeRealpath(this.projectRoot());
+    const prefix = projectRoot + "/";
+    const allPaths = [
+      this.paths.resolve(config.baseRegistryDir ?? ""),
+      ...(config.customRegistries ?? []).map((p: string) => this.paths.resolve(p)),
+    ];
+    return allPaths.some((p) => {
+      const resolved = this.safeRealpath(p);
+      return resolved.startsWith(prefix) || resolved === projectRoot;
+    });
+  }
+
+  /* v8 ignore next 5 */
+  private safeRealpath(p: string): string {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
   }
 
   /* v8 ignore next 12 */

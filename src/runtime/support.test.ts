@@ -158,6 +158,9 @@ describe("coverage support", () => {
       "utf8",
     );
     await symlink(globalAgentSource, globalAgentLink);
+    // Add a custom registry inside the project so sync targets project-level files
+    const { RegistryConfigService } = await import("../registry/registry");
+    await new RegistryConfigService({ homeDir: home }).add(join(project, "rig-tools"));
     await new ToolCreator({ homeDir: home }).create("sample");
 
     const service = new AgentInstructionSyncService({ homeDir: home, cwd: nested });
@@ -271,6 +274,8 @@ describe("coverage support", () => {
     const skipProject = join(skipHome, "project");
     await mkdir(join(skipProject, ".git"), { recursive: true });
     await writeFile(join(skipProject, "AGENTS.md"), "# Notes\n", "utf8");
+    const { RegistryConfigService: SkipRegistryConfig } = await import("../registry/registry");
+    await new SkipRegistryConfig({ homeDir: skipHome }).add(join(skipProject, "rig-tools"));
     await new ToolCreator({ homeDir: skipHome }).create("skiptool");
 
     const skipService = new AgentInstructionSyncService({ homeDir: skipHome, cwd: skipProject });
