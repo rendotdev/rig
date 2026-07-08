@@ -159,7 +159,6 @@ describe("coverage support", () => {
     );
     await symlink(globalAgentSource, globalAgentLink);
     // Add a custom registry inside the project so sync targets project-level files
-    const { RegistryConfigService } = await import("../registry/registry");
     await new RegistryConfigService({ homeDir: home }).add(join(project, "rig-tools"));
     await new ToolCreator({ homeDir: home }).create("sample");
 
