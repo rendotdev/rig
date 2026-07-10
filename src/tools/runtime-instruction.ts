@@ -44,6 +44,11 @@ Tool logging:
 Tool key-value state:
 - Use \`context.kv.set(key, value)\` and \`context.kv.get(key)\` for lightweight JSON state stored beside the tool entry file as \`kv.sqlite\`.
 
+Tool query cache:
+- Use \`await context.cache.query({ queryKey, queryFn, staleTime })\` for JSON-compatible derived data stored beside the tool entry file as \`cache.sqlite\`.
+- Query keys are non-empty JSON-compatible arrays. Missing data waits for \`queryFn\`; fresh data returns immediately; stale data returns immediately while Rig revalidates.
+- Use \`context.cache.peek(queryKey)\`, \`.set(queryKey, value)\`, \`.invalidate(queryKey)\`, \`.remove(queryKey)\`, and \`.clear()\` for explicit cache control.
+
 Tool SQLite database:
 - Add \`setupDb: (db) => { db.migrate(1, "create table", "create table ..."); }\` when a tool needs persistent state.
 - Rig stores the database beside the tool entry file as \`index.sqlite\` and runs \`setupDb\` before every command.
@@ -67,6 +72,7 @@ Command run context:
 - \`context.cwd\` is the current working directory.
 - \`context.db\` is available when the tool defines \`setupDb\`.
 - \`context.kv\` is always available for lightweight JSON key-value state.
+- \`context.cache\` is always available for persistent stale-while-revalidate query data.
 - \`context.log\` is a structured Pino logger for this tool command.
 - \`context.rig\` is the toolkit (same as the factory \`rig\` arg, useful for nested tool calls).
 - \`context.collections\` provides handles for each declared collection (empty object if none defined).
