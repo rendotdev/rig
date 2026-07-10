@@ -6,6 +6,7 @@ import { RigLoggerFactory } from "../runtime/logger";
 import { RigOutputTruncator } from "../runtime/truncation";
 import { ToolCollectionService, type CollectionHandle } from "./collection";
 import { ToolDatabaseService, UnavailableToolDatabaseFactory } from "./db";
+import { type ManagedRigToolCache, ToolCacheService } from "./cache";
 import { ToolKvStoreService } from "./kv";
 import { ToolLoader } from "./loader";
 import { SchemaRenderer } from "./schema";
@@ -266,6 +267,7 @@ class DryRunPresenter {
 export class ToolRunner {
   private readonly databases = new ToolDatabaseService();
   private readonly kvStores = new ToolKvStoreService();
+  private readonly caches = new ToolCacheService();
   private readonly collections = new ToolCollectionService();
   private readonly loggerFactory: RigLoggerFactory;
   private readonly loader: ToolLoader;
@@ -285,6 +287,7 @@ export class ToolRunner {
   ): Promise<RunCommandResult> {
     let db: RigToolDatabase | undefined;
     let kv: RigToolKvStore | undefined;
+    let cache: ManagedRigToolCache | undefined;
     let collectionHandles: Record<string, CollectionHandle<any>> | undefined;
     const log = this.loggerFactory.tool(toolName, commandName);
     try {
@@ -318,6 +321,7 @@ export class ToolRunner {
       const rig = createRigToolKit(this.options);
       db = await this.databases.setup(tool);
       kv = await this.kvStores.setup(tool);
+      cache = await this.caches.setup(tool, log);
       collectionHandles = await this.collections.setup(tool);
       log.info("Tool command started.");
       const data = await command.run({
@@ -327,6 +331,7 @@ export class ToolRunner {
         cwd: process.cwd(),
         db: db ?? this.unavailableDatabases.create(toolName),
         kv,
+        cache,
         log,
         rig,
         collections: collectionHandles ?? {},
@@ -361,8 +366,26 @@ export class ToolRunner {
       };
     } finally {
       this.collections.close(collectionHandles);
+      await this.settleCache(cache);
+      this.closeCache(cache);
       this.closeKv(kv);
       this.closeDatabase(db);
+    }
+  }
+
+  private async settleCache(cache: ManagedRigToolCache | undefined): Promise<void> {
+    try {
+      await cache?.settle();
+    } catch {
+      // The command already finished. Ignore settling failures so they do not mask command results.
+    }
+  }
+
+  private closeCache(cache: ManagedRigToolCache | undefined): void {
+    try {
+      cache?.close();
+    } catch {
+      // The command already finished. Ignore close failures so they do not mask command results.
     }
   }
 

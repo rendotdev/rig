@@ -37,6 +37,23 @@ API:
 - \`context.kv.get<T>(key)\` retrieve (undefined if missing)`,
   },
 
+  cache: {
+    title: "Query Cache",
+    content: `- Persistent JSON cache for derived data
+- Stored in cache.sqlite beside the tool file
+- Missing data waits for the query function
+- Fresh data returns immediately
+- Stale data returns immediately while Rig revalidates
+
+API:
+- \`context.cache.query({ queryKey, queryFn, staleTime })\`
+- \`context.cache.peek(queryKey)\`
+- \`context.cache.set(queryKey, value)\`
+- \`context.cache.invalidate(queryKey)\`
+- \`context.cache.remove(queryKey)\`
+- \`context.cache.clear()\``,
+  },
+
   db: {
     title: "SQLite Database",
     content: `- Raw Bun SQLite with migration support

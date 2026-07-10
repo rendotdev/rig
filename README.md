@@ -26,7 +26,7 @@ If you are not sure why you would want rig, here are some of my personal use cas
 - ...
   _-> I'll keep adding more of my tools as I keep automating my workflows..._
 
-rig also has built-in features for tool-scoped shell execution, cron, environment variable management, key-value storage, SQLite databases, logging, command chaining, and more.
+rig also has built-in features for tool-scoped shell execution, cron, environment variable management, key-value storage, stale-while-revalidate query caching, SQLite databases, logging, command chaining, and more.
 
 ## Install
 
@@ -76,10 +76,20 @@ The `rig` CLI is installed on this machine. It is _your_ CLI. You own its variou
 - Run `rig typecheck <tool>` to validate a tool's TypeScript and runtime types.
 - Run `rig env <tool> KEY=VALUE` to configure tool secrets/settings; run `rig env <tool> remove KEY` to remove them.
 - Run `rig list` to discover tools and available `rig run ...` commands.
+- Run `rig help <topic>` for concept docs (collections, cache, kv, db, env, log, shell, run, tool, args, paths).
 - Run `rig help <tool>` or `rig help <tool>.<command>` for usage, inputs, and outputs.
 - Run `rig run <tool>.<command> [args]` to execute a tool command.
 - To chain commands, use `--as <id>`, `--pipe`, and `@id.path` references to pass structured outputs instead of guessing filenames.
 - To learn more, run `rig --help` for other Rig CLI commands.
+
+### Learn more
+
+- Run `rig help collections` to learn about tool content collections (schema-validated markdown document stores with FTS search).
+- Run `rig help tool` to learn how to create a new rig tool from scratch.
+- Run `rig help kv` to learn about lightweight key-value state.
+- Run `rig help cache` to learn about persistent stale-while-revalidate query data.
+- Run `rig help db` to learn about raw SQLite databases with migrations.
+- Run `rig help topics` to see all available help topics.
 
 When rig runs, it keeps detected `AGENTS.md` and `CLAUDE.md` files updated with these instructions and the current `rig list` output.
 

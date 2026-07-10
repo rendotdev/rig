@@ -2,8 +2,9 @@ import { afterEach, describe, expect, test } from "vitest";
 import { existsSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ToolCreator } from "./create";
+import { ToolCacheService } from "./cache";
 import { ToolDatabaseService } from "./db";
 import { ToolHelpService } from "./help";
 import { ToolInspector } from "./inspect";
@@ -31,6 +32,16 @@ class TestHomeStore {
 
 class FakeSqliteStore {
   readonly kv = new Map<string, string>();
+  readonly cache = new Map<
+    string,
+    {
+      keyJson: string;
+      valueJson: string;
+      dataUpdatedAt: number;
+      invalidatedAt: number | null;
+      lastAccessedAt: number;
+    }
+  >();
   readonly migrations = new Map<number, { name: string; checksum: string }>();
   readonly notes: string[] = [];
   setupRuns = 0;
@@ -49,6 +60,16 @@ class FakeSqliteStatement {
     if (this.sql.includes("from _rig_kv")) {
       const valueJson = this.store.kv.get(String(params));
       return valueJson === undefined ? null : { value_json: valueJson };
+    }
+    if (this.sql.includes("from _rig_cache")) {
+      const row = this.store.cache.get(String(params));
+      if (!row) return null;
+      return {
+        key_json: row.keyJson,
+        value_json: row.valueJson,
+        data_updated_at: row.dataUpdatedAt,
+        invalidated_at: row.invalidatedAt,
+      };
     }
     if (this.sql.includes("count(*) as count from setup_runs")) {
       return { count: this.store.setupRuns };
@@ -72,6 +93,30 @@ class FakeSqliteStatement {
     if (this.sql.includes("into _rig_kv")) {
       this.store.kv.set(String(record.key), String(record.valueJson));
       return { lastInsertRowid: this.store.kv.size, changes: 1 };
+    }
+    if (this.sql.includes("into _rig_cache")) {
+      this.store.cache.set(String(record.keyHash), {
+        keyJson: String(record.keyJson),
+        valueJson: String(record.valueJson),
+        dataUpdatedAt: Number(record.dataUpdatedAt),
+        invalidatedAt: null,
+        lastAccessedAt: Number(record.lastAccessedAt),
+      });
+      return { lastInsertRowid: this.store.cache.size, changes: 1 };
+    }
+    if (this.sql.includes("set invalidated_at")) {
+      const row = this.store.cache.get(String(record.keyHash));
+      if (row) row.invalidatedAt = Number(record.invalidatedAt);
+      return { lastInsertRowid: 0, changes: row ? 1 : 0 };
+    }
+    if (this.sql.includes("set last_accessed_at")) {
+      const row = this.store.cache.get(String(record.keyHash));
+      if (row) row.lastAccessedAt = Number(record.lastAccessedAt);
+      return { lastInsertRowid: 0, changes: row ? 1 : 0 };
+    }
+    if (this.sql.includes("delete from _rig_cache where")) {
+      const deleted = this.store.cache.delete(String(params));
+      return { lastInsertRowid: 0, changes: deleted ? 1 : 0 };
     }
     if (this.sql.includes("into notes")) {
       this.store.notes.push(String(record.text));
@@ -102,11 +147,20 @@ class FakeSqliteDatabase {
     this.stores.clear();
   }
 
+  static store(filename: string): FakeSqliteStore | undefined {
+    return this.stores.get(filename);
+  }
+
   query(sql: string): FakeSqliteStatement {
     return new FakeSqliteStatement(this.store, sql);
   }
 
-  run(_sql: string): { lastInsertRowid: number; changes: number } {
+  run(sql: string): { lastInsertRowid: number; changes: number } {
+    if (sql.includes("delete from _rig_cache")) {
+      const changes = this.store.cache.size;
+      this.store.cache.clear();
+      return { lastInsertRowid: 0, changes };
+    }
     return { lastInsertRowid: 0, changes: 0 };
   }
 
@@ -727,6 +781,253 @@ export default (rig) => rig.defineTool({
     expect(() => unavailable.set("key", "value")).toThrow(
       "context.kv requires the Bun SQLite runtime",
     );
+  });
+
+  test("provides a persistent stale-while-revalidate query cache", async () => {
+    new FakeSqliteEnvironment().install();
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "cached");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(
+      join(toolDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "cached",
+  description: "Cache test tool.",
+  commands: {
+    read: rig.defineCommand({
+      description: "Read cached data.",
+      input: rig.z.object({ staleTime: rig.z.number(), fail: rig.z.boolean().optional() }),
+      output: rig.z.object({ value: rig.z.string(), calls: rig.z.number(), cachePath: rig.z.string() }),
+      run: async (context) => {
+        const value = await context.cache.query({
+          queryKey: ["value"],
+          staleTime: context.input.staleTime,
+          queryFn: async () => {
+            const calls = (context.kv.get("calls") ?? 0) + 1;
+            context.kv.set("calls", calls);
+            if (context.input.fail) throw new Error("refresh failed");
+            return "value-" + calls;
+          },
+        });
+        return { value, calls: context.kv.get("calls") ?? 0, cachePath: context.cache.path };
+      },
+    }),
+  },
+});
+`,
+      "utf8",
+    );
+
+    const runner = new ToolRunner({ homeDir: home });
+    const cold = await runner.run("cached", "read", {
+      homeDir: home,
+      input: JSON.stringify({ staleTime: 60_000 }),
+    });
+    const fresh = await runner.run("cached", "read", {
+      homeDir: home,
+      input: JSON.stringify({ staleTime: 60_000 }),
+    });
+    const stale = await runner.run("cached", "read", {
+      homeDir: home,
+      input: JSON.stringify({ staleTime: 0 }),
+    });
+    const refreshed = await runner.run("cached", "read", {
+      homeDir: home,
+      input: JSON.stringify({ staleTime: 60_000 }),
+    });
+    const failedRefresh = await runner.run("cached", "read", {
+      homeDir: home,
+      input: JSON.stringify({ staleTime: 0, fail: true }),
+    });
+    const cachePath = join(toolDir, "cache.sqlite");
+
+    expect(cold).toMatchObject({
+      exitCode: 0,
+      envelope: { data: { value: "value-1", calls: 1, cachePath } },
+    });
+    expect(fresh).toMatchObject({
+      exitCode: 0,
+      envelope: { data: { value: "value-1", calls: 1, cachePath } },
+    });
+    expect(stale).toMatchObject({
+      exitCode: 0,
+      envelope: { data: { value: "value-1", calls: 2, cachePath } },
+    });
+    expect(refreshed).toMatchObject({
+      exitCode: 0,
+      envelope: { data: { value: "value-2", calls: 2, cachePath } },
+    });
+    expect(failedRefresh).toMatchObject({
+      exitCode: 0,
+      envelope: { data: { value: "value-2", calls: 3, cachePath } },
+    });
+    expect(existsSync(cachePath)).toBe(true);
+    expect(await readFile(join(home, "rig", ".logs", "rig.log"), "utf8")).toContain(
+      "Cache revalidation failed.",
+    );
+  });
+
+  test("supports cache controls, deterministic keys, validation, and unavailable runtimes", async () => {
+    new FakeSqliteEnvironment().install();
+    const home = await homes.create();
+    const toolPath = join(home, "rig", "tools", "cache-api", "index.rig.ts");
+    const warnings: Array<{ bindings: unknown; message: unknown }> = [];
+    const log = {
+      warn: (bindings: unknown, message: unknown) => warnings.push({ bindings, message }),
+    } as never;
+    const service = new ToolCacheService();
+    const cache = await service.setup({ path: toolPath } as never, log);
+    const cachePath = join(dirname(toolPath), "cache.sqlite");
+
+    expect(service.cachePathForToolPath(toolPath)).toBe(cachePath);
+    expect(cache.path).toBe(cachePath);
+    expect(cache.peek(["missing"])).toBeUndefined();
+
+    const objectKey = ["todos", { b: 2, omitted: undefined, a: 1 }] as const;
+    cache.set(objectKey, { ok: true });
+    expect(cache.peek(["todos", { a: 1, b: 2 }])).toEqual({ ok: true });
+    expect(cache.peek(["todos", { a: 1, b: 3 }])).toBeUndefined();
+
+    const shared = { value: true };
+    const nullPrototype = Object.assign(Object.create(null) as Record<string, unknown>, {
+      enabled: true,
+    });
+    cache.set(["json", null, true, 1, "text", shared, shared, nullPrototype], "valid");
+    expect(cache.peek(["json", null, true, 1, "text", shared, shared, { enabled: true }])).toBe(
+      "valid",
+    );
+
+    let calls = 0;
+    const first = cache.query({
+      queryKey: ["dedupe"],
+      queryFn: async () => `value-${++calls}`,
+    });
+    const second = cache.query({
+      queryKey: ["dedupe"],
+      queryFn: async () => `ignored-${++calls}`,
+    });
+    await expect(Promise.all([first, second])).resolves.toEqual(["value-1", "value-1"]);
+    expect(calls).toBe(1);
+    await expect(
+      cache.query({ queryKey: ["dedupe"], staleTime: Infinity, queryFn: () => "ignored" }),
+    ).resolves.toBe("value-1");
+
+    cache.set(["invalidated"], "old");
+    cache.invalidate(["invalidated"]);
+    await expect(
+      cache.query({
+        queryKey: ["invalidated"],
+        staleTime: Infinity,
+        queryFn: () => "new",
+      }),
+    ).resolves.toBe("old");
+    await cache.settle();
+    expect(cache.peek(["invalidated"])).toBe("new");
+
+    cache.set(["failure"], "stale");
+    await expect(
+      cache.query({
+        queryKey: ["failure"],
+        staleTime: 0,
+        queryFn: () => {
+          throw new Error("background failure");
+        },
+      }),
+    ).resolves.toBe("stale");
+    await cache.settle();
+    expect(cache.peek(["failure"])).toBe("stale");
+    expect(warnings).toHaveLength(1);
+
+    await expect(
+      cache.query({
+        queryKey: ["cold-failure"],
+        queryFn: () => Promise.reject(new Error("cold failure")),
+      }),
+    ).rejects.toThrow("cold failure");
+    expect(warnings).toHaveLength(1);
+
+    cache.set(["remove"], true);
+    cache.remove(["remove"]);
+    expect(cache.peek(["remove"])).toBeUndefined();
+    cache.set(["clear-a"], true);
+    cache.set(["clear-b"], true);
+    cache.clear();
+    expect(cache.peek(["clear-a"])).toBeUndefined();
+
+    expect(() => cache.peek([])).toThrow("query keys must be non-empty arrays");
+    expect(() => cache.peek("bad" as never)).toThrow("query keys must be non-empty arrays");
+    expect(() => cache.peek([Number.NaN])).toThrow("JSON-compatible values");
+    expect(() => cache.peek([Number.POSITIVE_INFINITY])).toThrow("JSON-compatible values");
+    expect(() => cache.peek([undefined])).toThrow("JSON-compatible values");
+    expect(() => cache.peek([() => true])).toThrow("JSON-compatible values");
+    expect(() => cache.peek([Symbol("bad")])).toThrow("JSON-compatible values");
+    expect(() => cache.peek([1n])).toThrow("JSON-compatible values");
+    expect(() => cache.peek([new Date()])).toThrow("JSON-compatible values");
+    const cyclic: unknown[] = [];
+    cyclic.push(cyclic);
+    expect(() => cache.peek(cyclic)).toThrow("cannot contain cycles");
+    expect(() => cache.set(["undefined"], undefined)).toThrow("cannot store undefined");
+    await expect(
+      cache.query({ queryKey: ["bad-stale"], staleTime: -1, queryFn: () => true }),
+    ).rejects.toThrow("staleTime must be a non-negative number");
+    await expect(
+      cache.query({ queryKey: ["bad-stale"], staleTime: Number.NaN, queryFn: () => true }),
+    ).rejects.toThrow("staleTime must be a non-negative number");
+    await expect(
+      cache.query({ queryKey: ["bad-stale"], staleTime: "bad" as never, queryFn: () => true }),
+    ).rejects.toThrow("staleTime must be a non-negative number");
+
+    cache.set(["collision"], true);
+    const row = [...(FakeSqliteDatabase.store(cachePath)?.cache.values() ?? [])].find(
+      (value) => value.valueJson === "true",
+    );
+    expect(row).toBeDefined();
+    row!.keyJson = '["different"]';
+    expect(() => cache.peek(["collision"])).toThrow("query key hash collision");
+    cache.close();
+
+    new FakeSqliteEnvironment().uninstall();
+    const unavailable = await service.setup({ path: toolPath } as never, log);
+    expect(() => unavailable.query({ queryKey: ["key"], queryFn: () => true })).toThrow(
+      "context.cache requires the Bun SQLite runtime",
+    );
+    expect(() => unavailable.peek(["key"])).toThrow(
+      "context.cache requires the Bun SQLite runtime",
+    );
+    expect(() => unavailable.set(["key"], true)).toThrow(
+      "context.cache requires the Bun SQLite runtime",
+    );
+    expect(() => unavailable.invalidate(["key"])).toThrow(
+      "context.cache requires the Bun SQLite runtime",
+    );
+    expect(() => unavailable.remove(["key"])).toThrow(
+      "context.cache requires the Bun SQLite runtime",
+    );
+    expect(() => unavailable.clear()).toThrow("context.cache requires the Bun SQLite runtime");
+    await expect(unavailable.settle()).resolves.toBeUndefined();
+    expect(() => unavailable.close()).not.toThrow();
+  });
+
+  test("does not let cache cleanup failures mask command results", async () => {
+    const runner = new ToolRunner();
+    await expect(
+      (
+        runner as unknown as {
+          settleCache(cache: { settle(): Promise<void> }): Promise<void>;
+        }
+      ).settleCache({ settle: () => Promise.reject(new Error("settle failed")) }),
+    ).resolves.toBeUndefined();
+    expect(() =>
+      (
+        runner as unknown as {
+          closeCache(cache: { close(): void }): void;
+        }
+      ).closeCache({
+        close: () => {
+          throw new Error("close failed");
+        },
+      }),
+    ).not.toThrow();
   });
 
   test("returns changed migration errors as envelopes", async () => {

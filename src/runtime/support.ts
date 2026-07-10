@@ -280,6 +280,24 @@ export type RigToolKvStore = {
   set(key: string, value: unknown): void;
 };
 
+export type RigCacheKey = readonly unknown[];
+
+export type RigCacheQueryOptions<T> = {
+  queryKey: RigCacheKey;
+  queryFn: () => T | Promise<T>;
+  staleTime?: number;
+};
+
+export type RigToolCache = {
+  readonly path: string;
+  query<T>(options: RigCacheQueryOptions<T>): Promise<T>;
+  peek<T = unknown>(queryKey: RigCacheKey): T | undefined;
+  set<T>(queryKey: RigCacheKey, value: T): void;
+  invalidate(queryKey: RigCacheKey): void;
+  remove(queryKey: RigCacheKey): void;
+  clear(): void;
+};
+
 export type RigLogMethod = {
   (message: string): void;
   (bindings: Record<string, unknown>, message?: string): void;
@@ -303,6 +321,7 @@ export type RigToolRunContext<Input, Env = unknown> = {
   cwd: string;
   db: RigToolDatabase;
   kv: RigToolKvStore;
+  cache: RigToolCache;
   log: RigToolLogger;
   rig: RigToolKit;
 };
