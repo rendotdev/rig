@@ -45,7 +45,7 @@ class ReleaseOptionsParser {
 
   usage(): string {
     return [
-      "Usage: npm run release -- [patch|minor|major|x.y.z] [options]",
+      "Usage: vp run release -- [patch|minor|major|x.y.z] [options]",
       "",
       "By default this commits package.json, pushes an annotated vX tag, and lets GitHub Actions run publish.yml from CI. It never runs npm publish locally.",
       "",
@@ -53,12 +53,12 @@ class ReleaseOptionsParser {
       "  --dry-run       Print the planned release without changing files.",
       "  --no-push       Commit and tag locally, but do not push or start CI.",
       "  --no-tag        Commit the version bump without creating a git tag or starting publish.yml.",
-      "  --skip-checks   Skip bun run check and bun run build.",
+      "  --skip-checks   Skip vp run validate.",
       "",
       "Examples:",
-      "  npm run release:patch",
-      "  npm run release -- minor",
-      "  npm run release -- 0.1.0 --no-push",
+      "  vp run release:patch",
+      "  vp run release -- minor",
+      "  vp run release -- 0.1.0 --no-push",
     ].join("\n");
   }
 }
@@ -207,7 +207,7 @@ class ReleaseCommand {
 
     manifest.version = nextVersion;
     await this.packageFile.write(manifest);
-    this.runner.run(["bunx", "oxfmt", "package.json"]);
+    this.runner.run(["vp", "fmt", "package.json"]);
     this.runner.run(["git", "add", "package.json"]);
     this.runner.run(["git", "commit", "-m", `Release ${tagName}`]);
 
@@ -230,8 +230,7 @@ class ReleaseCommand {
   }
 
   private runChecks(): void {
-    this.runner.run(["bun", "run", "check"]);
-    this.runner.run(["bun", "run", "build"]);
+    this.runner.run(["vp", "run", "validate"]);
   }
 
   private push(options: ReleaseOptions, tagName: string): void {
