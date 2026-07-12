@@ -20,6 +20,28 @@ type CronJob = {
   input?: unknown;
 };
 
+class NpmPackResultClass {
+  constructor(private readonly params: { stdout: string }) {}
+
+  public filename(): string {
+    const parsed = JSON.parse(this.params.stdout) as unknown;
+    const candidate = Array.isArray(parsed)
+      ? parsed[0]
+      : typeof parsed === "object" && parsed !== null
+        ? Object.values(parsed)[0]
+        : undefined;
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("filename" in candidate) ||
+      typeof candidate.filename !== "string"
+    ) {
+      throw new Error(`npm pack returned no package filename: ${this.params.stdout}`);
+    }
+    return candidate.filename;
+  }
+}
+
 class ProcessRunnerClass {
   public async run(params: {
     command: string[];
@@ -82,8 +104,10 @@ class InstalledDistributionClass {
       cwd: repositoryRoot,
     });
     if (packed.exitCode !== 0) throw new Error(packed.stderr || packed.stdout);
-    const packResult = JSON.parse(packed.stdout) as Array<{ filename: string }>;
-    this.tarballPath = join(this.rootDir, packResult[0]!.filename);
+    this.tarballPath = join(
+      this.rootDir,
+      new NpmPackResultClass({ stdout: packed.stdout }).filename(),
+    );
 
     const installed = await this.processes.run({
       command: ["npm", "install", "--no-audit", "--no-fund", this.tarballPath],
@@ -164,6 +188,20 @@ describe("installed Rig distribution and recovery", () => {
 
   afterAll(async () => {
     await distribution.cleanup();
+  });
+
+  test("accepts npm 11 and npm 12 packed-artifact metadata", () => {
+    expect(new NpmPackResultClass({ stdout: '[{"filename":"npm-11.tgz"}]' }).filename()).toBe(
+      "npm-11.tgz",
+    );
+    expect(
+      new NpmPackResultClass({
+        stdout: '{"@rendotdev/rig":{"filename":"npm-12.tgz"}}',
+      }).filename(),
+    ).toBe("npm-12.tgz");
+    expect(() => new NpmPackResultClass({ stdout: "{}" }).filename()).toThrow(
+      "no package filename",
+    );
   });
 
   test("packs and installs a consumer-ready CLI with generated runtime support", async () => {
