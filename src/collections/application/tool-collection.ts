@@ -284,6 +284,7 @@ export type CollectionFileRecord = CollectionFileMetadata & {
 };
 
 export interface CollectionIndexInterface {
+  withExclusiveInitialization<T>(params: { operation: () => Promise<T> }): Promise<T>;
   open(): Promise<void>;
   upsertDoc(entry: CollectionEntry<Record<string, unknown>>, fileMtime: number): void;
   deleteDoc(id: string): void;
@@ -366,12 +367,16 @@ class SqliteCollectionIndexClass implements CollectionIndexInterface {
   private readonly dbPath: string;
   private readonly collectionPath: string;
   private readonly sqliteLoader = new BunSqliteModuleLoaderClass();
-  private readonly recoveryLock: BoundedFileLockClass;
+  private readonly initializationLock: BoundedFileLockClass;
 
   constructor(collectionPath: string) {
     this.collectionPath = collectionPath;
     this.dbPath = join(collectionPath, ".index.sqlite");
-    this.recoveryLock = new BoundedFileLockClass(this.dbPath);
+    this.initializationLock = new BoundedFileLockClass(this.dbPath);
+  }
+
+  async withExclusiveInitialization<T>(params: { operation: () => Promise<T> }): Promise<T> {
+    return this.initializationLock.run(params.operation);
   }
 
   async open(): Promise<void> {
@@ -385,7 +390,7 @@ class SqliteCollectionIndexClass implements CollectionIndexInterface {
     } catch (error) {
       this.close();
       if (!this.isRecoverable(error)) throw error;
-      await this.recoveryLock.run(() => this.recover(Database));
+      await this.recover(Database);
     }
   }
 
@@ -691,8 +696,12 @@ export class CollectionHandleImplClass<
 
   async init(): Promise<void> {
     await mkdir(this.path, { recursive: true });
-    await this.index.open();
-    await this.reconcile();
+    await this.index.withExclusiveInitialization({
+      operation: async () => {
+        await this.index.open();
+        await this.reconcile();
+      },
+    });
   }
 
   async create(entry: { id?: string; data: T; body?: string }): Promise<CollectionEntry<T>> {
