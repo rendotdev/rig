@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, test } from "vite-plus/test";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { RigConfigStore } from "./config";
+import { pathToFileURL } from "node:url";
+import { RigConfigStoreClass } from "./config";
 import {
-  RigDirectoryMigrationService,
+  RigDirectoryMigrationServiceClass,
   RigHomeDirectoryMigrationPromptId,
-  RigMigrationPromptStore,
+  RigMigrationPromptStoreClass,
 } from "./migration";
-import { RigPaths } from "./paths";
+import { RigPathsClass } from "./paths";
 
 class TestHomeStore {
   private readonly homes: string[] = [];
@@ -36,7 +38,7 @@ afterEach(async () => {
 describe("config", () => {
   test("expands tilde paths", async () => {
     const home = await homes.create();
-    const paths = new RigPaths({ homeDir: home });
+    const paths = new RigPathsClass({ homeDir: home });
     expect(paths.expandTilde("~/rig/tools")).toBe(join(home, "rig/tools"));
     expect(paths.legacyRigDir).toBe(join(home, ".rig"));
     expect(paths.legacyDefaultBaseRegistryDir).toBe("~/.rig/tools");
@@ -45,8 +47,8 @@ describe("config", () => {
 
   test("creates first-run config and base registry in a temp home", async () => {
     const home = await homes.create();
-    const paths = new RigPaths({ homeDir: home });
-    const store = new RigConfigStore({ homeDir: home });
+    const paths = new RigPathsClass({ homeDir: home });
+    const store = new RigConfigStoreClass({ homeDir: home });
     const config = await store.ensure();
     expect(config.version).toBe(1);
     expect(store.migrationResult()).toBeUndefined();
@@ -68,7 +70,7 @@ describe("config", () => {
     );
     await writeFile(join(legacyDir, "tools", "legacy", "index.rig.ts"), "export default {};\n");
 
-    const store = new RigConfigStore({ homeDir: home });
+    const store = new RigConfigStoreClass({ homeDir: home });
     const config = await store.ensure();
 
     expect(store.migrationResult()).toMatchObject({
@@ -109,7 +111,7 @@ describe("config", () => {
     await writeFile(join(home, "rig", "update-check.json"), "{}\n");
     await writeFile(join(home, "rig", "migration-prompts.json"), "{}\n");
 
-    const store = new RigConfigStore({ homeDir: home });
+    const store = new RigConfigStoreClass({ homeDir: home });
     const config = await store.ensure();
 
     expect(store.migrationResult()).toMatchObject({ status: "migrated", configUpdated: false });
@@ -138,7 +140,7 @@ describe("config", () => {
       "utf8",
     );
 
-    const store = new RigConfigStore({ homeDir: home });
+    const store = new RigConfigStoreClass({ homeDir: home });
     const config = await store.ensure();
 
     expect(store.migrationResult()).toMatchObject({
@@ -153,13 +155,13 @@ describe("config", () => {
     expect(existsSync(join(home, "rig", "tools", "current"))).toBe(true);
 
     await store.acknowledgeMigrationPrompt();
-    const promptStatePath = new RigPaths({ homeDir: home }).migrationPromptStatePath;
+    const promptStatePath = new RigPathsClass({ homeDir: home }).migrationPromptStatePath;
     const promptState = await readFile(promptStatePath, "utf8");
     expect(promptState).toContain(RigHomeDirectoryMigrationPromptId);
     await store.acknowledgeMigrationPrompt();
     expect(await readFile(promptStatePath, "utf8")).toBe(promptState);
 
-    const nextStore = new RigConfigStore({ homeDir: home });
+    const nextStore = new RigConfigStoreClass({ homeDir: home });
     await expect(nextStore.ensure()).resolves.toMatchObject({ baseRegistryDir: "~/rig/tools" });
     expect(nextStore.migrationResult()).toBeUndefined();
     await nextStore.acknowledgeMigrationPrompt();
@@ -169,15 +171,17 @@ describe("config", () => {
     const emptyLegacyHome = await homes.create();
     await mkdir(join(emptyLegacyHome, ".rig"));
     await expect(
-      new RigDirectoryMigrationService(
-        new RigPaths({ homeDir: emptyLegacyHome }),
+      new RigDirectoryMigrationServiceClass(
+        new RigPathsClass({ homeDir: emptyLegacyHome }),
       ).migrateIfNeeded(),
     ).resolves.toBeUndefined();
 
     const toolsOnlyHome = await homes.create();
     await mkdir(join(toolsOnlyHome, ".rig", "tools", "legacy"), { recursive: true });
     await expect(
-      new RigDirectoryMigrationService(new RigPaths({ homeDir: toolsOnlyHome })).migrateIfNeeded(),
+      new RigDirectoryMigrationServiceClass(
+        new RigPathsClass({ homeDir: toolsOnlyHome }),
+      ).migrateIfNeeded(),
     ).resolves.toMatchObject({ status: "migrated", configUpdated: false });
     expect(existsSync(join(toolsOnlyHome, "rig", "tools", "legacy"))).toBe(true);
 
@@ -186,8 +190,8 @@ describe("config", () => {
     await mkdir(join(invalidCurrentHome, "rig"));
     await writeFile(join(invalidCurrentHome, "rig", "rig.json"), "{ nope", "utf8");
     await expect(
-      new RigDirectoryMigrationService(
-        new RigPaths({ homeDir: invalidCurrentHome }),
+      new RigDirectoryMigrationServiceClass(
+        new RigPathsClass({ homeDir: invalidCurrentHome }),
       ).migrateIfNeeded(),
     ).resolves.toMatchObject({ status: "manual" });
 
@@ -206,8 +210,8 @@ describe("config", () => {
     );
     await writeFile(join(cronConflictHome, "rig", "cron", "job.ts"), "// job\n", "utf8");
     await expect(
-      new RigDirectoryMigrationService(
-        new RigPaths({ homeDir: cronConflictHome }),
+      new RigDirectoryMigrationServiceClass(
+        new RigPathsClass({ homeDir: cronConflictHome }),
       ).migrateIfNeeded(),
     ).resolves.toMatchObject({ status: "manual" });
 
@@ -226,16 +230,183 @@ describe("config", () => {
     );
     await writeFile(join(extraFileHome, "rig", "notes.txt"), "mine\n", "utf8");
     await expect(
-      new RigDirectoryMigrationService(new RigPaths({ homeDir: extraFileHome })).migrateIfNeeded(),
+      new RigDirectoryMigrationServiceClass(
+        new RigPathsClass({ homeDir: extraFileHome }),
+      ).migrateIfNeeded(),
     ).resolves.toMatchObject({ status: "manual" });
 
     const invalidPromptStateHome = await homes.create();
-    const invalidPromptStatePaths = new RigPaths({ homeDir: invalidPromptStateHome });
+    const invalidPromptStatePaths = new RigPathsClass({ homeDir: invalidPromptStateHome });
     await mkdir(invalidPromptStatePaths.rigDir, { recursive: true });
     await writeFile(invalidPromptStatePaths.migrationPromptStatePath, "[]\n", "utf8");
-    const promptStore = new RigMigrationPromptStore(invalidPromptStatePaths);
+    const promptStore = new RigMigrationPromptStoreClass(invalidPromptStatePaths);
     await expect(promptStore.hasPrompted("custom-prompt")).resolves.toBe(false);
     await promptStore.markPrompted("custom-prompt");
     await expect(promptStore.hasPrompted("custom-prompt")).resolves.toBe(true);
+  });
+
+  test("serializes same-process updates without lost config changes", async () => {
+    const home = await homes.create();
+    const paths = new RigPathsClass({ homeDir: home });
+    await new RigConfigStoreClass({ homeDir: home }).ensure();
+
+    await Promise.all(
+      Array.from({ length: 20 }, (_, index) =>
+        new RigConfigStoreClass({ homeDir: home }).update(async (config) => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return {
+            ...config,
+            customRegistries: [...config.customRegistries, `registry-${index}`],
+          };
+        }),
+      ),
+    );
+
+    const config = await new RigConfigStoreClass({ homeDir: home }).read();
+    expect(config.customRegistries.toSorted()).toEqual(
+      Array.from({ length: 20 }, (_, index) => `registry-${index}`).toSorted(),
+    );
+    expect((await readdir(paths.rigDir)).filter((entry) => entry.includes(".tmp-"))).toEqual([]);
+    expect(existsSync(`${paths.configPath}.lock`)).toBe(false);
+  });
+
+  test("serializes disposable-process updates without temp collisions or lost changes", async () => {
+    const home = await homes.create();
+    const paths = new RigPathsClass({ homeDir: home });
+    await new RigConfigStoreClass({ homeDir: home }).ensure();
+    const configModule = pathToFileURL(join(process.cwd(), "src", "config", "config.ts")).href;
+    const script = `
+import { RigConfigStoreClass } from ${JSON.stringify(configModule)};
+const store = new RigConfigStoreClass({ homeDir: process.env.RIG_CONCURRENCY_HOME });
+await store.update(async (config) => {
+  await Bun.sleep(5);
+  return { ...config, customRegistries: [...config.customRegistries, process.env.RIG_CONCURRENCY_ID] };
+});
+`;
+
+    const processes = Array.from({ length: 8 }, (_, index) =>
+      spawn("bun", ["--eval", script], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          RIG_CONCURRENCY_HOME: home,
+          RIG_CONCURRENCY_ID: `process-${index}`,
+        },
+      }),
+    );
+    const results = await Promise.all(
+      processes.map(
+        (child) =>
+          new Promise<{ exitCode: number; stderr: string }>((resolve) => {
+            let stderr = "";
+            child.stderr.setEncoding("utf8");
+            child.stderr.on("data", (chunk: string) => {
+              stderr += chunk;
+            });
+            child.on("close", (code) => resolve({ exitCode: code ?? 1, stderr }));
+          }),
+      ),
+    );
+
+    expect(results).toEqual(results.map(() => ({ exitCode: 0, stderr: "" })));
+    const config = await new RigConfigStoreClass({ homeDir: home }).read();
+    expect(config.customRegistries.toSorted()).toEqual(
+      Array.from({ length: 8 }, (_, index) => `process-${index}`).toSorted(),
+    );
+    expect((await readdir(paths.rigDir)).filter((entry) => entry.includes(".tmp-"))).toEqual([]);
+    expect(existsSync(`${paths.configPath}.lock`)).toBe(false);
+  });
+
+  test("times out on a live lock and recovers a stale dead-owner lock", async () => {
+    const home = await homes.create();
+    const paths = new RigPathsClass({ homeDir: home });
+    await new RigConfigStoreClass({ homeDir: home }).ensure();
+    const lockPath = `${paths.configPath}.lock`;
+    const ownerPath = join(lockPath, "owner.json");
+    await mkdir(lockPath);
+    await writeFile(
+      ownerPath,
+      `${JSON.stringify({
+        token: "live",
+        pid: process.pid,
+        hostname: hostname(),
+        acquiredAt: new Date(0).toISOString(),
+      })}\n`,
+      "utf8",
+    );
+    await utimes(lockPath, new Date(0), new Date(0));
+
+    const boundedStore = new RigConfigStoreClass({
+      homeDir: home,
+      configLock: { timeoutMs: 30, retryMs: 5, staleMs: 1 },
+    });
+    await expect(boundedStore.update((config) => config)).rejects.toThrow(
+      "Timed out waiting for lock",
+    );
+
+    await writeFile(
+      ownerPath,
+      `${JSON.stringify({
+        token: "dead",
+        pid: 2_147_483_647,
+        hostname: hostname(),
+        acquiredAt: new Date(0).toISOString(),
+      })}\n`,
+      "utf8",
+    );
+    await utimes(lockPath, new Date(0), new Date(0));
+    await expect(
+      boundedStore.update((config) => ({
+        ...config,
+        customRegistries: [...config.customRegistries, "recovered"],
+      })),
+    ).resolves.toMatchObject({ customRegistries: ["recovered"] });
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  test("releases the lock when a mutator fails", async () => {
+    const home = await homes.create();
+    const paths = new RigPathsClass({ homeDir: home });
+    const store = new RigConfigStoreClass({ homeDir: home });
+    const original = await store.ensure();
+
+    await expect(
+      store.update(() => {
+        throw new Error("mutator failed");
+      }),
+    ).rejects.toThrow("mutator failed");
+    expect(await store.read()).toEqual(original);
+    expect(existsSync(`${paths.configPath}.lock`)).toBe(false);
+    await expect(
+      store.update((config) => ({ ...config, customRegistries: ["after-failure"] })),
+    ).resolves.toMatchObject({ customRegistries: ["after-failure"] });
+  });
+
+  test("initializes config through update when ensure was not called", async () => {
+    const home = await homes.create();
+    const store = new RigConfigStoreClass({ homeDir: home });
+
+    await expect(
+      store.update((config) => ({ ...config, customRegistries: ["initialized-by-update"] })),
+    ).resolves.toMatchObject({
+      version: 1,
+      baseRegistryDir: "~/rig/tools",
+      customRegistries: ["initialized-by-update"],
+    });
+  });
+
+  test("serializes concurrent migration prompt updates", async () => {
+    const home = await homes.create();
+    const paths = new RigPathsClass({ homeDir: home });
+    const store = new RigMigrationPromptStoreClass(paths);
+    const promptIds = Array.from({ length: 12 }, (_, index) => `prompt-${index}`);
+
+    await Promise.all(promptIds.map((promptId) => store.markPrompted(promptId)));
+
+    await expect(
+      Promise.all(promptIds.map((promptId) => store.hasPrompted(promptId))),
+    ).resolves.toEqual(promptIds.map(() => true));
+    expect(existsSync(`${paths.migrationPromptStatePath}.lock`)).toBe(false);
+    expect((await readdir(paths.rigDir)).filter((entry) => entry.includes(".tmp-"))).toEqual([]);
   });
 });

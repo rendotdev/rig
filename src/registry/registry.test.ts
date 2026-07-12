@@ -2,10 +2,10 @@ import { afterEach, describe, expect, test } from "vite-plus/test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RegistryConfigService } from "./registry";
-import { ToolDiscoveryService } from "./discover";
-import { ToolCreator } from "../tools/create";
-import { ToolListService } from "../tools/list";
+import { RegistryConfigServiceClass } from "./registry";
+import { ToolDiscoveryServiceClass } from "./discover";
+import { ToolCreatorClass } from "../tools/create";
+import { ToolListServiceClass } from "../tools/list";
 
 class TestHomeStore {
   private readonly homes: string[] = [];
@@ -33,12 +33,27 @@ describe("registries", () => {
   test("adds and removes a custom registry", async () => {
     const home = await homes.create();
     const registry = join(home, "project-tools");
-    const service = new RegistryConfigService({ homeDir: home });
+    const service = new RegistryConfigServiceClass({ homeDir: home });
     const added = await service.add(registry);
     expect(added.customRegistries).toContain(registry);
 
     const removed = await service.remove(registry);
     expect(removed.customRegistries).not.toContain(registry);
+  });
+
+  test("preserves concurrent registry additions", async () => {
+    const home = await homes.create();
+    const registries = Array.from({ length: 12 }, (_, index) =>
+      join(home, `project-tools-${index}`),
+    );
+
+    await Promise.all(
+      registries.map((registry) => new RegistryConfigServiceClass({ homeDir: home }).add(registry)),
+    );
+
+    expect(
+      (await new RegistryConfigServiceClass({ homeDir: home }).list()).customRegistries.toSorted(),
+    ).toEqual(registries.toSorted());
   });
 
   test("discovers index.rig.tsx entry files", async () => {
@@ -47,7 +62,7 @@ describe("registries", () => {
     await mkdir(toolDir, { recursive: true });
     await writeFile(join(toolDir, "index.rig.tsx"), "export default {};\n", "utf8");
 
-    const tools = await new ToolDiscoveryService({ homeDir: home }).discover();
+    const tools = await new ToolDiscoveryServiceClass({ homeDir: home }).discover();
 
     expect(tools).toMatchObject([
       {
@@ -63,19 +78,19 @@ describe("registries", () => {
     await mkdir(toolDir, { recursive: true });
     await writeFile(join(toolDir, "tool.ts"), "export default {};\n", "utf8");
 
-    await expect(new ToolDiscoveryService({ homeDir: home }).discover()).rejects.toThrow(
+    await expect(new ToolDiscoveryServiceClass({ homeDir: home }).discover()).rejects.toThrow(
       "Tool legacy must use index.rig.ts or index.rig.tsx.",
     );
   });
 
   test("lists base tools and custom registries visible to a project path", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("base-visible");
+    await new ToolCreatorClass({ homeDir: home }).create("base-visible");
 
     const project = join(home, "project");
     const custom = join(project, "rig-tools");
     const outside = join(home, "outside-tools");
-    const registry = new RegistryConfigService({ homeDir: home });
+    const registry = new RegistryConfigServiceClass({ homeDir: home });
     await mkdir(join(project, ".git"), { recursive: true });
     await registry.add(outside);
     await registry.add(custom);
@@ -191,7 +206,7 @@ describe("registries", () => {
       "utf8",
     );
 
-    const service = new ToolListService({ homeDir: home });
+    const service = new ToolListServiceClass({ homeDir: home });
     const list = await service.list({ visibleFromPath: join(project, "AGENTS.md") });
     const rendered = service.renderPlain(list);
 
@@ -206,7 +221,7 @@ describe("registries", () => {
   });
 
   test("renders plain list entries without embedded line breaks", async () => {
-    const rendered = new ToolListService().renderPlain({
+    const rendered = new ToolListServiceClass().renderPlain({
       tools: [
         {
           name: "wrapped",
@@ -236,13 +251,13 @@ describe("registries", () => {
 
   test("detects duplicate tool names across registries", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
     const custom = join(home, "custom-tools");
-    await new RegistryConfigService({ homeDir: home }).add(custom);
+    await new RegistryConfigServiceClass({ homeDir: home }).add(custom);
     await mkdir(join(custom, "sample"), { recursive: true });
     await writeFile(join(custom, "sample", "index.rig.ts"), "export default {};\n", "utf8");
 
-    await expect(new ToolDiscoveryService({ homeDir: home }).discover()).rejects.toThrow(
+    await expect(new ToolDiscoveryServiceClass({ homeDir: home }).discover()).rejects.toThrow(
       "Duplicate tool name: sample",
     );
   });

@@ -7,20 +7,14 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: false,
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts", "test/e2e/**/*.e2e.test.ts"],
     passWithNoTests: false,
     restoreMocks: true,
     testTimeout: 30_000,
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      exclude: [
-        "src/**/*.d.ts",
-        "src/**/*.test.ts",
-        "src/tools/collection-memory-index.ts",
-        "src/tools/collection.ts",
-        "src/tools/help-topics.ts",
-      ],
+      exclude: ["src/**/*.d.ts", "src/**/*.test.ts", "src/tools/presentation/help-topics.ts"],
       reporter: ["text", "json-summary"],
       thresholds: {
         100: true,

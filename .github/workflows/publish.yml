@@ -57,5 +57,11 @@ jobs:
       - name: Publish with trusted publishing
         if: steps.published_version.outputs.already_published != 'true'
         run: |
+          package_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          publish_tag="latest"
+          if [[ "${package_version}" == *-* ]]; then
+            prerelease="${package_version#*-}"
+            publish_tag="${prerelease%%.*}"
+          fi
           unset NODE_AUTH_TOKEN
-          npm publish --access public
+          npm publish --access public --tag "${publish_tag}"
