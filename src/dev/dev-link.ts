@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { RigPaths, type PathOptions } from "../config/paths";
-import { RigError } from "../errors/RigError";
+import { delimiter, join, resolve } from "node:path";
+import { RigPathsClass, type PathOptions } from "../config/paths";
+import { RigErrorClass } from "../errors/RigError";
 
 export type DevLinkOptions = PathOptions & {
   repoRoot?: string;
+  platform?: NodeJS.Platform;
 };
 
 export type DevLinkCommandOptions = {
@@ -23,46 +24,56 @@ export type DevLinkStatus = {
   binDirOnPath: boolean;
 };
 
-export class DevLinkService {
-  private readonly paths: RigPaths;
+export class DevLinkServiceClass {
+  private readonly paths: RigPathsClass;
   private readonly repoRootOverride?: string;
+  private readonly platform: NodeJS.Platform;
 
   constructor(options: DevLinkOptions = {}) {
-    this.paths = new RigPaths(options);
+    this.paths = new RigPathsClass(options);
     this.repoRootOverride = options.repoRoot;
+    this.platform = options.platform ?? process.platform;
   }
 
   async link(options: DevLinkCommandOptions = {}): Promise<DevLinkStatus> {
     const repoRoot = this.repoRoot();
     const binDir = this.binDir(options.binDir);
-    const shimPath = join(binDir, "rig");
+    const shimPath = this.shimPath(binDir);
     const existing = await this.readExistingShim(shimPath);
 
     if (existing.exists && !existing.isRigDevShim && !options.force) {
-      throw new RigError("DEV_LINK_ERROR", `Refusing to overwrite existing file: ${shimPath}`, {
-        shimPath,
-        hint: "Use --force to replace it.",
-      });
+      throw new RigErrorClass(
+        "DEV_LINK_ERROR",
+        `Refusing to overwrite existing file: ${shimPath}`,
+        {
+          shimPath,
+          hint: "Use --force to replace it.",
+        },
+      );
     }
 
     await mkdir(binDir, { recursive: true });
     /* v8 ignore next 3 */
     if (typeof Bun !== "undefined") await Bun.write(shimPath, this.shimSource(repoRoot));
     else await writeFile(shimPath, this.shimSource(repoRoot), "utf8");
-    await chmod(shimPath, 0o755);
+    if (this.platform !== "win32") await chmod(shimPath, 0o755);
     return this.status(options);
   }
 
   async unlink(options: DevLinkCommandOptions = {}): Promise<DevLinkStatus> {
     const binDir = this.binDir(options.binDir);
-    const shimPath = join(binDir, "rig");
+    const shimPath = this.shimPath(binDir);
     const existing = await this.readExistingShim(shimPath);
 
     if (existing.exists && !existing.isRigDevShim && !options.force) {
-      throw new RigError("DEV_LINK_ERROR", `Refusing to remove non-Rig dev shim: ${shimPath}`, {
-        shimPath,
-        hint: "Use --force to remove it anyway.",
-      });
+      throw new RigErrorClass(
+        "DEV_LINK_ERROR",
+        `Refusing to remove non-Rig dev shim: ${shimPath}`,
+        {
+          shimPath,
+          hint: "Use --force to remove it anyway.",
+        },
+      );
     }
 
     if (existing.exists) {
@@ -75,7 +86,7 @@ export class DevLinkService {
   async status(options: DevLinkCommandOptions = {}): Promise<DevLinkStatus> {
     const repoRoot = this.repoRoot();
     const binDir = this.binDir(options.binDir);
-    const shimPath = join(binDir, "rig");
+    const shimPath = this.shimPath(binDir);
     const existing = await this.readExistingShim(shimPath);
     return {
       repoRoot,
@@ -83,7 +94,7 @@ export class DevLinkService {
       shimPath,
       exists: existing.exists,
       isRigDevShim: existing.isRigDevShim,
-      pointsToCurrentRepo: existing.content.includes(`RIG_DEV_REPO=${JSON.stringify(repoRoot)}`),
+      pointsToCurrentRepo: existing.content.includes(this.repoMarker(repoRoot)),
       binDirOnPath: this.binDirOnPath(binDir),
     };
   }
@@ -118,7 +129,7 @@ export class DevLinkService {
       !existsSync(join(repoRoot, "package.json")) ||
       !existsSync(join(repoRoot, "src", "cli.ts"))
     ) {
-      throw new RigError("DEV_LINK_ERROR", "Run dev link from the Rig repository root.", {
+      throw new RigErrorClass("DEV_LINK_ERROR", "Run dev link from the Rig repository root.", {
         repoRoot,
         expected: ["package.json", "src/cli.ts"],
       });
@@ -131,11 +142,28 @@ export class DevLinkService {
   }
 
   private shimSource(repoRoot: string): string {
-    return `#!/usr/bin/env bash
+    if (this.platform === "win32") {
+      return `@echo off
+rem Rig dev shim. Safe to overwrite with \`rig dev link\`.
+set "RIG_DEV_REPO=${repoRoot}"
+bun --install=fallback run "%RIG_DEV_REPO%\\src\\cli.ts" %*
+`;
+    }
+    return `#!/bin/sh
 # Rig dev shim. Safe to overwrite with \`rig dev link\`.
 RIG_DEV_REPO=${JSON.stringify(repoRoot)}
 exec bun --install=fallback run "$RIG_DEV_REPO/src/cli.ts" "$@"
 `;
+  }
+
+  private shimPath(binDir: string): string {
+    return join(binDir, this.platform === "win32" ? "rig.cmd" : "rig");
+  }
+
+  private repoMarker(repoRoot: string): string {
+    return this.platform === "win32"
+      ? `RIG_DEV_REPO=${repoRoot}`
+      : `RIG_DEV_REPO=${JSON.stringify(repoRoot)}`;
   }
 
   private async readExistingShim(
@@ -157,7 +185,7 @@ exec bun --install=fallback run "$RIG_DEV_REPO/src/cli.ts" "$@"
   }
 
   private binDirOnPath(binDir: string): boolean {
-    const entries = (process.env.PATH ?? "").split(":").map((entry) => resolve(entry));
+    const entries = (process.env.PATH ?? "").split(delimiter).map((entry) => resolve(entry));
     return entries.includes(resolve(binDir));
   }
 }

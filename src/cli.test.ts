@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BunRuntimeBootstrap, CliApplication, isCliEntrypoint } from "./cli";
-import { RigPaths } from "./config/paths";
-import { ToolCreator } from "./tools/create";
+import { BunRuntimeBootstrapClass, CliApplicationClass, isCliEntrypoint } from "./cli";
+import { RigPathsClass } from "./config/paths";
+import { ToolCreatorClass } from "./tools/create";
 
 class CliWorkspaceStore {
   private readonly paths: string[] = [];
@@ -57,7 +57,7 @@ class CliHarness {
     if (this.updateCheck) delete process.env.RIG_UPDATE_CHECK;
     else process.env.RIG_UPDATE_CHECK = "0";
     process.env.RIG_LOG = "0";
-    await new CliApplication().run(["node", "rig", ...args]);
+    await new CliApplicationClass().run(["node", "rig", ...args]);
     return this.output;
   }
 
@@ -93,7 +93,7 @@ describe("cli application", () => {
 
   test("prints update notices from default status", async () => {
     const home = await workspaces.create();
-    const paths = new RigPaths({ homeDir: home });
+    const paths = new RigPathsClass({ homeDir: home });
     await mkdir(paths.rigDir, { recursive: true });
     await writeFile(
       paths.updateCheckCachePath,
@@ -223,7 +223,7 @@ describe("cli application", () => {
     expect(listOutput).toContain("sample.example");
     expect(listOutput).toContain("rig run sample.example text=example #");
     expect(await cli.run(["list", "--json"])).toContain('"tools"');
-    expect(await cli.run(["ls", "--plain"])).toContain("rig run sample.example text=example #");
+    expect(await cli.run(["ls"])).toContain("rig run sample.example text=example #");
     expect(await cli.run(["edit", "sample"])).toContain(
       join(home, "rig", "tools", "sample", "index.rig.ts"),
     );
@@ -259,6 +259,40 @@ describe("cli application", () => {
     expect(updated).not.toContain("sample.example");
   });
 
+  test("keeps read and run commands free of generated repository writes", async () => {
+    const home = await workspaces.create();
+    const project = join(home, "project");
+    const agentPath = join(project, "AGENTS.md");
+    const toolPath = join(home, "rig", "tools", "sample", "index.rig.ts");
+    await mkdir(join(project, ".git"), { recursive: true });
+    await writeFile(agentPath, "# Agent notes\n", "utf8");
+    process.chdir(project);
+
+    const cli = new CliHarness(home, true);
+    await cli.run(["create", "sample"]);
+    const staleAgent = (await readFile(agentPath, "utf8")).replace(
+      "# Agent notes",
+      "# Local notes",
+    );
+    const staleTool = (await readFile(toolPath, "utf8")).replace(
+      "Rig tool runtime",
+      "Stale runtime ref",
+    );
+    await writeFile(agentPath, staleAgent, "utf8");
+    await writeFile(toolPath, staleTool, "utf8");
+    const before = { agent: await stat(agentPath), tool: await stat(toolPath) };
+
+    expect(await cli.run(["list"])).toContain("sample.example");
+    expect(await cli.run(["help", "sample.example"])).toContain("Tool: sample");
+    expect(await cli.run(["inspect", "sample.example"])).toContain('"id": "sample.example"');
+    expect(await cli.run(["run", "sample.example", "read-only"])).toContain('"text": "read-only"');
+
+    expect(await readFile(agentPath, "utf8")).toBe(staleAgent);
+    expect(await readFile(toolPath, "utf8")).toBe(staleTool);
+    expect((await stat(agentPath)).mtimeMs).toBe(before.agent.mtimeMs);
+    expect((await stat(toolPath)).mtimeMs).toBe(before.tool.mtimeMs);
+  });
+
   test("ignores agent instruction sync failures", async () => {
     const home = await workspaces.create();
     const project = join(home, "project");
@@ -273,7 +307,7 @@ describe("cli application", () => {
 
   test("runs and typechecks tools", async () => {
     const home = await workspaces.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
     const cli = new CliHarness(home);
 
     expect(await cli.run(["run", "sample.example", "--input", '{"text":"cli"}'])).toContain(
@@ -335,7 +369,7 @@ describe("cli application", () => {
       },
     );
     vi.stubGlobal("Bun", { ...(originalBun as Record<string, unknown>), cron });
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
     const cli = new CliHarness(home);
 
     expect(await cli.run(["cron", "list"])).toContain('"cronJobs": []');
@@ -388,7 +422,10 @@ describe("cli application", () => {
     await mkdir(join(home, "node_modules", "bun", "bin"), { recursive: true });
     await writeFile(bunPath, "", "utf8");
 
-    const bootstrap = new BunRuntimeBootstrap(home, spawn, {}, () => undefined);
+    const bootstrap = new BunRuntimeBootstrapClass(
+      { packageRoot: home },
+      { spawn, env: {}, bunGlobal: () => undefined },
+    );
     expect(bootstrap.resolveBunPath()).toBe(bunPath);
     expect(bootstrap.shouldBootstrap()).toBe(true);
     expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig", "list"])).toBe(7);
@@ -400,54 +437,51 @@ describe("cli application", () => {
     });
     expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig"])).toBe(1);
     expect(
-      new BunRuntimeBootstrap(join(home, "missing"), spawn, {}, () => undefined).run(
-        pathToFileURL(entrypoint).href,
-        ["node", "rig"],
-      ),
+      new BunRuntimeBootstrapClass(
+        { packageRoot: join(home, "missing") },
+        { spawn, env: {}, bunGlobal: () => undefined },
+      ).run(pathToFileURL(entrypoint).href, ["node", "rig"]),
     ).toBeUndefined();
     expect(
-      new BunRuntimeBootstrap(home, spawn, { RIG_BUN_BOOTSTRAPPED: "1" }, () => undefined).run(
-        pathToFileURL(entrypoint).href,
-        ["node", "rig"],
-      ),
+      new BunRuntimeBootstrapClass(
+        { packageRoot: home },
+        { spawn, env: { RIG_BUN_BOOTSTRAPPED: "1" }, bunGlobal: () => undefined },
+      ).run(pathToFileURL(entrypoint).href, ["node", "rig"]),
     ).toBeUndefined();
     expect(
-      new BunRuntimeBootstrap(
-        home,
-        spawn,
-        { RIG_BUN_BOOTSTRAPPED: "1" },
-        () => undefined,
+      new BunRuntimeBootstrapClass(
+        { packageRoot: home },
+        { spawn, env: { RIG_BUN_BOOTSTRAPPED: "1" }, bunGlobal: () => undefined },
       ).shouldBootstrap(),
     ).toBe(false);
     expect(
-      new BunRuntimeBootstrap(
-        home,
-        spawn,
-        { RIG_DISABLE_BUN_BOOTSTRAP: "1" },
-        () => undefined,
+      new BunRuntimeBootstrapClass(
+        { packageRoot: home },
+        { spawn, env: { RIG_DISABLE_BUN_BOOTSTRAP: "1" }, bunGlobal: () => undefined },
       ).shouldBootstrap(),
     ).toBe(false);
     expect(
-      new BunRuntimeBootstrap(home, spawn, {}, () => ({ version: "test" })).shouldBootstrap(),
+      new BunRuntimeBootstrapClass(
+        { packageRoot: home },
+        { spawn, env: {}, bunGlobal: () => ({ version: "test" }) },
+      ).shouldBootstrap(),
     ).toBe(false);
     expect(
-      new BunRuntimeBootstrap(
-        home,
-        spawn,
-        { RIG_BUN_PATH: bunPath },
-        () => undefined,
+      new BunRuntimeBootstrapClass(
+        { packageRoot: home },
+        { spawn, env: { RIG_BUN_PATH: bunPath }, bunGlobal: () => undefined },
       ).resolveBunPath(),
     ).toBe(bunPath);
-    expect(new BunRuntimeBootstrap(home, spawn, {}).shouldBootstrap()).toBe(
-      (globalThis as typeof globalThis & { Bun?: unknown }).Bun === undefined,
-    );
+    expect(
+      new BunRuntimeBootstrapClass({ packageRoot: home }, { spawn, env: {} }).shouldBootstrap(),
+    ).toBe((globalThis as typeof globalThis & { Bun?: unknown }).Bun === undefined);
   });
 
   test("prints queried run output and pipeline ids", async () => {
     const home = await workspaces.create();
     const cli = new CliHarness(home);
 
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
 
     expect(await cli.run(["run", "sample.example", "text=hello", "--query", "data.text"])).toBe(
       "hello",
@@ -477,7 +511,7 @@ describe("cli application", () => {
     expect(cli.errorOutput).toContain('"name": "missing"');
     await expect(cli.run(["run", "sample", "x"])).rejects.toThrow("exit:1");
     expect(cli.errorOutput).toContain("Command id must use <tool>.<command>: sample");
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
     await expect(cli.run(["run", "sample.example", "text=x", "--as", "bad.id"])).rejects.toThrow(
       "exit:1",
     );
@@ -491,12 +525,12 @@ describe("cli application", () => {
     ).rejects.toThrow("exit:1");
     expect(cli.errorOutput).toContain("Query cannot access: data.text.extra");
 
-    const app = new CliApplication() as unknown as {
+    const app = new CliApplicationClass() as unknown as {
       printError(error: unknown): never;
       version(): string;
     };
     expect(() => app.printError(new Error("plain failure"))).toThrow("exit:1");
-    expect(cli.errorOutput).toContain("INPUT_ERROR: plain failure");
+    expect(cli.errorOutput).toContain("INTERNAL_ERROR: plain failure");
 
     process.env.RIG_PACKAGE_ROOT = process.cwd();
     const packageJson = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as {

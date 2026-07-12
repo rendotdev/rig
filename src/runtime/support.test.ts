@@ -1,34 +1,44 @@
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { Readable } from "node:stream";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { RigAgentInstructions } from "../agents/instructions";
-import { AgentInstructionSyncService } from "../agents/sync";
-import { RigConfigStore } from "../config/config";
-import { RigPaths } from "../config/paths";
-import { RigConfigDefaults } from "../config/schema";
-import { DevLinkService } from "../dev/dev-link";
+import { AgentInstructionSyncServiceClass } from "../agents/sync";
+import { RigConfigStoreClass } from "../config/config";
+import { RigPathsClass } from "../config/paths";
+import { rigConfigDefaults } from "../config/schema";
+import { DevLinkServiceClass } from "../dev/dev-link";
 import { ErrorCodes } from "../errors/codes";
-import { RigError, RigErrors } from "../errors/RigError";
-import { ToolDiscoveryService } from "../registry/discover";
-import { RegistryConfigService } from "../registry/registry";
-import { RigPackageRoot } from "./package-root";
-import { BunRigShell } from "./shell";
-import { RuntimeSupport } from "./support";
-import { RigOutputTruncator } from "./truncation";
-import { ToolCreator } from "../tools/create";
-import { ToolHelpRenderer, ToolHelpService } from "../tools/help";
-import { ToolInspector } from "../tools/inspect";
-import { ToolDefinitionValidator, ToolLoader } from "../tools/loader";
-import { ToolRunner } from "../tools/run";
-import { ToolRuntimeInstructionSyncService } from "../tools/runtime-instruction";
-import { SchemaRenderer } from "../tools/schema";
+import { RigErrorClass, rigErrors } from "../errors/RigError";
+import { ToolDiscoveryServiceClass } from "../registry/discover";
+import { RegistryConfigServiceClass } from "../registry/registry";
+import { rigPackageRoot } from "./package-root";
+import { BunRigShellClass } from "./shell";
+import { RuntimeSupportClass } from "./support";
+import { RigOutputTruncatorClass } from "./truncation";
+import { ToolCreatorClass } from "../tools/create";
+import { ToolHelpRendererClass, ToolHelpServiceClass } from "../tools/help";
+import { ToolInspectorClass } from "../tools/inspect";
+import { ToolDefinitionValidatorClass, ToolLoaderClass } from "../tools/loader";
+import { ToolRunnerClass } from "../tools/run";
+import { ToolRuntimeInstructionSyncServiceClass } from "../tools/runtime-instruction";
+import { schemaRenderer } from "../tools/schema";
 import { args, createRigToolKit, defineTool, paths, RigTool, rig } from "../tools/sdk";
-import { CommandIds } from "../tools/types";
-import { ToolTypecheckService } from "../tools/typecheck";
+import { commandIds } from "../tools/types";
+import { ToolTypecheckServiceClass } from "../tools/typecheck";
 
 class TempWorkspaceStore {
   private readonly paths: string[] = [];
@@ -91,8 +101,8 @@ function simpleToolSource(name: string, command = "echo") {
 describe("coverage support", () => {
   test("syncs generated runtime comments into tool files", async () => {
     const home = await workspaces.create();
-    const created = await new ToolCreator({ homeDir: home }).create("sample");
-    const service = new ToolRuntimeInstructionSyncService({ homeDir: home });
+    const created = await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const service = new ToolRuntimeInstructionSyncServiceClass({ homeDir: home });
 
     expect(service.renderPrefix()).toContain("rig.$");
     expect(service.renderPrefix()).toContain("context.cache.query");
@@ -118,7 +128,7 @@ describe("coverage support", () => {
 
     const emptyHome = await workspaces.create("rig-coverage-empty-tools-");
     await expect(
-      new ToolRuntimeInstructionSyncService({ homeDir: emptyHome }).sync(),
+      new ToolRuntimeInstructionSyncServiceClass({ homeDir: emptyHome }).sync(),
     ).resolves.toEqual({ tools: [] });
   });
 
@@ -159,11 +169,9 @@ describe("coverage support", () => {
       "utf8",
     );
     await symlink(globalAgentSource, globalAgentLink);
-    // Add a custom registry inside the project so sync targets project-level files
-    await new RegistryConfigService({ homeDir: home }).add(join(project, "rig-tools"));
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
 
-    const service = new AgentInstructionSyncService({ homeDir: home, cwd: nested });
+    const service = new AgentInstructionSyncServiceClass({ homeDir: home, cwd: nested });
     expect(service.renderBlock("No tools found.")).toContain(RigAgentInstructions);
     await expect(
       (service as unknown as { realPath(path: string): Promise<string> }).realPath(
@@ -231,7 +239,7 @@ describe("coverage support", () => {
 
     expect(
       (
-        await new AgentInstructionSyncService({
+        await new AgentInstructionSyncServiceClass({
           homeDir: home,
           cwd: packageNested,
         }).discoverTargets()
@@ -239,7 +247,7 @@ describe("coverage support", () => {
     ).toContain(join(packageProject, "AGENTS.md"));
     expect(
       (
-        await new AgentInstructionSyncService({
+        await new AgentInstructionSyncServiceClass({
           homeDir: home,
           cwd: join(home, "wks"),
         }).discoverTargets()
@@ -266,7 +274,7 @@ describe("coverage support", () => {
     const empty = join(emptyHome, "empty");
     await mkdir(empty);
     await expect(
-      new AgentInstructionSyncService({ homeDir: emptyHome, cwd: empty }).sync(),
+      new AgentInstructionSyncServiceClass({ homeDir: emptyHome, cwd: empty }).sync(),
     ).resolves.toMatchObject({ skipped: false, targets: [] });
 
     // Exercise canSkipSync: set up a home with config, tool, and stamp file
@@ -274,11 +282,12 @@ describe("coverage support", () => {
     const skipProject = join(skipHome, "project");
     await mkdir(join(skipProject, ".git"), { recursive: true });
     await writeFile(join(skipProject, "AGENTS.md"), "# Notes\n", "utf8");
-    const { RegistryConfigService: SkipRegistryConfig } = await import("../registry/registry");
-    await new SkipRegistryConfig({ homeDir: skipHome }).add(join(skipProject, "rig-tools"));
-    await new ToolCreator({ homeDir: skipHome }).create("skiptool");
+    await new ToolCreatorClass({ homeDir: skipHome }).create("skiptool");
 
-    const skipService = new AgentInstructionSyncService({ homeDir: skipHome, cwd: skipProject });
+    const skipService = new AgentInstructionSyncServiceClass({
+      homeDir: skipHome,
+      cwd: skipProject,
+    });
     const syncResult = await skipService.sync();
     expect(syncResult.targets.some((t) => t.changed)).toBe(true);
 
@@ -292,10 +301,38 @@ describe("coverage support", () => {
     expect(reResult.targets.some((t) => t.changed)).toBe(true);
   });
 
+  test("fingerprints TypeScript and TSX tools across every configured registry", async () => {
+    const home = await workspaces.create();
+    const project = join(home, "project");
+    const customRegistry = join(home, "custom-tools");
+    const agentPath = join(project, "AGENTS.md");
+    await mkdir(join(project, ".git"), { recursive: true });
+    await writeFile(agentPath, "# Agent notes\n", "utf8");
+    await new ToolCreatorClass({ homeDir: home }).create("base");
+    await new RegistryConfigServiceClass({ homeDir: home }).add(customRegistry);
+    const customToolDir = join(customRegistry, "custom");
+    const customToolPath = join(customToolDir, "index.rig.tsx");
+    await mkdir(customToolDir, { recursive: true });
+    await writeFile(customToolPath, simpleToolSource("custom", "echo"), "utf8");
+
+    const service = new AgentInstructionSyncServiceClass({ homeDir: home, cwd: project });
+    await service.sync();
+    expect(await readFile(agentPath, "utf8")).toContain("custom.echo");
+    const originalStat = await stat(customToolPath);
+    const changedSource = (await readFile(customToolPath, "utf8")).replace("echo", "ping");
+    await writeFile(customToolPath, changedSource, "utf8");
+    await utimes(customToolPath, originalStat.atime, originalStat.mtime);
+
+    const changed = await service.sync();
+    expect(changed.targets.some((target) => target.changed)).toBe(true);
+    expect(await readFile(agentPath, "utf8")).toContain("custom.ping");
+    expect(await readFile(agentPath, "utf8")).not.toContain("custom.echo");
+  });
+
   test("exercises config reads, writes, defaults, and path helpers", async () => {
     const home = await workspaces.create();
-    const pathsForHome = new RigPaths({ homeDir: home });
-    const configStore = new RigConfigStore({ homeDir: home });
+    const pathsForHome = new RigPathsClass({ homeDir: home });
+    const configStore = new RigConfigStoreClass({ homeDir: home });
 
     await expect(configStore.read()).rejects.toThrow("Could not read config");
     await mkdir(pathsForHome.rigDir, { recursive: true });
@@ -307,7 +344,7 @@ describe("coverage support", () => {
       "Rig config is invalid",
     );
 
-    const config = RigConfigDefaults.create();
+    const config = rigConfigDefaults.create();
     config.customRegistries = ["~/custom-tools", join(home, "absolute-tools")];
     await configStore.write(config);
     expect(await configStore.read()).toEqual(config);
@@ -324,7 +361,7 @@ describe("coverage support", () => {
       "custom",
     ]);
 
-    const defaultPaths = new RigPaths();
+    const defaultPaths = new RigPathsClass();
     expect(defaultPaths.homeDir).toBeTruthy();
     expect(pathsForHome.expandTilde("~")).toBe(home);
     expect(pathsForHome.expandTilde("~/tools")).toBe(join(home, "tools"));
@@ -337,8 +374,8 @@ describe("coverage support", () => {
 
   test("exercises registry configuration and discovery edges", async () => {
     const home = await workspaces.create();
-    const service = new RegistryConfigService({ homeDir: home });
-    const pathsForHome = new RigPaths({ homeDir: home });
+    const service = new RegistryConfigServiceClass({ homeDir: home });
+    const pathsForHome = new RigPathsClass({ homeDir: home });
 
     const listed = await service.list();
     expect(listed.baseRegistryDir).toBe(pathsForHome.resolve("~/rig/tools"));
@@ -354,7 +391,7 @@ describe("coverage support", () => {
       "Registry is not configured",
     );
 
-    const discovery = new ToolDiscoveryService({ homeDir: home });
+    const discovery = new ToolDiscoveryServiceClass({ homeDir: home });
     expect(discovery.projectRootFor("/")).toBe("/");
     await expect(discovery.find("missing")).rejects.toThrow("Tool not found: missing");
 
@@ -385,10 +422,10 @@ describe("coverage support", () => {
 
     const binDir = join(home, "bin");
     process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
-    const serviceFromCwd = new DevLinkService({ homeDir: home });
+    const serviceFromCwd = new DevLinkServiceClass({ homeDir: home });
     expect((await serviceFromCwd.status({ binDir })).repoRoot).toBe(process.cwd());
 
-    const service = new DevLinkService({ homeDir: home, repoRoot });
+    const service = new DevLinkServiceClass({ homeDir: home, repoRoot });
     const missing = await service.status({ binDir });
     expect(missing.exists).toBe(false);
     expect(missing.binDirOnPath).toBe(true);
@@ -415,20 +452,20 @@ describe("coverage support", () => {
     delete process.env.PATH;
     expect((await service.status({ binDir })).binDirOnPath).toBe(false);
 
-    await expect(new DevLinkService({ homeDir: home, repoRoot: home }).status()).rejects.toThrow(
-      "Run dev link from the Rig repository root.",
-    );
+    await expect(
+      new DevLinkServiceClass({ homeDir: home, repoRoot: home }).status(),
+    ).rejects.toThrow("Run dev link from the Rig repository root.");
   });
 
   test("exercises error conversion and exported codes", () => {
-    const rigError = new RigError("INPUT_ERROR", "bad", { field: "x" });
-    expect(RigErrors.from(rigError)).toBe(rigError);
-    expect(RigErrors.from(new Error("plain"))).toMatchObject({
-      code: "INPUT_ERROR",
+    const rigError = new RigErrorClass("INPUT_ERROR", "bad", { field: "x" });
+    expect(rigErrors.from(rigError)).toBe(rigError);
+    expect(rigErrors.from(new Error("plain"))).toMatchObject({
+      code: "INTERNAL_ERROR",
       message: "plain",
     });
-    expect(RigErrors.from("string failure")).toMatchObject({
-      code: "INPUT_ERROR",
+    expect(rigErrors.from("string failure")).toMatchObject({
+      code: "INTERNAL_ERROR",
       message: "string failure",
     });
     expect(ErrorCodes.SHELL_ERROR).toBe("SHELL_ERROR");
@@ -438,8 +475,8 @@ describe("coverage support", () => {
   test("exercises package-root detection modes", async () => {
     const envRoot = await workspaces.create();
     process.env.RIG_PACKAGE_ROOT = envRoot;
-    expect(RigPackageRoot.find(import.meta.url)).toBe(envRoot);
-    expect(RigPackageRoot.packageFile(import.meta.url, "dist", "rig.js")).toBe(
+    expect(rigPackageRoot.find(import.meta.url)).toBe(envRoot);
+    expect(rigPackageRoot.packageFile(import.meta.url, "dist", "rig.js")).toBe(
       join(envRoot, "dist", "rig.js"),
     );
     delete process.env.RIG_PACKAGE_ROOT;
@@ -449,24 +486,26 @@ describe("coverage support", () => {
     const cliPath = join(repoRoot, "src", "cli.ts");
     await writeFile(cliPath, "", "utf8");
     process.argv[1] = cliPath;
-    expect(RigPackageRoot.find(import.meta.url)).toBe(await realpath(repoRoot));
+    expect(rigPackageRoot.find(import.meta.url)).toBe(await realpath(repoRoot));
 
     process.argv[1] = join(repoRoot, "missing.ts");
     await mkdir(join(repoRoot, "dist"), { recursive: true });
     const execPath = join(repoRoot, "dist", "rig.js");
     await writeFile(execPath, "", "utf8");
     Object.defineProperty(process, "execPath", { value: execPath, configurable: true });
-    expect(RigPackageRoot.find(import.meta.url)).toBe(await realpath(repoRoot));
+    expect(rigPackageRoot.find(import.meta.url)).toBe(await realpath(repoRoot));
 
     Object.defineProperty(process, "execPath", {
       value: join(repoRoot, "bin", "bun"),
       configurable: true,
     });
     process.argv[1] = join(repoRoot, "bin", "script");
-    expect(RigPackageRoot.find("file:///%7EBUN/root")).toBe(join(repoRoot, "bin"));
+    expect(rigPackageRoot.find("file:///%7EBUN/root")).toBe(join(repoRoot, "bin"));
     expect(
       (
-        RigPackageRoot as unknown as { fromEntrypoint(entrypoint: undefined): string | undefined }
+        rigPackageRoot as unknown as {
+          fromEntrypoint(entrypoint: undefined): string | undefined;
+        }
       ).fromEntrypoint(undefined),
     ).toBeUndefined();
 
@@ -481,69 +520,28 @@ describe("coverage support", () => {
       value: join(repoRoot, "bin", "bun"),
       configurable: true,
     });
-    expect(RigPackageRoot.find(import.meta.url)).toBe(await realpath(symlinkRoot));
+    expect(rigPackageRoot.find(import.meta.url)).toBe(await realpath(symlinkRoot));
+
+    process.argv[1] = join(repoRoot, "missing", "script");
+    Object.defineProperty(process, "execPath", {
+      value: join(repoRoot, "missing", "bun"),
+      configurable: true,
+    });
+    const deepModule = join(repoRoot, "a", "b", "c", "d", "e", "f", "g", "h", "i", "mod.ts");
+    expect(rigPackageRoot.find(pathToFileURL(deepModule).href)).toBe(
+      join(dirname(deepModule), "..", ".."),
+    );
+    expect(
+      (
+        rigPackageRoot as unknown as {
+          fromModule(metaUrl: string): string | undefined;
+        }
+      ).fromModule("file:///mod.ts"),
+    ).toBeUndefined();
   });
 
   test("exercises shell execution, JSON parsing, validation, truncation, and timeouts", async () => {
-    const fakeBunCalls: { strings: string[]; raw: readonly string[]; values: unknown[] }[] = [];
-    let fakeBunDelay = 0;
-    const fakeBun = {
-      $: (strings: TemplateStringsArray, ...values: unknown[]) => {
-        fakeBunCalls.push({ strings: [...strings], raw: strings.raw, values });
-        return {
-          nothrow() {
-            return this;
-          },
-          cwd() {
-            return this;
-          },
-          env() {
-            return this;
-          },
-          async quiet() {
-            if (fakeBunDelay) {
-              await new Promise((done) => setTimeout(done, fakeBunDelay));
-            }
-            return {
-              stdout: Buffer.from("bun-out\n"),
-              stderr: Buffer.from("bun-err\n"),
-              exitCode: 0,
-            };
-          },
-        };
-      },
-    };
-
-    const plainBunShell = new BunRigShell({}, () => fakeBun);
-    await expect(plainBunShell.exec(["echo", "plain"])).resolves.toMatchObject({
-      stdout: "bun-out\n",
-    });
-
-    const bunShell = new BunRigShell({ timeoutMs: 5_000, maxOutputBytes: 100 }, () => fakeBun);
-    await expect(bunShell.$`echo ${"hello"}`).resolves.toMatchObject({ stdout: "bun-out\n" });
-    await expect(
-      bunShell.exec(["echo", "hello"], { cwd: process.cwd(), maxOutputBytes: 4 }),
-    ).resolves.toMatchObject({
-      command: ["echo", "hello"],
-      stdout: "bun-\n[rig: output truncated]",
-    });
-    await expect(bunShell.bash("echo raw")).resolves.toMatchObject({ command: ["echo raw"] });
-    expect(fakeBunCalls.map((call) => call.values)).toEqual([
-      [["echo", "plain"]],
-      ["hello"],
-      [["echo", "hello"]],
-      [],
-    ]);
-    fakeBunDelay = 20;
-    await expect(bunShell.exec(["slow"], { timeoutMs: 1 })).rejects.toThrow("Command timed out");
-    await expect(new BunRigShell({}, () => ({})).exec(["echo", "fallback"])).resolves.toMatchObject(
-      {
-        stdout: "fallback\n",
-      },
-    );
-    expect((bunShell as unknown as { bun(): unknown }).bun()).toBe(fakeBun);
-
-    const shell = new BunRigShell({ timeoutMs: 5_000, maxOutputBytes: 20 });
+    const shell = new BunRigShellClass({ timeoutMs: 5_000, maxOutputBytes: 20 });
     const success = await shell.exec(["bun", "-e", "console.log('hello')"], {
       cwd: process.cwd(),
       env: { RIG_SHELL_TEST: "1" },
@@ -568,13 +566,51 @@ describe("coverage support", () => {
       stdout: "bash-ok\n",
     });
 
-    const trimmed = await shell.exec([
-      "bun",
-      "-e",
-      "console.log('x'.repeat(100)); console.error('y'.repeat(100))",
-    ]);
-    expect(trimmed.stdout).toContain("[rig: output truncated]");
-    expect(trimmed.stderr).toContain("[rig: output truncated]");
+    const bounded = await shell.exec(
+      ["bun", "-e", "process.stdout.write('x'.repeat(5_000_000)); console.error('y'.repeat(100))"],
+      { maxOutputBytes: 64 },
+    );
+    expect(bounded.stdout).toBe(`${"x".repeat(64)}\n[rig: output truncated]`);
+    expect(bounded.stderr).toBe(`${"y".repeat(64)}\n[rig: output truncated]`);
+
+    const unicode = await shell.exec(["bun", "-e", "process.stdout.write('😀'.repeat(100))"], {
+      maxOutputBytes: 7,
+    });
+    expect(unicode.stdout).toBe("😀\n[rig: output truncated]");
+    expect(unicode.stdout).not.toContain("�");
+
+    const invalidUtf8 = await shell.bash("printf '\\377\\376\\375\\374'", {
+      maxOutputBytes: 10,
+    });
+    expect(invalidUtf8.stdout).toContain("�");
+
+    const noOutput = await shell.exec(["bun", "-e", "process.stdout.write('hidden')"], {
+      maxOutputBytes: 0,
+    });
+    expect(noOutput.stdout).toBe("\n[rig: output truncated]");
+
+    const markerRoot = await workspaces.create("rig-shell-timeout-");
+    const delayedMarker = join(markerRoot, "delayed-marker");
+    await expect(
+      shell.bash(`(sleep 0.2; touch ${delayedMarker}) & wait`, { timeoutMs: 10 }),
+    ).rejects.toThrow("Command timed out");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
+    expect(existsSync(delayedMarker)).toBe(false);
+
+    await expect(
+      shell.exec(["bun", "-e", "process.on('SIGTERM', () => {}); setTimeout(() => {}, 1000)"], {
+        timeoutMs: 10,
+      }),
+    ).rejects.toThrow("Command timed out");
+    await expect(
+      shell.bash("trap '' TERM; while true; do sleep 1; done", { timeoutMs: 10 }),
+    ).rejects.toThrow("Command timed out");
+
+    const failed = await shell.exec(["bun", "-e", "process.exit(2)"]);
+    expect(failed).toMatchObject({ exitCode: 2, stdout: "", stderr: "" });
+    await expect(shell.exec(["rig-command-that-does-not-exist"])).rejects.toThrow(
+      "Command could not start",
+    );
 
     await expect(
       shell.json(["bun", "-e", "console.log(JSON.stringify({ok:true}))"]),
@@ -588,43 +624,43 @@ describe("coverage support", () => {
     await expect(shell.exec([])).rejects.toThrow("shell.exec expects");
     await expect(shell.exec([""])).rejects.toThrow("shell.exec expects");
     await expect(shell.exec(["bun", 1 as never])).rejects.toThrow("shell.exec expects");
-    await expect(
-      shell.exec(["bun", "-e", "setTimeout(() => {}, 1000)"], { timeoutMs: 1 }),
-    ).rejects.toThrow("Command timed out");
-    await expect(
-      (
-        shell as unknown as {
-          runNodeProcess(args: string[], options: { timeoutMs?: number }): Promise<unknown>;
-        }
-      ).runNodeProcess(["bun", "-e", "setTimeout(() => {}, 1000)"], { timeoutMs: 1 }),
-    ).rejects.toThrow("Command timed out");
-    await expect(
-      (
-        shell as unknown as {
-          runNodeProcess(args: string[], options: { maxOutputBytes?: number }): Promise<unknown>;
-        }
-      ).runNodeProcess(["bun", "-e", "console.log('node-fallback')"], { maxOutputBytes: 100 }),
-    ).resolves.toMatchObject({ stdout: "node-fallback\n" });
 
-    expect(
-      (
-        shell as unknown as { trimOutput(value: string, maxOutputBytes?: number): string }
-      ).trimOutput("abc", 0),
-    ).toBe("abc");
+    await expect(new BunRigShellClass().exec(["echo", "fallback"])).resolves.toMatchObject({
+      command: ["echo", "fallback"],
+      stdout: "fallback\n",
+      exitCode: 0,
+    });
     await expect(
-      (shell as unknown as { readStream(stream: Readable): Promise<string> }).readStream(
-        Readable.from(["a", Buffer.from("b")]),
-      ),
-    ).resolves.toBe("ab");
+      new BunRigShellClass({ env: { RIG_SHELL_DEFAULT: "available" } }).exec([
+        "bash",
+        "-lc",
+        'printf %s "$RIG_SHELL_DEFAULT"',
+      ]),
+    ).resolves.toMatchObject({ stdout: "available" });
+
+    const independentlyBounded = await new BunRigShellClass({ maxOutputBytes: 4 }).exec([
+      "bun",
+      "-e",
+      "process.stdout.write('abcdefgh')",
+    ]);
+    expect(independentlyBounded.stdout).toBe("abcd\n[rig: output truncated]");
   });
 
   test("exercises runtime support generation and truncation helpers", async () => {
     const home = await workspaces.create();
     const registry = join(home, "registry");
-    const support = new RuntimeSupport({ homeDir: home });
+    const support = new RuntimeSupportClass({ homeDir: home });
     await support.ensure([registry]);
     expect(await readFile(join(registry, "tsconfig.json"), "utf8")).toContain("Generated by Rig");
-    const runtimeTypes = await readFile(new RigPaths({ homeDir: home }).runtimeTypesPath, "utf8");
+    const runtimeSdk = await readFile(new RigPathsClass({ homeDir: home }).runtimeSdkPath, "utf8");
+    expect(runtimeSdk).toContain("class RigManagedProcessClass");
+    expect(runtimeSdk).toContain('detached: process.platform !== "win32"');
+    expect(runtimeSdk).toContain("[rig: output truncated]");
+    expect(runtimeSdk).toContain("^[A-Za-z0-9_-]+[.][A-Za-z0-9_-]+$");
+    const runtimeTypes = await readFile(
+      new RigPathsClass({ homeDir: home }).runtimeTypesPath,
+      "utf8",
+    );
     expect(runtimeTypes).toContain("$(strings: TemplateStringsArray");
     expect(runtimeTypes).toContain("env: Env");
     expect(runtimeTypes).toContain("processEnv: NodeJS.ProcessEnv");
@@ -639,9 +675,9 @@ describe("coverage support", () => {
     expect(await readFile(join(registry, "tsconfig.json"), "utf8")).toBe("{}\n");
 
     expect(
-      await new RigOutputTruncator({ maxBytes: 100, maxLines: 10 }).truncateData({ ok: true }),
+      await new RigOutputTruncatorClass({ maxBytes: 100, maxLines: 10 }).truncateData({ ok: true }),
     ).toEqual({ ok: true });
-    const truncator = new RigOutputTruncator({ maxBytes: 10, maxLines: 2 });
+    const truncator = new RigOutputTruncatorClass({ maxBytes: 10, maxLines: 2 });
     expect(await truncator.truncateData(undefined)).toBeUndefined();
     const truncated = (await truncator.truncateData({ text: "a\nb\nc\nd" })) as {
       truncated: boolean;
@@ -679,17 +715,17 @@ describe("coverage support", () => {
 
   test("exercises creator, help, inspection, listing, schemas, SDK, and type helpers", async () => {
     const home = await workspaces.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    await expect(new ToolCreator({ homeDir: home }).create("sample")).rejects.toThrow(
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    await expect(new ToolCreatorClass({ homeDir: home }).create("sample")).rejects.toThrow(
       "Tool already exists",
     );
 
-    const renderer = new ToolHelpRenderer();
-    const loaded = await new ToolLoader({ homeDir: home }).load("sample");
+    const renderer = new ToolHelpRendererClass();
+    const loaded = await new ToolLoaderClass({ homeDir: home }).load("sample");
     const fullHelp = renderer.render(loaded.definition);
     expect(fullHelp).toContain("# sample");
     await expect(
-      new ToolHelpService({ homeDir: home }).render("sample", "missing"),
+      new ToolHelpServiceClass({ homeDir: home }).render("sample", "missing"),
     ).rejects.toThrow("Command not found: sample.missing");
 
     const command = loaded.definition.commands.example!;
@@ -761,21 +797,21 @@ describe("coverage support", () => {
     );
 
     await writeTool(home, "metadata", simpleToolSource("metadata"));
-    const inspector = new ToolInspector({ homeDir: home });
+    const inspector = new ToolInspectorClass({ homeDir: home });
     expect(await inspector.inspect("sample")).toMatchObject({ name: "sample" });
     expect(await inspector.inspect("metadata", "echo")).toMatchObject({ examples: [] });
     await expect(inspector.inspect("sample", "missing")).rejects.toThrow(
       "Command not found: sample.missing",
     );
     expect(
-      new (await import("../tools/list")).ToolListService({ homeDir: home }).renderPlain({
+      new (await import("../tools/list")).ToolListServiceClass({ homeDir: home }).renderPlain({
         tools: [],
       }),
     ).toBe("No Rig tools found.");
 
-    expect(SchemaRenderer.toJsonSchema({})).toMatchObject({ type: "unknown" });
-    expect(SchemaRenderer.summary(z.object({ text: z.string() }))).toContain("text");
-    expect(CommandIds.from("tool", "command")).toBe("tool.command");
+    expect(schemaRenderer.toJsonSchema({})).toMatchObject({ type: "unknown" });
+    expect(schemaRenderer.summary(z.object({ text: z.string() }))).toContain("text");
+    expect(commandIds.from("tool", "command")).toBe("tool.command");
 
     const toolkit = createRigToolKit();
     await expect(toolkit.$`echo toolkit-ok`).resolves.toMatchObject({
@@ -826,7 +862,7 @@ describe("coverage support", () => {
   });
 
   test("exercises loader validation and load failures", async () => {
-    const validator = new ToolDefinitionValidator();
+    const validator = new ToolDefinitionValidatorClass();
     const toolkit = createRigToolKit();
     const validCommand = {
       description: "Valid command.",
@@ -855,6 +891,8 @@ describe("coverage support", () => {
       [{ name: "valid", description: "x" }, "needs a commands object"],
       [{ ...validTool, setupDb: true }, "setupDb must be a function"],
       [{ ...validTool, env: true }, "needs a Zod schema for env"],
+      [{ ...validTool, collections: true }, "needs a collections object"],
+      [{ ...validTool, collections: { "../notes": {} } }, "Invalid collection name"],
       [{ name: "valid", description: "x", commands: {} }, "must define at least one command"],
       [{ ...validTool, commands: { "": validCommand } }, "Invalid command name"],
       [{ ...validTool, commands: { echo: null } }, "Invalid command valid.echo"],
@@ -900,7 +938,7 @@ describe("coverage support", () => {
     }
 
     const home = await workspaces.create();
-    const loader = new ToolLoader({ homeDir: home });
+    const loader = new ToolLoaderClass({ homeDir: home });
     loader.validateCommandName("echo");
     await expect(loader.load("nonexistent")).rejects.toThrow("Tool not found");
     await expect(loader.loadCommand("valid", "Bad")).rejects.toThrow("Tool not found");
@@ -1021,12 +1059,18 @@ describe("coverage support", () => {
       output: rig.z.object({ ok: rig.z.boolean() }),
       run: async () => { throw "boom"; },
     }),
+    syntax: rig.defineCommand({
+      description: "Throw an unexpected syntax error.",
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async () => { throw new SyntaxError("tool bug"); },
+    }),
   },
 });
 `,
     );
 
-    const runner = new ToolRunner({ homeDir: home });
+    const runner = new ToolRunnerClass({ homeDir: home });
     await expect(runner.run("sample", "echo", { homeDir: home })).resolves.toMatchObject({
       exitCode: 0,
       envelope: { data: { text: "default" } },
@@ -1099,14 +1143,18 @@ describe("coverage support", () => {
     });
     await expect(runner.run("thrower", "string", { homeDir: home })).resolves.toMatchObject({
       exitCode: 1,
-      envelope: { errors: [{ code: "INPUT_ERROR", message: "boom" }] },
+      envelope: { errors: [{ code: "INTERNAL_ERROR", message: "boom" }] },
+    });
+    await expect(runner.run("thrower", "syntax", { homeDir: home })).resolves.toMatchObject({
+      exitCode: 1,
+      envelope: { errors: [{ code: "INTERNAL_ERROR", message: "tool bug" }] },
     });
   });
 
   test("exercises typecheck success, all-tools mode, missing tools, and parser diagnostics", async () => {
     const home = await workspaces.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    const service = new ToolTypecheckService({ homeDir: home });
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const service = new ToolTypecheckServiceClass({ homeDir: home });
     const all = await service.typecheck();
     expect(all.ok).toBe(true);
     expect(all.checked).toHaveLength(1);

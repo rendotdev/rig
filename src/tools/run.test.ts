@@ -3,15 +3,16 @@ import { existsSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ToolCreator } from "./create";
-import { ToolCacheService } from "./cache";
-import { ToolDatabaseService } from "./db";
-import { ToolHelpService } from "./help";
-import { ToolInspector } from "./inspect";
-import { ToolKvStoreService } from "./kv";
-import { ToolListService } from "./list";
-import { ToolRunner } from "./run";
-import { ToolTypecheckService } from "./typecheck";
+import { ToolCreatorClass } from "./create";
+import { ToolCacheServiceClass } from "./cache";
+import { ToolDatabaseServiceClass } from "./db";
+import { ToolHelpServiceClass } from "./help";
+import { ToolInspectorClass } from "./inspect";
+import { ToolKvStoreServiceClass } from "./kv";
+import { ToolListServiceClass } from "./list";
+import { RunInputReaderClass, ToolRunnerClass } from "./run";
+import type { CommandDefinition } from "./types";
+import { ToolTypecheckServiceClass } from "./typecheck";
 
 class TestHomeStore {
   private readonly homes: string[] = [];
@@ -45,6 +46,7 @@ class FakeSqliteStore {
   readonly migrations = new Map<number, { name: string; checksum: string }>();
   readonly notes: string[] = [];
   setupRuns = 0;
+  closeRuns = 0;
 }
 
 class FakeSqliteStatement {
@@ -134,6 +136,7 @@ class FakeSqliteStatement {
 
 class FakeSqliteDatabase {
   private static readonly stores = new Map<string, FakeSqliteStore>();
+  private static failNextRunPattern?: string;
   private readonly store: FakeSqliteStore;
 
   constructor(filename: string) {
@@ -145,6 +148,11 @@ class FakeSqliteDatabase {
 
   static reset(): void {
     this.stores.clear();
+    this.failNextRunPattern = undefined;
+  }
+
+  static failNextRunContaining(pattern: string): void {
+    this.failNextRunPattern = pattern;
   }
 
   static store(filename: string): FakeSqliteStore | undefined {
@@ -156,6 +164,13 @@ class FakeSqliteDatabase {
   }
 
   run(sql: string): { lastInsertRowid: number; changes: number } {
+    if (
+      FakeSqliteDatabase.failNextRunPattern &&
+      sql.includes(FakeSqliteDatabase.failNextRunPattern)
+    ) {
+      FakeSqliteDatabase.failNextRunPattern = undefined;
+      throw new Error("sqlite initialization failed");
+    }
     if (sql.includes("delete from _rig_cache")) {
       const changes = this.store.cache.size;
       this.store.cache.clear();
@@ -168,7 +183,9 @@ class FakeSqliteDatabase {
     return () => callback();
   }
 
-  close(): void {}
+  close(): void {
+    this.store.closeRuns++;
+  }
 }
 
 class FakeSqliteEnvironment {
@@ -182,6 +199,10 @@ class FakeSqliteEnvironment {
     delete (globalThis as typeof globalThis & { rigSqliteDatabaseForTests?: unknown })
       .rigSqliteDatabaseForTests;
     FakeSqliteDatabase.reset();
+  }
+
+  failNextInitialization(): void {
+    FakeSqliteDatabase.failNextRunContaining("PRAGMA journal_mode = WAL");
   }
 }
 
@@ -221,15 +242,35 @@ class DbSetupTestToolWriter {
 }
 
 describe("tool commands", () => {
+  test("normalizes non-Error JSON parser failures", async () => {
+    const parse = JSON.parse;
+    JSON.parse = () => {
+      throw "parser failed";
+    };
+
+    try {
+      await expect(
+        new RunInputReaderClass().read({} as CommandDefinition, { input: "{" }),
+      ).rejects.toMatchObject({
+        code: "INPUT_ERROR",
+        details: { message: "parser failed" },
+      });
+    } finally {
+      JSON.parse = parse;
+    }
+  });
+
   test("creates a starter tool with definition-owned examples", async () => {
     const home = await homes.create();
-    const result = await new ToolCreator({ homeDir: home }).create("sample");
+    const result = await new ToolCreatorClass({ homeDir: home }).create("sample");
     expect(result.files).toHaveLength(1);
     expect(result.toolPath).toBe(join(home, "rig", "tools", "sample", "index.rig.ts"));
     expect(result.id).toBe("sample.example");
 
-    const help = await new ToolHelpService({ homeDir: home }).render("sample", "example");
-    const commandIdHelp = await new ToolHelpService({ homeDir: home }).render("sample.example");
+    const help = await new ToolHelpServiceClass({ homeDir: home }).render("sample", "example");
+    const commandIdHelp = await new ToolHelpServiceClass({ homeDir: home }).render(
+      "sample.example",
+    );
     expect(commandIdHelp).toMatch(
       /^Tool: sample\nCommand: example\nRun: rig run sample\.example \[args\.\.\.\]/,
     );
@@ -242,8 +283,8 @@ describe("tool commands", () => {
 
   test("inspects command metadata as JSON", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    const inspected = await new ToolInspector({ homeDir: home }).inspect("sample", "example");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const inspected = await new ToolInspectorClass({ homeDir: home }).inspect("sample", "example");
     expect(inspected).toMatchObject({
       tool: "sample",
       command: "example",
@@ -254,8 +295,8 @@ describe("tool commands", () => {
 
   test("type-checks generated tools with injected Rig runtime types", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    const result = await new ToolTypecheckService({ homeDir: home }).typecheck("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const result = await new ToolTypecheckServiceClass({ homeDir: home }).typecheck("sample");
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
@@ -286,7 +327,7 @@ export default tool;
       "utf8",
     );
 
-    const result = await new ToolTypecheckService({ homeDir: home }).typecheck("bad-output");
+    const result = await new ToolTypecheckServiceClass({ homeDir: home }).typecheck("bad-output");
 
     expect(result.ok).toBe(false);
     expect(result.stdout).toContain("Type 'number' is not assignable to type 'string'");
@@ -294,8 +335,8 @@ export default tool;
 
   test("runs a command and returns a success envelope", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    const result = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const result = await new ToolRunnerClass({ homeDir: home }).run("sample", "example", {
       homeDir: home,
       args: ["Agent"],
     });
@@ -304,13 +345,24 @@ export default tool;
       data: { text: "Agent" },
       errors: [],
     });
+    const toolDir = join(home, "rig", "tools", "sample");
+    for (const file of [
+      "kv.sqlite",
+      "kv.sqlite-wal",
+      "kv.sqlite-shm",
+      "cache.sqlite",
+      "cache.sqlite-wal",
+      "cache.sqlite-shm",
+    ]) {
+      expect(existsSync(join(toolDir, file))).toBe(false);
+    }
   });
 
   test("resolves pipeline references in command input", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
 
-    const result = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+    const result = await new ToolRunnerClass({ homeDir: home }).run("sample", "example", {
       homeDir: home,
       args: ["text=@clean.output"],
       pipeContext: { clean: { output: "image.cleaned.png" } },
@@ -322,7 +374,7 @@ export default tool;
       errors: [],
     });
 
-    const exactId = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+    const exactId = await new ToolRunnerClass({ homeDir: home }).run("sample", "example", {
       homeDir: home,
       args: ["text=@clean"],
       pipeContext: { clean: "image.cleaned.png" },
@@ -332,7 +384,7 @@ export default tool;
       errors: [],
     });
 
-    const embedded = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+    const embedded = await new ToolRunnerClass({ homeDir: home }).run("sample", "example", {
       homeDir: home,
       args: ["text=output:@clean.output"],
       pipeContext: { clean: { output: "image.cleaned.png" } },
@@ -342,7 +394,7 @@ export default tool;
       errors: [],
     });
 
-    const arrayInput = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+    const arrayInput = await new ToolRunnerClass({ homeDir: home }).run("sample", "example", {
       homeDir: home,
       input: JSON.stringify({ text: "@names.0", ignored: ["@names.0"] }),
       pipeContext: { names: ["image.cleaned.png"] },
@@ -355,8 +407,8 @@ export default tool;
 
   test("returns pipeline reference errors as envelopes", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    const runner = new ToolRunner({ homeDir: home });
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const runner = new ToolRunnerClass({ homeDir: home });
 
     const unknown = await runner.run("sample", "example", {
       homeDir: home,
@@ -393,7 +445,7 @@ export default tool;
 
   test("runs registered tools from a tool context", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
     const toolDir = join(home, "rig", "tools", "caller");
     await mkdir(toolDir, { recursive: true });
     await writeFile(
@@ -420,7 +472,7 @@ export default tool;
       "utf8",
     );
 
-    const result = await new ToolRunner({ homeDir: home }).run("caller", "call", {
+    const result = await new ToolRunnerClass({ homeDir: home }).run("caller", "call", {
       homeDir: home,
       input: '{"text":"Nested"}',
     });
@@ -430,6 +482,66 @@ export default tool;
       data: { text: "Nested" },
       errors: [],
     });
+  });
+
+  test("reuses loaded definitions across nested calls in one execution session", async () => {
+    const home = await homes.create();
+    const toolsDir = join(home, "rig", "tools");
+    const calleeDir = join(toolsDir, "callee");
+    const callerDir = join(toolsDir, "caller");
+    await mkdir(calleeDir, { recursive: true });
+    await mkdir(callerDir, { recursive: true });
+    await writeFile(
+      join(calleeDir, "index.rig.ts"),
+      `export default (rig) => {
+  globalThis.__rigNestedDefinitionLoads = (globalThis.__rigNestedDefinitionLoads ?? 0) + 1;
+  const definitionLoad = globalThis.__rigNestedDefinitionLoads;
+  return rig.defineTool({
+    name: "callee",
+    description: "Nested cache test callee.",
+    commands: {
+      read: rig.defineCommand({
+        description: "Return the definition load count.",
+        input: rig.z.object({}),
+        output: rig.z.number(),
+        run: () => definitionLoad,
+      }),
+    },
+  });
+};
+`,
+      "utf8",
+    );
+    await writeFile(
+      join(callerDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "caller",
+  description: "Nested cache test caller.",
+  commands: {
+    call: rig.defineCommand({
+      description: "Call another Rig tool repeatedly.",
+      input: rig.z.object({ count: rig.z.number() }),
+      output: rig.z.array(rig.z.number()),
+      run: async (context) => {
+        const values = [];
+        for (let index = 0; index < context.input.count; index++) {
+          values.push(await context.rig.run({ command: "callee.read" }));
+        }
+        return values;
+      },
+    }),
+  },
+});
+`,
+      "utf8",
+    );
+
+    const result = await new ToolRunnerClass({ homeDir: home }).run("caller", "call", {
+      input: JSON.stringify({ count: 50 }),
+    });
+
+    expect(result).toMatchObject({ exitCode: 0 });
+    expect((result.envelope as { data: number[] }).data).toEqual(Array(50).fill(1));
   });
 
   test("runs tools that import modules resolved from node_modules", async () => {
@@ -470,7 +582,7 @@ export default (rig) => rig.defineTool({
 
     const originalCwd = process.cwd();
     try {
-      const result = await new ToolRunner({ homeDir: home }).run("external-import", "shout", {
+      const result = await new ToolRunnerClass({ homeDir: home }).run("external-import", "shout", {
         homeDir: home,
         input: '{"text":"modules"}',
       });
@@ -537,7 +649,7 @@ export default (rig) => rig.defineTool({
       "utf8",
     );
 
-    const result = await new ToolRunner({ homeDir: home }).run("with-env", "read", {
+    const result = await new ToolRunnerClass({ homeDir: home }).run("with-env", "read", {
       homeDir: home,
     });
     expect(result).toMatchObject({
@@ -554,7 +666,7 @@ export default (rig) => rig.defineTool({
       },
     });
 
-    const dryRun = await new ToolRunner({ homeDir: home }).run("with-env", "read", {
+    const dryRun = await new ToolRunnerClass({ homeDir: home }).run("with-env", "read", {
       homeDir: home,
       dryRun: true,
     });
@@ -611,7 +723,7 @@ export default (rig) => rig.defineTool({
 
         return {
           item,
-          result: await new ToolRunner({ homeDir: home }).run(item.name, "read", {
+          result: await new ToolRunnerClass({ homeDir: home }).run(item.name, "read", {
             homeDir: home,
           }),
         };
@@ -677,12 +789,14 @@ export default (rig) => rig.defineTool({
       "utf8",
     );
 
-    const runner = new ToolRunner({ homeDir: home });
+    const runner = new ToolRunnerClass({ homeDir: home });
     const first = await runner.run("notes", "add", { homeDir: home, args: ["text=one"] });
     const second = await runner.run("notes", "add", { homeDir: home, args: ["text=two"] });
     const dbPath = join(toolDir, "index.sqlite");
 
-    expect(new ToolDatabaseService().dbPathForToolPath(join(toolDir, "index.rig.ts"))).toBe(dbPath);
+    expect(new ToolDatabaseServiceClass().dbPathForToolPath(join(toolDir, "index.rig.ts"))).toBe(
+      dbPath,
+    );
     expect(first).toMatchObject({
       exitCode: 0,
       envelope: { data: { id: 1, setupRuns: 1, dbPath } },
@@ -692,6 +806,68 @@ export default (rig) => rig.defineTool({
       envelope: { data: { id: 2, setupRuns: 2, dbPath } },
     });
     expect(existsSync(dbPath)).toBe(true);
+  });
+
+  test("closes databases when factory initialization or setupDb fails", async () => {
+    const sqlite = new FakeSqliteEnvironment();
+    sqlite.install();
+    const home = await homes.create();
+    const toolPath = join(home, "rig", "tools", "failure", "index.rig.ts");
+    const dbPath = join(dirname(toolPath), "index.sqlite");
+    const service = new ToolDatabaseServiceClass();
+
+    sqlite.failNextInitialization();
+    await expect(
+      service.setup({ path: toolPath, definition: { setupDb: () => undefined } } as never),
+    ).rejects.toThrow("sqlite initialization failed");
+    expect(FakeSqliteDatabase.store(dbPath)?.closeRuns).toBe(1);
+
+    await expect(
+      service.setup({
+        path: toolPath,
+        definition: {
+          setupDb: () => {
+            throw new Error("setupDb failed");
+          },
+        },
+      } as never),
+    ).rejects.toThrow("setupDb failed");
+    expect(FakeSqliteDatabase.store(dbPath)?.closeRuns).toBe(2);
+  });
+
+  test("closes earlier resources when collection setup fails", async () => {
+    new FakeSqliteEnvironment().install();
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "partial-setup");
+    const toolPath = join(toolDir, "index.rig.ts");
+    const dbPath = join(toolDir, "index.sqlite");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(join(toolDir, "blocked"), "prevents collection directory creation", "utf8");
+    await writeFile(
+      toolPath,
+      `export default (rig) => rig.defineTool({
+  name: "partial-setup",
+  description: "Partial setup cleanup test.",
+  setupDb: () => {},
+  collections: { blocked: {} },
+  commands: {
+    read: rig.defineCommand({
+      description: "Should not run.",
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async () => ({ ok: true }),
+    }),
+  },
+});`,
+      "utf8",
+    );
+
+    const result = await new ToolRunnerClass({ homeDir: home }).run("partial-setup", "read", {
+      homeDir: home,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(FakeSqliteDatabase.store(dbPath)?.closeRuns).toBe(1);
   });
 
   test("provides tool loggers and sqlite-backed key-value state", async () => {
@@ -735,7 +911,7 @@ export default (rig) => rig.defineTool({
       "utf8",
     );
 
-    const runner = new ToolRunner({ homeDir: home });
+    const runner = new ToolRunnerClass({ homeDir: home });
     const first = await runner.run("stateful", "write", {
       homeDir: home,
       args: ["key=name", "value=one"],
@@ -747,7 +923,9 @@ export default (rig) => rig.defineTool({
     const bad = await runner.run("stateful", "bad", { homeDir: home });
     const kvPath = join(toolDir, "kv.sqlite");
 
-    expect(new ToolKvStoreService().kvPathForToolPath(join(toolDir, "index.rig.ts"))).toBe(kvPath);
+    expect(new ToolKvStoreServiceClass().kvPathForToolPath(join(toolDir, "index.rig.ts"))).toBe(
+      kvPath,
+    );
     expect(first).toMatchObject({
       exitCode: 0,
       envelope: { data: { current: "one", kvPath } },
@@ -761,19 +939,21 @@ export default (rig) => rig.defineTool({
       envelope: { errors: [{ code: "INPUT_ERROR" }] },
     });
     expect(existsSync(kvPath)).toBe(true);
+    expect(existsSync(join(toolDir, "cache.sqlite"))).toBe(false);
+    expect(FakeSqliteDatabase.store(kvPath)?.closeRuns).toBe(3);
 
     const logOutput = await readFile(join(home, "rig", ".logs", "rig.log"), "utf8");
     expect(logOutput).toContain('"prefix":"tool:stateful.write"');
     expect(logOutput).toContain("Stored key-value state.");
 
-    const kv = await new ToolKvStoreService().setup({
+    const kv = await new ToolKvStoreServiceClass().setup({
       path: join(toolDir, "index.rig.ts"),
     } as never);
     expect(() => kv.get("")).toThrow("context.kv keys must be non-empty strings.");
     (kv as unknown as { close(): void }).close();
 
     new FakeSqliteEnvironment().uninstall();
-    const unavailable = await new ToolKvStoreService().setup({
+    const unavailable = await new ToolKvStoreServiceClass().setup({
       path: join(home, "unavailable", "index.rig.ts"),
     } as never);
     expect(unavailable.path).toBe(join(home, "unavailable", "kv.sqlite"));
@@ -783,7 +963,7 @@ export default (rig) => rig.defineTool({
     );
   });
 
-  test("provides a persistent stale-while-revalidate query cache", async () => {
+  test("provides a persistent query cache with foreground refreshes", async () => {
     new FakeSqliteEnvironment().install();
     const home = await homes.create();
     const toolDir = join(home, "rig", "tools", "cached");
@@ -818,7 +998,7 @@ export default (rig) => rig.defineTool({
       "utf8",
     );
 
-    const runner = new ToolRunner({ homeDir: home });
+    const runner = new ToolRunnerClass({ homeDir: home });
     const cold = await runner.run("cached", "read", {
       homeDir: home,
       input: JSON.stringify({ staleTime: 60_000 }),
@@ -851,20 +1031,17 @@ export default (rig) => rig.defineTool({
     });
     expect(stale).toMatchObject({
       exitCode: 0,
-      envelope: { data: { value: "value-1", calls: 2, cachePath } },
+      envelope: { data: { value: "value-2", calls: 2, cachePath } },
     });
     expect(refreshed).toMatchObject({
       exitCode: 0,
       envelope: { data: { value: "value-2", calls: 2, cachePath } },
     });
     expect(failedRefresh).toMatchObject({
-      exitCode: 0,
-      envelope: { data: { value: "value-2", calls: 3, cachePath } },
+      exitCode: 1,
+      envelope: { errors: [{ code: "INTERNAL_ERROR", message: "refresh failed" }] },
     });
     expect(existsSync(cachePath)).toBe(true);
-    expect(await readFile(join(home, "rig", ".logs", "rig.log"), "utf8")).toContain(
-      "Cache revalidation failed.",
-    );
   });
 
   test("supports cache controls, deterministic keys, validation, and unavailable runtimes", async () => {
@@ -875,13 +1052,15 @@ export default (rig) => rig.defineTool({
     const log = {
       warn: (bindings: unknown, message: unknown) => warnings.push({ bindings, message }),
     } as never;
-    const service = new ToolCacheService();
+    const service = new ToolCacheServiceClass();
     const cache = await service.setup({ path: toolPath } as never, log);
     const cachePath = join(dirname(toolPath), "cache.sqlite");
 
     expect(service.cachePathForToolPath(toolPath)).toBe(cachePath);
     expect(cache.path).toBe(cachePath);
+    expect(existsSync(cachePath)).toBe(false);
     expect(cache.peek(["missing"])).toBeUndefined();
+    expect(existsSync(cachePath)).toBe(true);
 
     const objectKey = ["todos", { b: 2, omitted: undefined, a: 1 }] as const;
     cache.set(objectKey, { ok: true });
@@ -920,8 +1099,7 @@ export default (rig) => rig.defineTool({
         staleTime: Infinity,
         queryFn: () => "new",
       }),
-    ).resolves.toBe("old");
-    await cache.settle();
+    ).resolves.toBe("new");
     expect(cache.peek(["invalidated"])).toBe("new");
 
     cache.set(["failure"], "stale");
@@ -930,13 +1108,12 @@ export default (rig) => rig.defineTool({
         queryKey: ["failure"],
         staleTime: 0,
         queryFn: () => {
-          throw new Error("background failure");
+          throw new Error("foreground failure");
         },
       }),
-    ).resolves.toBe("stale");
-    await cache.settle();
+    ).rejects.toThrow("foreground failure");
     expect(cache.peek(["failure"])).toBe("stale");
-    expect(warnings).toHaveLength(1);
+    expect(warnings).toHaveLength(0);
 
     await expect(
       cache.query({
@@ -944,7 +1121,7 @@ export default (rig) => rig.defineTool({
         queryFn: () => Promise.reject(new Error("cold failure")),
       }),
     ).rejects.toThrow("cold failure");
-    expect(warnings).toHaveLength(1);
+    expect(warnings).toHaveLength(0);
 
     cache.set(["remove"], true);
     cache.remove(["remove"]);
@@ -1004,19 +1181,37 @@ export default (rig) => rig.defineTool({
       "context.cache requires the Bun SQLite runtime",
     );
     expect(() => unavailable.clear()).toThrow("context.cache requires the Bun SQLite runtime");
-    await expect(unavailable.settle()).resolves.toBeUndefined();
     expect(() => unavailable.close()).not.toThrow();
   });
 
+  test("closes partial lazy state initialization and retries cleanly", async () => {
+    const sqlite = new FakeSqliteEnvironment();
+    sqlite.install();
+    const home = await homes.create();
+    const toolPath = join(home, "rig", "tools", "partial", "index.rig.ts");
+    const kvPath = join(dirname(toolPath), "kv.sqlite");
+    const cachePath = join(dirname(toolPath), "cache.sqlite");
+    const log = { warn: () => undefined } as never;
+
+    const kv = await new ToolKvStoreServiceClass().setup({ path: toolPath } as never);
+    sqlite.failNextInitialization();
+    expect(() => kv.get("key")).toThrow("sqlite initialization failed");
+    expect(FakeSqliteDatabase.store(kvPath)?.closeRuns).toBe(1);
+    expect(kv.get("key")).toBeUndefined();
+    (kv as { close(): void }).close();
+    expect(FakeSqliteDatabase.store(kvPath)?.closeRuns).toBe(2);
+
+    const cache = await new ToolCacheServiceClass().setup({ path: toolPath } as never, log);
+    sqlite.failNextInitialization();
+    expect(() => cache.peek(["key"])).toThrow("sqlite initialization failed");
+    expect(FakeSqliteDatabase.store(cachePath)?.closeRuns).toBe(1);
+    expect(cache.peek(["key"])).toBeUndefined();
+    cache.close();
+    expect(FakeSqliteDatabase.store(cachePath)?.closeRuns).toBe(2);
+  });
+
   test("does not let cache cleanup failures mask command results", async () => {
-    const runner = new ToolRunner();
-    await expect(
-      (
-        runner as unknown as {
-          settleCache(cache: { settle(): Promise<void> }): Promise<void>;
-        }
-      ).settleCache({ settle: () => Promise.reject(new Error("settle failed")) }),
-    ).resolves.toBeUndefined();
+    const runner = new ToolRunnerClass();
     expect(() =>
       (
         runner as unknown as {
@@ -1040,7 +1235,7 @@ export default (rig) => rig.defineTool({
     );
 
     await expect(
-      new ToolRunner({ homeDir: home }).run("db-changed", "check", { homeDir: home }),
+      new ToolRunnerClass({ homeDir: home }).run("db-changed", "check", { homeDir: home }),
     ).resolves.toMatchObject({ exitCode: 0 });
     await writer.write(
       "db-changed",
@@ -1048,7 +1243,7 @@ export default (rig) => rig.defineTool({
     );
     expect(toolPath).toBe(join(home, "rig", "tools", "db-changed", "index.rig.ts"));
 
-    const result = await new ToolRunner({ homeDir: home }).run("db-changed", "check", {
+    const result = await new ToolRunnerClass({ homeDir: home }).run("db-changed", "check", {
       homeDir: home,
     });
     expect(result).toMatchObject({
@@ -1096,7 +1291,7 @@ export default (rig) => rig.defineTool({
         await new DbSetupTestToolWriter(home).write(item.name, item.setup);
         return {
           item,
-          result: await new ToolRunner({ homeDir: home }).run(item.name, "check", {
+          result: await new ToolRunnerClass({ homeDir: home }).run(item.name, "check", {
             homeDir: home,
           }),
         };
@@ -1139,7 +1334,7 @@ export default (rig) => rig.defineTool({
     );
 
     await expect(
-      new ToolRunner({ homeDir: home }).run("missing-db", "read", { homeDir: home }),
+      new ToolRunnerClass({ homeDir: home }).run("missing-db", "read", { homeDir: home }),
     ).resolves.toMatchObject({
       exitCode: 1,
       envelope: {
@@ -1155,8 +1350,8 @@ export default (rig) => rig.defineTool({
 
   test("renders a compact plain command list", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    const service = new ToolListService({ homeDir: home });
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const service = new ToolListServiceClass({ homeDir: home });
     const list = await service.list();
 
     const rendered = service.renderPlain(list);
@@ -1165,7 +1360,7 @@ export default (rig) => rig.defineTool({
 
   test("dry-runs a command without execution", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
     const toolDir = join(home, "rig", "tools", "writer");
     await mkdir(toolDir, { recursive: true });
     await writeFile(
@@ -1188,7 +1383,7 @@ export default (rig) => rig.defineTool({
       "utf8",
     );
 
-    const result = await new ToolRunner({ homeDir: home }).run("writer", "save", {
+    const result = await new ToolRunnerClass({ homeDir: home }).run("writer", "save", {
       homeDir: home,
       args: ["text=Agent"],
       dryRun: true,
@@ -1208,7 +1403,7 @@ export default (rig) => rig.defineTool({
 
   test("truncates large command output and saves the full data to a temp file", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
     const toolDir = join(home, "rig", "tools", "large");
     await mkdir(toolDir, { recursive: true });
     await writeFile(
@@ -1229,7 +1424,7 @@ export default (rig) => rig.defineTool({
       "utf8",
     );
 
-    const result = await new ToolRunner({ homeDir: home }).run("large", "dump", {
+    const result = await new ToolRunnerClass({ homeDir: home }).run("large", "dump", {
       homeDir: home,
     });
 
@@ -1275,7 +1470,7 @@ export default RigTool.define({
       "utf8",
     );
 
-    const result = await new ToolRunner({ homeDir: home }).run("raw-schema", "echo", {
+    const result = await new ToolRunnerClass({ homeDir: home }).run("raw-schema", "echo", {
       homeDir: home,
       input: '{"text":"Agent"}',
     });
@@ -1289,8 +1484,8 @@ export default RigTool.define({
 
   test("returns an error envelope for invalid input", async () => {
     const home = await homes.create();
-    await new ToolCreator({ homeDir: home }).create("sample");
-    const result = await new ToolRunner({ homeDir: home }).run("sample", "example", {
+    await new ToolCreatorClass({ homeDir: home }).create("sample");
+    const result = await new ToolRunnerClass({ homeDir: home }).run("sample", "example", {
       homeDir: home,
       input: '{"text":123}',
     });
