@@ -21,6 +21,7 @@ export class RigBuilderClass {
       outdir: "./dist",
       target: "node",
       splitting: true,
+      external: ["typescript"],
       naming: {
         entry: "rig.js",
         chunk: "[name]-[hash].js",

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -219,6 +219,18 @@ describe("installed Rig distribution and recovery", () => {
     const typecheck = await rig.run({ args: ["typecheck", "consumer"], timeoutMs: 30_000 });
     expect(typecheck.exitCode).toBe(0);
     expect(typecheck.json<{ ok: boolean }>().ok).toBe(true);
+
+    const installedDistDir = dirname(distribution.entrypoint);
+    const installedJavaScript = (
+      await Promise.all(
+        (
+          await readdir(installedDistDir)
+        )
+          .filter((file) => file.endsWith(".js"))
+          .map((file) => readFile(join(installedDistDir, file), "utf8")),
+      )
+    ).join("\n");
+    expect(installedJavaScript).not.toContain(join(repositoryRoot, "node_modules", "typescript"));
 
     for (const file of ["sdk.ts", "types.d.ts", "globals.d.ts", "tsconfig.tools.json"]) {
       expect(existsSync(join(rig.rigHomeDir, "rig", "runtime", file))).toBe(true);
