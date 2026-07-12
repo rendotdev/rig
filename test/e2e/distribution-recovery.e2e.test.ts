@@ -403,7 +403,7 @@ describe("installed Rig distribution and recovery", () => {
       Array.from({ length: 8 }, () => rig.run({ args: ["run", "documents.list"] })),
     );
     for (const result of recovered) {
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(result.json<{ data: { ids: string[] } }>().data.ids).toEqual(["first-note"]);
     }
     expect((await readFile(indexPath)).subarray(0, 15).toString()).toBe("SQLite format 3");
