@@ -87,6 +87,7 @@ class ManagedProcessClass {
   private terminate(): void {
     this.timedOut = true;
     this.signal("SIGTERM");
+    /* v8 ignore next -- process exit timing before forced escalation differs by platform */
     this.escalation = setTimeout(() => this.signal("SIGKILL"), TerminationGraceMs);
   }
 
