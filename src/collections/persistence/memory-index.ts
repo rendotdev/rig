@@ -15,6 +15,10 @@ export class MemoryCollectionIndexClass implements CollectionIndexInterface {
   private docs = new Map<string, DocRow>();
   private files = new Map<string, CollectionFileRecord>();
 
+  async withExclusiveInitialization<T>(params: { operation: () => Promise<T> }): Promise<T> {
+    return params.operation();
+  }
+
   async open(): Promise<void> {
     // No-op for memory index
   }
