@@ -239,6 +239,10 @@ describe("cli application", () => {
     process.chdir(project);
 
     const cli = new CliHarness(home, true);
+
+    // Add a custom registry inside the project so sync targets it
+    const projectRegistry = join(project, "rig-tools");
+    expect(await cli.run(["registry", "create", projectRegistry])).toContain(projectRegistry);
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
 
     const syncedTool = await readFile(join(home, "rig", "tools", "sample", "index.rig.ts"), "utf8");

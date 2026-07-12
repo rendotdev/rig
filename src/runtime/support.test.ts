@@ -169,6 +169,7 @@ describe("coverage support", () => {
       "utf8",
     );
     await symlink(globalAgentSource, globalAgentLink);
+    await new RegistryConfigServiceClass({ homeDir: home }).add(join(project, "rig-tools"));
     await new ToolCreatorClass({ homeDir: home }).create("sample");
 
     const service = new AgentInstructionSyncServiceClass({ homeDir: home, cwd: nested });
@@ -282,6 +283,7 @@ describe("coverage support", () => {
     const skipProject = join(skipHome, "project");
     await mkdir(join(skipProject, ".git"), { recursive: true });
     await writeFile(join(skipProject, "AGENTS.md"), "# Notes\n", "utf8");
+    await new RegistryConfigServiceClass({ homeDir: skipHome }).add(join(skipProject, "rig-tools"));
     await new ToolCreatorClass({ homeDir: skipHome }).create("skiptool");
 
     const skipService = new AgentInstructionSyncServiceClass({
@@ -304,7 +306,7 @@ describe("coverage support", () => {
   test("fingerprints TypeScript and TSX tools across every configured registry", async () => {
     const home = await workspaces.create();
     const project = join(home, "project");
-    const customRegistry = join(home, "custom-tools");
+    const customRegistry = join(project, "rig-tools");
     const agentPath = join(project, "AGENTS.md");
     await mkdir(join(project, ".git"), { recursive: true });
     await writeFile(agentPath, "# Agent notes\n", "utf8");

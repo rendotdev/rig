@@ -405,6 +405,7 @@ class SqliteCollectionIndexClass implements CollectionIndexInterface {
   private initialize(Database: CollectionDatabaseConstructor): void {
     this.db = new Database(this.dbPath, { create: true, strict: true });
     try {
+      this.db.run("PRAGMA busy_timeout = 5000;");
       this.db.run("PRAGMA journal_mode = WAL;");
       this.migrate();
       this.validate();

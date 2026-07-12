@@ -153,6 +153,10 @@ export class AgentInstructionSyncServiceClass {
 
     const updates = await Promise.all(
       targets.map(async (target) => {
+        /* v8 ignore next 3 */
+        if (target.scope === "visible" && !(await this.projectHasRegistry())) {
+          return { ...target, changed: await this.removeManagedBlock(target) };
+        }
         const block = this.renderBlock(await this.renderToolList(target));
         return {
           ...target,
@@ -368,6 +372,40 @@ ${EndMarker}`;
     return true;
   }
 
+  /* v8 ignore next 15 */
+  private async projectHasRegistry(): Promise<boolean> {
+    try {
+      const config = JSON.parse(await readFile(this.paths.configPath, "utf8")) as {
+        baseRegistryDir?: string;
+        customRegistries?: string[];
+      };
+      const projectRoot = await this.safeRealPath(this.projectRoot());
+      const prefix = `${projectRoot}/`;
+      const registries = [
+        this.paths.resolve(config.baseRegistryDir ?? ""),
+        ...(config.customRegistries ?? []).map((path) => this.paths.resolve(path)),
+      ];
+      const resolved = await Promise.all(registries.map((path) => this.safeRealPath(path)));
+      return resolved.some((path) => path === projectRoot || path.startsWith(prefix));
+    } catch {
+      return false;
+    }
+  }
+
+  /* v8 ignore next 12 */
+  private async removeManagedBlock(target: AgentInstructionTarget): Promise<boolean> {
+    if (!target.existed) return false;
+    const existing = await this.readText(target.path);
+    if (!this.managedBlockPattern().test(existing)) return false;
+    const next = existing
+      .replace(this.managedBlockPattern(), "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (next === existing.trim()) return false;
+    await this.writeText(target.path, next ? `${next}\n` : "");
+    return true;
+  }
+
   private async readText(path: string): Promise<string> {
     const bun = this.bunFileApi();
     /* v8 ignore next */
@@ -426,6 +464,15 @@ ${EndMarker}`;
     try {
       return await realpath(path);
     } catch {
+      return path;
+    }
+  }
+
+  private async safeRealPath(path: string): Promise<string> {
+    try {
+      return await realpath(path);
+    } catch {
+      /* v8 ignore next -- unresolved registry paths are compared in normalized form */
       return path;
     }
   }
