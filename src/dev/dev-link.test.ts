@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DevLinkService } from "./dev-link";
+import { DevLinkServiceClass } from "./dev-link";
 
 class TestWorkspaceStore {
   private readonly paths: string[] = [];
@@ -43,7 +43,7 @@ describe("dev link", () => {
     const repoPath = await workspaces.create();
     await new TestRigRepo(repoPath).create();
 
-    const service = new DevLinkService({ homeDir: home, repoRoot: repoPath });
+    const service = new DevLinkServiceClass({ homeDir: home, repoRoot: repoPath });
     const linked = await service.link();
 
     expect(linked.exists).toBe(true);
@@ -67,8 +67,28 @@ describe("dev link", () => {
     await mkdir(binDir, { recursive: true });
     await writeFile(join(binDir, "rig"), "#!/usr/bin/env bash\necho nope\n", "utf8");
 
-    await expect(new DevLinkService({ homeDir: home, repoRoot: repoPath }).link()).rejects.toThrow(
-      "Refusing to overwrite existing file",
-    );
+    await expect(
+      new DevLinkServiceClass({ homeDir: home, repoRoot: repoPath }).link(),
+    ).rejects.toThrow("Refusing to overwrite existing file");
+  });
+
+  test("writes a Windows command shim when requested", async () => {
+    const home = await workspaces.create();
+    const repoPath = await workspaces.create();
+    await new TestRigRepo(repoPath).create();
+
+    const service = new DevLinkServiceClass({
+      homeDir: home,
+      repoRoot: repoPath,
+      platform: "win32",
+    });
+    const linked = await service.link();
+    const shim = await readFile(linked.shimPath, "utf8");
+
+    expect(linked.shimPath).toBe(join(home, ".local", "bin", "rig.cmd"));
+    expect(linked.pointsToCurrentRepo).toBe(true);
+    expect(shim).toContain("@echo off");
+    expect(shim).toContain('set "RIG_DEV_REPO=');
+    expect(shim).toContain('run "%RIG_DEV_REPO%\\src\\cli.ts" %*');
   });
 });

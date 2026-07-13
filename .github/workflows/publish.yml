@@ -25,27 +25,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Node
-        uses: actions/setup-node@v5
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
         with:
-          node-version: 24
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+          node-version: "24"
+          cache: true
 
       - name: Update npm for trusted publishing
         run: npm install -g npm@latest
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: vp install --frozen-lockfile
 
-      - name: Check
-        run: bun run check
-
-      - name: Build
-        run: bun run build
+      - name: Run CI workflow
+        run: vp run ci
 
       - name: Check published version
         id: published_version
@@ -61,12 +54,14 @@ jobs:
             echo "already_published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Pack dry run
-        if: steps.published_version.outputs.already_published != 'true'
-        run: npm pack --dry-run
-
       - name: Publish with trusted publishing
         if: steps.published_version.outputs.already_published != 'true'
         run: |
+          package_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          publish_tag="latest"
+          if [[ "${package_version}" == *-* ]]; then
+            prerelease="${package_version#*-}"
+            publish_tag="${prerelease%%.*}"
+          fi
           unset NODE_AUTH_TOKEN
-          npm publish --access public
+          npm publish --access public --tag "${publish_tag}"

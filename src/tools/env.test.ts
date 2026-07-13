@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ToolEnvService } from "./env";
+import { ToolEnvServiceClass } from "./env";
 
 class EnvWorkspaceStore {
   private readonly homes: string[] = [];
@@ -68,7 +68,7 @@ MODE='dev'
 `,
     );
 
-    const service = new ToolEnvService({ homeDir: home });
+    const service = new ToolEnvServiceClass({ homeDir: home });
     const listed = await service.configure("needs-env");
     const updated = await service.configure("needs-env", [
       "TOKEN=new secret",
@@ -188,7 +188,7 @@ MODE='dev'
 `,
     );
 
-    const service = new ToolEnvService({ homeDir: home });
+    const service = new ToolEnvServiceClass({ homeDir: home });
     await expect(service.configure("needs-token.read.extra")).rejects.toThrow(
       "Env target must use <tool>",
     );
