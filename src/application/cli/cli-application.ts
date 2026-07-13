@@ -40,6 +40,7 @@ export class CliApplicationClass {
     this.configureConfigCommands();
     this.configureRegistryCommands();
     this.configureListCommand();
+    this.configureFindCommand();
     this.configureInspectCommand();
     this.configureCreateCommand();
     this.configureEditCommand();
@@ -166,6 +167,28 @@ export class CliApplicationClass {
         if (commandOptions.json) this.printJson(data);
         else console.log(service.renderPlain(data));
       });
+  }
+
+  private configureFindCommand(): void {
+    this.program
+      .command("find")
+      .argument("<query>", "Natural-language description of the command to find.")
+      .description("Find commands with local typo-tolerant fuzzy search.")
+      .option("--limit <count>", "Maximum results to return, from 1 to 50.", "5")
+      .option("--tool <tool>", "Search within one tool.")
+      .option("--json", "Print ranked result metadata as JSON.")
+      .action(
+        async (
+          query: string,
+          commandOptions: { limit?: string; tool?: string; json?: boolean },
+        ) => {
+          const { ToolFindServiceClass } = await import("../../tools/find");
+          const service = new ToolFindServiceClass(this.pathOptions());
+          const data = await service.find({ query, options: commandOptions });
+          if (commandOptions.json) this.printJson(data);
+          else console.log(service.renderPlain({ data }));
+        },
+      );
   }
 
   private configureInspectCommand(): void {

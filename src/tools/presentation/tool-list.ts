@@ -37,7 +37,7 @@ export type ToolListData = {
   visibleFromPath?: string;
 };
 
-class CommandRunExampleRendererClass {
+export class CommandRunExampleRendererClass {
   render(toolName: string, commandName: string, command: CommandDefinition): string {
     const id = commandIds.from(toolName, commandName);
     const exampleInput = command.examples?.find((example) => example.input !== undefined)?.input;

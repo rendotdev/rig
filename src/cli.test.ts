@@ -225,6 +225,10 @@ describe("cli application", () => {
     expect(listOutput).toContain("rig run sample.example text=example #");
     expect(await cli.run(["list", "--json"])).toContain('"tools"');
     expect(await cli.run(["ls"])).toContain("rig run sample.example text=example #");
+    expect(await cli.run(["find", "exampl tool"])).toContain("1. sample.example");
+    expect(
+      await cli.run(["find", "example", "--tool", "sample", "--limit", "1", "--json"]),
+    ).toContain('"id": "sample.example"');
     expect(await cli.run(["edit", "sample"])).toContain(
       join(home, "rig", "tools", "sample", "index.rig.ts"),
     );

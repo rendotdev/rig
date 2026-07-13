@@ -69,6 +69,28 @@ const EnvToolSource = `const tool: RigToolFactory = (rig) => rig.defineTool({
 export default tool;
 `;
 
+const FindToolSource = `const tool: RigToolFactory = (rig) => rig.defineTool({
+  name: "proofreader",
+  description: "Check grammar, spelling, and writing style.",
+  commands: {
+    "check-file": rig.defineCommand({
+      description: "Check grammar and spelling in a local Markdown file.",
+      input: rig.z.object({ input: rig.z.string().describe("Markdown file path") }),
+      output: rig.z.object({ issues: rig.z.number() }),
+      examples: [{
+        title: "Proofread notes",
+        text: "Check a Markdown document for writing problems.",
+        input: { input: "notes.md" },
+        output: { issues: 0 },
+      }],
+      run: async () => ({ issues: 0 }),
+    }),
+  },
+});
+
+export default tool;
+`;
+
 describe("built Rig CLI lifecycle", () => {
   let rig: RigE2EHarnessClass;
 
@@ -158,6 +180,28 @@ describe("built Rig CLI lifecycle", () => {
     const edit = await rig.run({ args: ["edit", "sample"] });
     expect(edit.exitCode).toBe(0);
     expect(edit.stdout.trim()).toBe(join(rig.rigHomeDir, "rig", "tools", "sample", "index.rig.ts"));
+  });
+
+  test("finds commands with typo-tolerant ranking, JSON metadata, limits, and tool filters", async () => {
+    await rig.run({ args: ["init"] });
+    await rig.writeTool({ name: "proofreader", source: FindToolSource });
+
+    const plain = await rig.run({ args: ["find", "grammer chek markdown"] });
+    expect(plain.exitCode).toBe(0);
+    expect(plain.stderr).toBe("");
+    expect(plain.stdout).toContain("1. proofreader.check-file");
+    expect(plain.stdout).toContain("rig run proofreader.check-file input=notes.md");
+
+    const json = await rig.run({
+      args: ["find", "proofread notes", "--tool", "proofreader", "--limit", "1", "--json"],
+    });
+    expect(json.exitCode).toBe(0);
+    expect(json.json<{ results: Array<{ id: string; matches: unknown[] }> }>()).toMatchObject({
+      query: "proofread notes",
+      tool: "proofreader",
+      limit: 1,
+      results: [{ rank: 1, id: "proofreader.check-file" }],
+    });
   });
 
   test("runs positional, key-value, JSON, and input-file payloads as subprocesses", async () => {
