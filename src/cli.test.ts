@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BunRuntimeBootstrapClass, CliApplicationClass, isCliEntrypoint } from "./cli";
 import { RigPathsClass } from "./config/paths";
+import { RegistryConfigServiceClass } from "./registry/registry";
 import { ToolCreatorClass } from "./tools/create";
 
 class CliWorkspaceStore {
@@ -236,6 +237,7 @@ describe("cli application", () => {
     const project = join(home, "project");
     await mkdir(join(project, ".git"), { recursive: true });
     await writeFile(join(project, "AGENTS.md"), "# Agent notes\n", "utf8");
+    await new RegistryConfigServiceClass({ homeDir: home }).add(join(project, "rig-tools"));
     process.chdir(project);
 
     const cli = new CliHarness(home, true);
