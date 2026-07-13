@@ -211,6 +211,7 @@ describe("cli application", () => {
     const cli = new CliHarness(home);
 
     expect(await cli.run(["help"])).toContain("# rig");
+    expect(await cli.run(["help", "cache"])).toContain("# Help • Query Cache");
     expect(await cli.run(["create", "sample"])).toContain("Created tool sample");
     expect(await cli.run(["help"])).toContain(
       "The `rig` CLI is installed on this machine. It is _your_ CLI.",

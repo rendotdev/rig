@@ -95,6 +95,7 @@ describe("coverage support", () => {
     const service = new ToolRuntimeInstructionSyncService({ homeDir: home });
 
     expect(service.renderPrefix()).toContain("rig.$");
+    expect(service.renderPrefix()).toContain("context.cache.query");
     expect(service.upsertPrefix("#!/usr/bin/env bun\nconsole.log(1);\n")).toMatch(
       /^#!\/usr\/bin\/env bun\n\/\/ rig:runtime-reference:start/,
     );
@@ -630,6 +631,7 @@ describe("coverage support", () => {
     expect(runtimeTypes).toContain("env?: Env");
     expect(runtimeTypes).toContain("setupDb?: (db: RigToolDatabase)");
     expect(runtimeTypes).toContain("kv: RigToolKvStore");
+    expect(runtimeTypes).toContain("cache: RigToolCache");
     expect(runtimeTypes).toContain("log: RigToolLogger");
     expect(runtimeTypes).toContain("shell: RigShell");
     await writeFile(join(registry, "tsconfig.json"), "{}\n", "utf8");
