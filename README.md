@@ -30,6 +30,8 @@ rig also has built-in features for tool-scoped shell execution, cron, environmen
 
 ## Install
 
+rig requires [Bun 1.3.14 or newer](https://bun.sh/docs/installation).
+
 ```bash
 $ npm install -g @rendotdev/rig
 $ rig

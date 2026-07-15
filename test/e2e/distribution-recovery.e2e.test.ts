@@ -85,7 +85,7 @@ class InstalledDistributionClass {
   public rootDir = "";
   public consumerDir = "";
   public entrypoint = "";
-  public bunPath = "";
+  public binaryPath = "";
   public tarballPath = "";
   private readonly processes = new ProcessRunnerClass();
 
@@ -124,14 +124,17 @@ class InstalledDistributionClass {
       "dist",
       "rig.mjs",
     );
-    this.bunPath = join(this.consumerDir, "node_modules", ".bin", "bun");
+    this.binaryPath = join(this.consumerDir, "node_modules", ".bin", "rig");
     if (!existsSync(this.entrypoint)) {
       throw new Error(`Installed Rig entrypoint is missing: ${this.entrypoint}`);
+    }
+    if (!existsSync(this.binaryPath)) {
+      throw new Error(`Installed Rig binary is missing: ${this.binaryPath}`);
     }
   }
 
   public harnessFactory(): RigE2EHarnessFactoryClass {
-    return new RigE2EHarnessFactoryClass({ cliPath: this.entrypoint, runtime: "node" });
+    return new RigE2EHarnessFactoryClass({ cliPath: this.binaryPath, runtime: "direct" });
   }
 
   public async cleanup(): Promise<void> {
@@ -256,8 +259,15 @@ describe("installed Rig distribution and recovery", () => {
     expect(globals).toContain("RigTool");
   }, 45_000);
 
-  test("bootstraps an installed Node invocation into the packaged Bun runtime", async () => {
-    expect(existsSync(distribution.bunPath)).toBe(true);
+  test("bootstraps an installed Node invocation into the system Bun runtime", async () => {
+    const installedPackage = JSON.parse(
+      await readFile(
+        join(distribution.consumerDir, "node_modules", "@rendotdev", "rig", "package.json"),
+        "utf8",
+      ),
+    ) as { dependencies?: Record<string, string> };
+    expect(installedPackage.dependencies?.bun).toBeUndefined();
+    expect(existsSync(join(distribution.consumerDir, "node_modules", ".bin", "bun"))).toBe(false);
     const rootDir = await mkdtemp(join(tmpdir(), "rig-node-bootstrap-e2e-"));
     try {
       const result = await processes.run({

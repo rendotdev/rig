@@ -1,10 +1,7 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DomainClass } from "../../domain/domain-class";
-import { rigPackageRoot } from "../../runtime/package-root";
 
 type BunRuntimeSpawn = (
   command: string,
@@ -15,6 +12,7 @@ type BunRuntimeSpawn = (
 type BunRuntimeGlobalProvider = () => unknown;
 
 export type BunRuntimeBootstrapParams = {
+  /** @deprecated Rig now uses the Bun runtime available on PATH. */
   packageRoot?: string;
 };
 
@@ -22,34 +20,27 @@ export type BunRuntimeBootstrapDeps = {
   spawn?: BunRuntimeSpawn;
   env?: NodeJS.ProcessEnv;
   bunGlobal?: BunRuntimeGlobalProvider;
-  resolvePackage?: (specifier: string) => string;
 };
 
 export class BunRuntimeBootstrapClass extends DomainClass<
   BunRuntimeBootstrapParams,
   BunRuntimeBootstrapDeps
 > {
-  private readonly packageRoot: string;
   private readonly spawn: BunRuntimeSpawn;
   private readonly env: NodeJS.ProcessEnv;
   private readonly bunGlobal: BunRuntimeGlobalProvider;
-  private readonly resolvePackage: (specifier: string) => string;
 
   public constructor(params: BunRuntimeBootstrapParams, deps: BunRuntimeBootstrapDeps) {
     super(params, deps);
-    this.packageRoot = this.params.packageRoot ?? rigPackageRoot.find(import.meta.url);
     this.spawn = this.deps.spawn ?? spawnSync;
     this.env = this.deps.env ?? process.env;
     this.bunGlobal =
       this.deps.bunGlobal ?? (() => (globalThis as typeof globalThis & { Bun?: unknown }).Bun);
-    const require = createRequire(import.meta.url);
-    this.resolvePackage = this.deps.resolvePackage ?? require.resolve.bind(require);
   }
 
   public run(params: { metaUrl: string; argv: string[] }): number | undefined {
     if (!this.shouldBootstrap()) return undefined;
     const bunPath = this.resolveBunPath();
-    if (!bunPath) return undefined;
     const result = this.spawn(
       bunPath,
       [this.autoInstallFlag(), fileURLToPath(params.metaUrl), ...params.argv.slice(2)],
@@ -69,27 +60,12 @@ export class BunRuntimeBootstrapClass extends DomainClass<
     );
   }
 
-  public resolveBunPath(): string | undefined {
-    const configured = this.env.RIG_BUN_PATH;
-    const candidates = [
-      configured,
-      join(this.packageRoot, "node_modules", "bun", "bin", "bun.exe"),
-      join(this.packageRoot, "node_modules", ".bin", "bun"),
-      this.installedBunPath(),
-    ].filter((value): value is string => Boolean(value));
-    return candidates.find((candidate) => existsSync(candidate));
+  public resolveBunPath(): string {
+    return this.env.RIG_BUN_PATH ?? "bun";
   }
 
   public autoInstallFlag(): string {
     return "--install=fallback";
-  }
-
-  private installedBunPath(): string | undefined {
-    try {
-      return join(dirname(this.resolvePackage("bun/package.json")), "bin", "bun.exe");
-    } catch {
-      return undefined;
-    }
   }
 }
 

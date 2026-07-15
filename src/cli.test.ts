@@ -415,9 +415,9 @@ describe("cli application", () => {
     );
   });
 
-  test("resolves and runs the bundled Bun runtime bootstrap", async () => {
+  test("resolves and runs the system Bun runtime bootstrap", async () => {
     const home = await workspaces.create();
-    const bunPath = join(home, "node_modules", "bun", "bin", "bun.exe");
+    const bunPath = join(home, "bin", "bun");
     const entrypoint = join(home, "dist", "rig.mjs");
     const calls: { command: string; args: string[]; env?: NodeJS.ProcessEnv }[] = [];
     const spawn = ((command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
@@ -425,12 +425,9 @@ describe("cli application", () => {
       return { status: calls.length === 1 ? 7 : null };
     }) as never;
 
-    await mkdir(join(home, "node_modules", "bun", "bin"), { recursive: true });
-    await writeFile(bunPath, "", "utf8");
-
     const bootstrap = new BunRuntimeBootstrapClass(
       { packageRoot: home },
-      { spawn, env: {}, bunGlobal: () => undefined },
+      { spawn, env: { RIG_BUN_PATH: bunPath }, bunGlobal: () => undefined },
     );
     expect(bootstrap.resolveBunPath()).toBe(bunPath);
     expect(bootstrap.shouldBootstrap()).toBe(true);
@@ -456,12 +453,9 @@ describe("cli application", () => {
           spawn,
           env: {},
           bunGlobal: () => undefined,
-          resolvePackage: () => {
-            throw new Error("missing package");
-          },
         },
       ).run({ metaUrl: pathToFileURL(entrypoint).href, argv: ["node", "rig"] }),
-    ).toBeUndefined();
+    ).toBe(1);
     expect(
       new BunRuntimeBootstrapClass(
         { packageRoot: home },
@@ -492,6 +486,12 @@ describe("cli application", () => {
         { spawn, env: { RIG_BUN_PATH: bunPath }, bunGlobal: () => undefined },
       ).resolveBunPath(),
     ).toBe(bunPath);
+    expect(
+      new BunRuntimeBootstrapClass(
+        { packageRoot: home },
+        { spawn, env: {}, bunGlobal: () => undefined },
+      ).resolveBunPath(),
+    ).toBe("bun");
     expect(
       new BunRuntimeBootstrapClass({ packageRoot: home }, { spawn, env: {} }).shouldBootstrap(),
     ).toBe((globalThis as typeof globalThis & { Bun?: unknown }).Bun === undefined);

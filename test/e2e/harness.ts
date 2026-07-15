@@ -13,7 +13,7 @@ export type RigE2ECommandParams = {
   timeoutMs?: number;
 };
 
-export type RigE2ERuntime = "bun" | "node";
+export type RigE2ERuntime = "bun" | "direct" | "node";
 
 export type RigE2ECommandResult = {
   command: string[];
@@ -105,7 +105,10 @@ export class RigE2EHarnessClass {
   }
 
   public async run(params: RigE2ECommandParams = {}): Promise<RigE2ECommandResult> {
-    const command = [this.runtime, this.cliPath, ...(params.args ?? [])];
+    const command =
+      this.runtime === "direct"
+        ? [this.cliPath, ...(params.args ?? [])]
+        : [this.runtime, this.cliPath, ...(params.args ?? [])];
     const cwd = params.cwd ?? this.projectDir;
     const startedAt = this.deps.now();
     const child = spawn(command[0]!, command.slice(1), {
@@ -237,7 +240,7 @@ export class RigE2EHarnessFactoryClass {
       rigHomeDir: join(rootDir, "rig-home"),
       projectDir: join(rootDir, "project"),
       cliPath,
-      runtime: this.params.runtime ?? "node",
+      runtime: this.params.runtime ?? "bun",
     };
     await Promise.all([
       mkdir(paths.homeDir, { recursive: true }),
