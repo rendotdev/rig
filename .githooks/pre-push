@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+allowed_name="rendotdev"
+allowed_email="294850895+rendotdev@users.noreply.github.com"
+zero_sha="0000000000000000000000000000000000000000"
+
+fail_commit() {
+  local commit="$1"
+  local author_name="$2"
+  local author_email="$3"
+  local committer_name="$4"
+  local committer_email="$5"
+  cat >&2 <<EOF
+Push blocked: commit ${commit} does not use the required repository identity.
+
+Required identity:
+  ${allowed_name} <${allowed_email}>
+
+Commit identity:
+  author:    ${author_name} <${author_email}>
+  committer: ${committer_name} <${committer_email}>
+
+Rewrite the commit before pushing.
+EOF
+  exit 1
+}
+
+check_commit() {
+  local commit="$1"
+  local author_name author_email committer_name committer_email
+  author_name="$(git show -s --format='%an' "$commit")"
+  author_email="$(git show -s --format='%ae' "$commit")"
+  committer_name="$(git show -s --format='%cn' "$commit")"
+  committer_email="$(git show -s --format='%ce' "$commit")"
+
+  if [[ "$author_name" != "$allowed_name" ]] || \
+    [[ "$author_email" != "$allowed_email" ]] || \
+    [[ "$committer_name" != "$allowed_name" ]] || \
+    [[ "$committer_email" != "$allowed_email" ]]; then
+    fail_commit "$commit" "$author_name" "$author_email" "$committer_name" "$committer_email"
+  fi
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -n "${local_ref:-}" ]] || continue
+  [[ "$local_sha" == "$zero_sha" ]] && continue
+
+  if [[ "$remote_sha" == "$zero_sha" ]]; then
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+
+  while read -r commit; do
+    [[ -n "$commit" ]] || continue
+    check_commit "$commit"
+  done < <(git rev-list "$range")
+done

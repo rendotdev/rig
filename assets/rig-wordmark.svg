@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 380" role="img" aria-labelledby="title desc">
+  <title id="title">Rig wordmark</title>
+  <desc id="desc">Black lowercase Rig wordmark.</desc>
+  <g transform="translate(-580 -420)" fill="#000">
+    <path d="M620 711 V594 Q620 520 693 520 H761 V565 H692 Q666 565 666 594 V711 Z"/>
+    <rect x="795" y="520" width="45" height="191"/>
+    <rect x="796" y="443" width="43" height="43"/>
+    <path fill-rule="evenodd" d="M959 520 H1075 V735 Q1075 788 1022 788 H914 V744 H1016 Q1030 744 1030 730 V711 H953 Q919 711 897 686 Q876 660 876 617 Q876 574 898 547 Q921 520 959 520 Z M957 565 Q924 565 924 617 Q924 667 957 667 H1030 V565 Z"/>
+  </g>
+</svg>
