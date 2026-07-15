@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export class SmokeScriptClass {
-  private readonly cliPath = join(import.meta.dir, "..", "..", "dist", "rig.js");
+  private readonly cliPath = join(import.meta.dir, "..", "..", "dist", "rig.mjs");
   private home = "";
 
   async run(): Promise<void> {

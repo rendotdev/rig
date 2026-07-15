@@ -223,7 +223,7 @@ export class RigE2EHarnessFactoryClass {
 
   public async create(): Promise<RigE2EHarnessClass> {
     const harnessDir = dirname(fileURLToPath(import.meta.url));
-    const cliPath = resolve(this.params.cliPath ?? join(harnessDir, "..", "..", "dist", "rig.js"));
+    const cliPath = resolve(this.params.cliPath ?? join(harnessDir, "..", "..", "dist", "rig.mjs"));
     if (!existsSync(cliPath)) {
       throw new Error(
         `Built Rig CLI is missing at ${cliPath}. Run \`vp run build\` before E2E tests.`,

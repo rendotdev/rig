@@ -68,7 +68,7 @@ class BenchmarkReporterClass {
 }
 
 export class RigBenchmarkSuiteClass {
-  private readonly entrypoint = process.env.RIG_BENCH_ENTRY ?? "dist/rig.js";
+  private readonly entrypoint = process.env.RIG_BENCH_ENTRY ?? "dist/rig.mjs";
   private readonly iterations = Number(process.env.RIG_BENCH_ITERATIONS ?? 20);
   private readonly runner = new RigBenchmarkRunnerClass(this.entrypoint, this.iterations);
   private readonly reporter = new BenchmarkReporterClass();

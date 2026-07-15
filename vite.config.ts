@@ -101,7 +101,7 @@ export default defineConfig({
         cache: false,
       },
       dev: {
-        command: "bun --install=fallback --watch run src/cli.ts",
+        command: "vp pack --watch",
         cache: false,
       },
       format: {
@@ -132,7 +132,6 @@ export default defineConfig({
       onlyBundle: false,
     },
     entry: { rig: "src/cli.ts" },
-    fixedExtension: false,
     format: "esm",
     outDir: "dist",
     platform: "node",

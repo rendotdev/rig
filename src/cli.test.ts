@@ -418,7 +418,7 @@ describe("cli application", () => {
   test("resolves and runs the bundled Bun runtime bootstrap", async () => {
     const home = await workspaces.create();
     const bunPath = join(home, "node_modules", "bun", "bin", "bun.exe");
-    const entrypoint = join(home, "dist", "rig.js");
+    const entrypoint = join(home, "dist", "rig.mjs");
     const calls: { command: string; args: string[]; env?: NodeJS.ProcessEnv }[] = [];
     const spawn = ((command: string, args: string[], options: { env?: NodeJS.ProcessEnv }) => {
       calls.push({ command, args, env: options.env });

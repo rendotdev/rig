@@ -478,8 +478,8 @@ describe("coverage support", () => {
     const envRoot = await workspaces.create();
     process.env.RIG_PACKAGE_ROOT = envRoot;
     expect(rigPackageRoot.find(import.meta.url)).toBe(envRoot);
-    expect(rigPackageRoot.packageFile(import.meta.url, "dist", "rig.js")).toBe(
-      join(envRoot, "dist", "rig.js"),
+    expect(rigPackageRoot.packageFile(import.meta.url, "dist", "rig.mjs")).toBe(
+      join(envRoot, "dist", "rig.mjs"),
     );
     delete process.env.RIG_PACKAGE_ROOT;
 
@@ -492,7 +492,7 @@ describe("coverage support", () => {
 
     process.argv[1] = join(repoRoot, "missing.ts");
     await mkdir(join(repoRoot, "dist"), { recursive: true });
-    const execPath = join(repoRoot, "dist", "rig.js");
+    const execPath = join(repoRoot, "dist", "rig.mjs");
     await writeFile(execPath, "", "utf8");
     Object.defineProperty(process, "execPath", { value: execPath, configurable: true });
     expect(rigPackageRoot.find(import.meta.url)).toBe(await realpath(repoRoot));

@@ -116,7 +116,14 @@ class InstalledDistributionClass {
     });
     if (installed.exitCode !== 0) throw new Error(installed.stderr || installed.stdout);
 
-    this.entrypoint = join(this.consumerDir, "node_modules", "@rendotdev", "rig", "dist", "rig.js");
+    this.entrypoint = join(
+      this.consumerDir,
+      "node_modules",
+      "@rendotdev",
+      "rig",
+      "dist",
+      "rig.mjs",
+    );
     this.bunPath = join(this.consumerDir, "node_modules", ".bin", "bun");
     if (!existsSync(this.entrypoint)) {
       throw new Error(`Installed Rig entrypoint is missing: ${this.entrypoint}`);
@@ -221,16 +228,25 @@ describe("installed Rig distribution and recovery", () => {
     expect(typecheck.json<{ ok: boolean }>().ok).toBe(true);
 
     const installedDistDir = dirname(distribution.entrypoint);
+    const installedPackage = JSON.parse(
+      await readFile(
+        join(distribution.consumerDir, "node_modules", "@rendotdev", "rig", "package.json"),
+        "utf8",
+      ),
+    ) as { bin?: Record<string, string> };
+    expect(installedPackage.bin).toEqual({ rig: "dist/rig.mjs" });
+    const installedFiles = await readdir(installedDistDir);
+    expect(installedFiles).toContain("rig.mjs");
+    expect(installedFiles.some((file) => file.endsWith(".js"))).toBe(false);
     const installedJavaScript = (
       await Promise.all(
-        (
-          await readdir(installedDistDir)
-        )
-          .filter((file) => file.endsWith(".js"))
+        installedFiles
+          .filter((file) => file.endsWith(".mjs"))
           .map((file) => readFile(join(installedDistDir, file), "utf8")),
       )
     ).join("\n");
     expect(installedJavaScript).not.toContain(join(repositoryRoot, "node_modules", "typescript"));
+    expect(installedJavaScript).toContain('import("bun:sqlite")');
 
     for (const file of ["sdk.ts", "types.d.ts", "globals.d.ts", "tsconfig.tools.json"]) {
       expect(existsSync(join(rig.rigHomeDir, "rig", "runtime", file))).toBe(true);
