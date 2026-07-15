@@ -286,8 +286,8 @@ describe("rig logger", () => {
     const source = `
       import { rm, writeFile } from "node:fs/promises";
       await new Promise((resolve) => setTimeout(resolve, 100));
-      await rm(${JSON.stringify(lockPath)}, { recursive: true, force: true });
       await writeFile(${JSON.stringify(activePath)}, "", "utf8");
+      await rm(${JSON.stringify(lockPath)}, { recursive: true, force: true });
     `;
     const child = spawn("bun", ["-e", source], { stdio: "pipe" });
     logger.info("Written after competing rotation.");
