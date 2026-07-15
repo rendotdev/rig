@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 420" role="img" aria-labelledby="title desc">
+  <title id="title">Rig icon</title>
+  <desc id="desc">Black geometric command-line icon for Rig.</desc>
+  <g transform="translate(-180 -410)" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M510 508 L384 433 Q368 424 352 434 L232 510 Q213 522 213 545 L213 703 Q213 728 235 741 L353 811 Q369 820 386 810 L517 733" stroke-width="42"/>
+    <path d="M296 560 L365 628 L296 686" stroke-width="33"/>
+    <path d="M404 676 H462" stroke-width="31"/>
+  </g>
+</svg>

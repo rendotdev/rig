@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
+  <title id="title">Rig logo</title>
+  <desc id="desc">Black geometric command-line logo for Rig on a white background.</desc>
+  <rect width="1254" height="1254" fill="#fff"/>
+  <g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M510 508 L384 433 Q368 424 352 434 L232 510 Q213 522 213 545 L213 703 Q213 728 235 741 L353 811 Q369 820 386 810 L517 733" stroke-width="42"/>
+    <path d="M296 560 L365 628 L296 686" stroke-width="33"/>
+    <path d="M404 676 H462" stroke-width="31"/>
+  </g>
+  <g fill="#000">
+    <!-- r -->
+    <path d="M620 711 V594 Q620 520 693 520 H761 V565 H692 Q666 565 666 594 V711 Z"/>
+    <!-- i -->
+    <rect x="795" y="520" width="45" height="191"/>
+    <rect x="796" y="443" width="43" height="43"/>
+    <!-- g -->
+    <path fill-rule="evenodd" d="M959 520 H1075 V735 Q1075 788 1022 788 H914 V744 H1016 Q1030 744 1030 730 V711 H953 Q919 711 897 686 Q876 660 876 617 Q876 574 898 547 Q921 520 959 520 Z M957 565 Q924 565 924 617 Q924 667 957 667 H1030 V565 Z"/>
+  </g>
+</svg>
