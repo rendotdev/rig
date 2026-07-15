@@ -7,7 +7,11 @@ class ArchitectureSourceSetClass {
       ["src", "scripts"].map(async (root) =>
         (await readdir(root, { recursive: true }))
           .filter(
-            (path) => path.endsWith(".ts") && !path.endsWith(".test.ts") && !path.endsWith(".d.ts"),
+            (path) =>
+              (path.endsWith(".ts") || path.endsWith(".tsx")) &&
+              !path.endsWith(".test.ts") &&
+              !path.endsWith(".test.tsx") &&
+              !path.endsWith(".d.ts"),
           )
           .map((path) => `${root}/${path}`),
       ),

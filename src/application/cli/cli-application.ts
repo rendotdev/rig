@@ -367,36 +367,80 @@ export class CliApplicationClass {
       });
   }
 
-  /* v8 ignore next 20 */
+  /* v8 ignore start */
   private configureUpdateCommand(): void {
     this.program
       .command("update")
       .description("Update rig to the latest published version.")
       .action(async () => {
-        const $ = (globalThis as typeof globalThis & { Bun: { $: unknown } }).Bun.$;
+        const [{ CommandUiRenderer }, { RigUpdaterFactory }] = await Promise.all([
+          import("./command-ui"),
+          import("../../runtime/updates/rig-updater"),
+        ]);
         const currentVersion = this.version();
-        const pm = this.detectPackageManager();
-        console.log(`Current version: ${currentVersion}`);
-        console.log(`Updating via ${pm}...`);
-        const cmd =
-          pm === "bun"
-            ? $`bun install -g @rendotdev/rig@latest`.quiet().nothrow()
-            : $`npm install -g @rendotdev/rig@latest --force`.quiet().nothrow();
-        const result = await cmd;
-        if (result.exitCode !== 0) {
-          console.error("Update failed.");
-          process.exit(1);
-        }
-        const check = await $`rig --version`.quiet().text();
-        const newVersion = check.trim();
-        if (newVersion === currentVersion) {
-          console.log(`Already on the latest version (${currentVersion}).`);
-        } else {
-          console.log(`Updated: ${currentVersion} -> ${newVersion}`);
-        }
-        await $`rig init`;
+        const Updater = RigUpdaterFactory.create({
+          packageRoot: rigPackageRoot.find(import.meta.url),
+          currentVersion,
+        });
+
+        await CommandUiRenderer.run({
+          label: "Preparing Rig update",
+          successLabel: "Update finished",
+          execute: async function execute(report) {
+            report.complete({ label: `Current version: ${Updater.getCurrentVersion()}` });
+            report("Checking for updates");
+            const plan = await Updater.plan();
+            if (plan.status === "skipped") {
+              report.complete({
+                label: "Update unavailable",
+                detail: `  ${plan.reason}`,
+                mutedDetail: true,
+              });
+              return { status: "skipped" as const };
+            }
+
+            if (plan.status === "ready") {
+              report.complete({
+                label: `Update available: ${plan.currentVersion} to ${plan.latestVersion}`,
+              });
+              report("Updating Rig");
+              const update = await Updater.update({ plan });
+              if (update.status !== "updated") {
+                throw new Error("Rig did not complete the planned update.");
+              }
+              report.complete({
+                label: `Updated Rig: ${update.previousVersion} to ${update.version}`,
+                detail: CommandUiRenderer.formatCommandOutputGroups({
+                  steps: [update.step],
+                  outputs: [update.output],
+                }),
+                mutedDetail: true,
+              });
+            } else {
+              report.complete({ label: `Already up to date: ${plan.version}` });
+            }
+
+            report("Synchronizing runtime and agent instructions");
+            const sync = await Updater.sync({ plan });
+            report.complete({
+              label: "Synchronized runtime and agent instructions",
+              detail: CommandUiRenderer.formatCommandOutputGroups({
+                steps: [sync.step],
+                outputs: [sync.output],
+              }),
+              mutedDetail: true,
+            });
+            return { status: "ready" as const };
+          },
+          renderSuccess: function renderSuccess(result) {
+            return result.status === "skipped"
+              ? `Rig ${currentVersion} was left unchanged.`
+              : "Rig is ready to use.";
+          },
+        });
       });
   }
+  /* v8 ignore stop */
 
   private configureDevCommands(): void {
     const devCommand = this.program.command("dev").description("Local development helpers.");
@@ -631,13 +675,6 @@ export class CliApplicationClass {
   private commandTarget(commandId: string): { tool: string; command: string } {
     return commandTargets.parse(commandId);
   }
-
-  /* v8 ignore start */
-  private detectPackageManager(): "bun" | "npm" {
-    const entrypoint = (process.argv[1] ?? "").replaceAll("\\", "/");
-    return entrypoint.includes("/.bun/") ? "bun" : "npm";
-  }
-  /* v8 ignore stop */
 
   private version(): string {
     try {
