@@ -124,8 +124,7 @@ export class BunSqliteModuleLoaderClass {
 
   /* v8 ignore start */
   private async nativeDatabase(): Promise<DatabaseConstructor> {
-    const specifier = "bun:sqlite";
-    const moduleValue = (await import(specifier)) as { Database: DatabaseConstructor };
+    const moduleValue = (await import("bun:sqlite")) as { Database: DatabaseConstructor };
     return moduleValue.Database;
   }
   /* v8 ignore stop */

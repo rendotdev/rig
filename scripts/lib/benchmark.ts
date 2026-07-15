@@ -47,7 +47,7 @@ class RigBenchmarkRunnerClass {
 
   spawn(command: BenchmarkCommandClass): void {
     const result = Bun.spawnSync({
-      cmd: [process.execPath, this.entrypoint, ...command.args],
+      cmd: ["node", this.entrypoint, ...command.args],
       env: { ...process.env, ...command.env },
       stdout: "pipe",
       stderr: "pipe",
@@ -68,7 +68,7 @@ class BenchmarkReporterClass {
 }
 
 export class RigBenchmarkSuiteClass {
-  private readonly entrypoint = process.env.RIG_BENCH_ENTRY ?? "src/cli.ts";
+  private readonly entrypoint = process.env.RIG_BENCH_ENTRY ?? "dist/rig.mjs";
   private readonly iterations = Number(process.env.RIG_BENCH_ITERATIONS ?? 20);
   private readonly runner = new RigBenchmarkRunnerClass(this.entrypoint, this.iterations);
   private readonly reporter = new BenchmarkReporterClass();

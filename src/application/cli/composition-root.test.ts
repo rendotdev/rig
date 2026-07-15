@@ -6,7 +6,9 @@ describe("CLI composition root", () => {
   it("runs the application when Bun bootstrap is unnecessary", async () => {
     const application = { run: vi.fn<(argv: string[]) => Promise<void>>(async () => undefined) };
     const runtimeBootstrap = {
-      run: vi.fn<(metaUrl: string, argv: string[]) => number | undefined>(() => undefined),
+      run: vi.fn<(params: { metaUrl: string; argv: string[] }) => number | undefined>(
+        () => undefined,
+      ),
     };
     const root = new CliCompositionRootClass(
       { metaUrl: "file:///rig.ts", argv: ["bun", "rig", "list"] },
@@ -15,14 +17,17 @@ describe("CLI composition root", () => {
 
     await root.run();
 
-    expect(runtimeBootstrap.run).toHaveBeenCalledWith("file:///rig.ts", ["bun", "rig", "list"]);
+    expect(runtimeBootstrap.run).toHaveBeenCalledWith({
+      metaUrl: "file:///rig.ts",
+      argv: ["bun", "rig", "list"],
+    });
     expect(application.run).toHaveBeenCalledWith(["bun", "rig", "list"]);
   });
 
   it("exits with the bootstrap result before running the application", async () => {
     const application = { run: vi.fn<(argv: string[]) => Promise<void>>(async () => undefined) };
     const runtimeBootstrap = {
-      run: vi.fn<(metaUrl: string, argv: string[]) => number | undefined>(() => 7),
+      run: vi.fn<(params: { metaUrl: string; argv: string[] }) => number | undefined>(() => 7),
     };
     const exit = vi.fn<(code: number) => never>(() => {
       throw new Error("exit");
@@ -39,8 +44,8 @@ describe("CLI composition root", () => {
 
   it("constructs the default dependency graph", () => {
     expect(
-      new CliCompositionRootClass({ metaUrl: import.meta.url, argv: process.argv }),
+      new CliCompositionRootClass({ metaUrl: import.meta.url, argv: process.argv }, {}),
     ).toBeDefined();
-    expect(new BunRuntimeBootstrapClass()).toBeDefined();
+    expect(new BunRuntimeBootstrapClass({}, {})).toBeDefined();
   });
 });

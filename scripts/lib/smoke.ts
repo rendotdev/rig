@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export class SmokeScriptClass {
-  private readonly cliPath = join(import.meta.dir, "..", "..", "src", "cli.ts");
+  private readonly cliPath = join(import.meta.dir, "..", "..", "dist", "rig.mjs");
   private home = "";
 
   async run(): Promise<void> {
@@ -29,7 +29,7 @@ export class SmokeScriptClass {
   }
 
   private async rig(args: string[], env: Record<string, string>): Promise<string> {
-    const proc = Bun.spawn(["bun", "run", this.cliPath, ...args], {
+    const proc = Bun.spawn(["node", this.cliPath, ...args], {
       cwd: this.home,
       env: { ...process.env, ...env },
       stdout: "pipe",

@@ -34,18 +34,18 @@ class FakeCronRegistrar implements CronRegistrar {
   readonly removed: string[] = [];
   readonly validated: string[] = [];
 
-  register(path: string, schedule: string, title: string): Promise<void> {
-    this.registered.push({ path, schedule, title });
+  register(params: { path: string; schedule: string; title: string }): Promise<void> {
+    this.registered.push(params);
     return Promise.resolve();
   }
 
-  remove(title: string): Promise<void> {
-    this.removed.push(title);
+  remove(params: { title: string }): Promise<void> {
+    this.removed.push(params.title);
     return Promise.resolve();
   }
 
-  validate(schedule: string): void {
-    this.validated.push(schedule);
+  validate(params: { schedule: string }): void {
+    this.validated.push(params.schedule);
   }
 }
 
@@ -69,7 +69,7 @@ describe("cron tool commands", () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
     const registrar = new FakeCronRegistrar();
-    const service = new RigCronServiceClass({ homeDir: home }, registrar);
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     const added = await service.add({
@@ -105,7 +105,7 @@ describe("cron tool commands", () => {
     expect(config.cronJobs).toHaveLength(1);
     expect(await service.list()).toMatchObject({ cronJobs: [added.job] });
 
-    const run = await service.run("weekly-jira");
+    const run = await service.run({ name: "weekly-jira" });
     expect(run.exitCode).toBe(0);
     expect(run.envelope).toMatchObject({
       data: { text: "Jira" },
@@ -114,19 +114,22 @@ describe("cron tool commands", () => {
 
     const logs: string[] = [];
     vi.spyOn(console, "log").mockImplementation((value) => logs.push(String(value)));
-    await new RigCronWorkerClass({ homeDir: home }).scheduled("weekly-jira", {
-      cron: "0 9 * * MON",
-      scheduledTime: 123,
-      type: "scheduled",
+    await new RigCronWorkerClass({ homeDir: home }, {}).scheduled({
+      name: "weekly-jira",
+      controller: {
+        cron: "0 9 * * MON",
+        scheduledTime: 123,
+        type: "scheduled",
+      },
     });
     expect(logs.join("\n")).toContain('"name": "weekly-jira"');
     expect(logs.join("\n")).toContain('"scheduledTime": 123');
     expect(process.exitCode).toBe(0);
     logs.length = 0;
-    await new RigCronWorkerClass({ homeDir: home }).scheduled("weekly-jira");
+    await new RigCronWorkerClass({ homeDir: home }, {}).scheduled({ name: "weekly-jira" });
     expect(logs.join("\n")).toContain('"schedule": "0 9 * * MON"');
 
-    const removed = await service.remove("weekly-jira");
+    const removed = await service.remove({ name: "weekly-jira" });
     expect(removed).toMatchObject({
       name: "weekly-jira",
       removed: true,
@@ -140,7 +143,7 @@ describe("cron tool commands", () => {
   test("supports input files and no explicit input", async () => {
     const home = await homes.create();
     const registrar = new FakeCronRegistrar();
-    const service = new RigCronServiceClass({ homeDir: home }, registrar);
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
     const inputPath = join(home, "input.json");
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
@@ -166,7 +169,7 @@ describe("cron tool commands", () => {
     ]);
     expect(fromFile.job.input).toEqual({ text: "from file" });
     expect(defaultInput.job).not.toHaveProperty("input");
-    expect(await service.run("default-input")).toMatchObject({
+    expect(await service.run({ name: "default-input" })).toMatchObject({
       envelope: { data: { text: "example" }, errors: [] },
       exitCode: 0,
     });
@@ -176,7 +179,7 @@ describe("cron tool commands", () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
     const registrar = new FakeCronRegistrar();
-    const service = new RigCronServiceClass({ homeDir: home }, registrar);
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     await service.add({
@@ -209,7 +212,7 @@ describe("cron tool commands", () => {
 
     await Promise.all(
       names.map((name) =>
-        new RigCronServiceClass({ homeDir: home }, registrar).add({
+        new RigCronServiceClass({ homeDir: home }, { registrar }).add({
           name,
           command: "sample.example",
           schedule: "@daily",
@@ -219,7 +222,7 @@ describe("cron tool commands", () => {
     );
 
     expect(
-      (await new RigCronServiceClass({ homeDir: home }, registrar).list()).cronJobs.map(
+      (await new RigCronServiceClass({ homeDir: home }, { registrar }).list()).cronJobs.map(
         (job) => job.name,
       ),
     ).toEqual(names);
@@ -227,11 +230,14 @@ describe("cron tool commands", () => {
 
   test("validates cron job names, inputs, command ids, and command input", async () => {
     const home = await homes.create();
-    const service = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const service = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
 
-    await expect(service.run("missing")).rejects.toThrow("Cron job not found: missing");
+    await expect(service.run({ name: "missing" })).rejects.toThrow("Cron job not found: missing");
     await expect(
       service.add({
         name: "bad name",
@@ -284,7 +290,7 @@ describe("cron tool commands", () => {
       },
     );
     vi.stubGlobal("Bun", { ...(originalBun as Record<string, unknown>), cron });
-    const service = new RigCronServiceClass({ homeDir: home });
+    const service = new RigCronServiceClass({ homeDir: home }, {});
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     await service.add({
@@ -293,7 +299,7 @@ describe("cron tool commands", () => {
       schedule: "@weekly",
       moduleUrl: cronModuleUrl(import.meta.url),
     });
-    await service.remove("bun-cron");
+    await service.remove({ name: "bun-cron" });
 
     expect(cron.parse).toHaveBeenCalledWith("@weekly");
     expect(cron).toHaveBeenCalledWith(expect.any(String), "@weekly", "bun-cron");
@@ -319,7 +325,7 @@ describe("cron tool commands", () => {
       register: () => Promise.reject(new Error("launchd unavailable")),
       remove,
     };
-    const service = new RigCronServiceClass({ homeDir: home }, registrar);
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
 
@@ -335,13 +341,16 @@ describe("cron tool commands", () => {
 
     expect((await new RigConfigStoreClass({ homeDir: home }).read()).cronJobs).toEqual([]);
     expect(existsSync(paths.cronWorkerPath("weekly-jira"))).toBe(false);
-    expect(remove).toHaveBeenCalledWith("weekly-jira");
+    expect(remove).toHaveBeenCalledWith({ title: "weekly-jira" });
   });
 
   test("restores the previous job and worker when replacement registration fails", async () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
-    const initialService = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const initialService = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     const original = await initialService.add({
@@ -354,12 +363,12 @@ describe("cron tool commands", () => {
     const workerPath = paths.cronWorkerPath("weekly-jira");
     const originalWorker = await readFile(workerPath, "utf8");
     const register = vi
-      .fn<(path: string, schedule: string, title: string) => Promise<void>>()
+      .fn<(params: { path: string; schedule: string; title: string }) => Promise<void>>()
       .mockRejectedValueOnce(new Error("replacement unavailable"))
       .mockResolvedValueOnce();
     const service = new RigCronServiceClass(
       { homeDir: home },
-      { validate: () => {}, register, remove: () => Promise.resolve() },
+      { registrar: { validate: () => {}, register, remove: () => Promise.resolve() } },
     );
 
     await expect(
@@ -376,13 +385,16 @@ describe("cron tool commands", () => {
       original.job,
     ]);
     expect(await readFile(workerPath, "utf8")).toBe(originalWorker);
-    expect(register.mock.calls.map((call) => call[1])).toEqual(["@daily", "@weekly"]);
+    expect(register.mock.calls.map((call) => call[0].schedule)).toEqual(["@daily", "@weekly"]);
   });
 
   test("preserves the configured job and worker when removal fails", async () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
-    const initialService = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const initialService = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     const original = await initialService.add({
@@ -396,13 +408,17 @@ describe("cron tool commands", () => {
     const service = new RigCronServiceClass(
       { homeDir: home },
       {
-        validate: () => {},
-        register: () => Promise.resolve(),
-        remove: () => Promise.reject(new Error("launchd remove unavailable")),
+        registrar: {
+          validate: () => {},
+          register: () => Promise.resolve(),
+          remove: () => Promise.reject(new Error("launchd remove unavailable")),
+        },
       },
     );
 
-    await expect(service.remove("weekly-jira")).rejects.toThrow("launchd remove unavailable");
+    await expect(service.remove({ name: "weekly-jira" })).rejects.toThrow(
+      "launchd remove unavailable",
+    );
     expect((await new RigConfigStoreClass({ homeDir: home }).read()).cronJobs).toEqual([
       original.job,
     ]);
@@ -412,7 +428,10 @@ describe("cron tool commands", () => {
   test("restores local state and OS registration when removal persistence fails", async () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
-    const initialService = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const initialService = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     const original = await initialService.add({
@@ -424,10 +443,10 @@ describe("cron tool commands", () => {
     const workerPath = paths.cronWorkerPath("weekly-jira");
     const originalWorker = await readFile(workerPath, "utf8");
     const registrar = new FakeCronRegistrar();
-    const service = new RigCronServiceClass({ homeDir: home }, registrar);
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
     rejectNextConfigUpdate("config unavailable");
 
-    await expect(service.remove("weekly-jira")).rejects.toThrow("config unavailable");
+    await expect(service.remove({ name: "weekly-jira" })).rejects.toThrow("config unavailable");
     expect((await new RigConfigStoreClass({ homeDir: home }).read()).cronJobs).toEqual([
       original.job,
     ]);
@@ -441,7 +460,10 @@ describe("cron tool commands", () => {
   test("restores the removed config job when worker deletion fails", async () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
-    const initialService = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const initialService = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     const original = await initialService.add({
@@ -454,17 +476,19 @@ describe("cron tool commands", () => {
     const service = new RigCronServiceClass(
       { homeDir: home },
       {
-        validate: () => {},
-        register: () => Promise.resolve(),
-        remove: async () => {
-          await rm(workerPath);
-          await mkdir(workerPath);
-          await writeFile(join(workerPath, "keep"), "force deletion failure\n", "utf8");
+        registrar: {
+          validate: () => {},
+          register: () => Promise.resolve(),
+          remove: async () => {
+            await rm(workerPath);
+            await mkdir(workerPath);
+            await writeFile(join(workerPath, "keep"), "force deletion failure\n", "utf8");
+          },
         },
       },
     );
 
-    await expect(service.remove("weekly-jira")).rejects.toMatchObject({
+    await expect(service.remove({ name: "weekly-jira" })).rejects.toMatchObject({
       code: "CRON_ERROR",
       message: "Cron state rollback was incomplete.",
     });
@@ -475,7 +499,10 @@ describe("cron tool commands", () => {
 
   test("preserves a concurrent cron replacement during removal restoration", async () => {
     const home = await homes.create();
-    const service = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const service = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
     const replacement = {
       name: "weekly-jira",
       command: "sample.example",
@@ -496,7 +523,10 @@ describe("cron tool commands", () => {
 
   test("does not restore a failed replacement over missing or newer config state", async () => {
     const home = await homes.create();
-    const service = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const service = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
     const store = new RigConfigStoreClass({ homeDir: home });
     const failedJob = {
       name: "weekly-jira",
@@ -524,7 +554,7 @@ describe("cron tool commands", () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
     const registrar = new FakeCronRegistrar();
-    const service = new RigCronServiceClass({ homeDir: home }, registrar);
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     rejectNextConfigUpdate("config unavailable");
@@ -546,7 +576,10 @@ describe("cron tool commands", () => {
   test("leaves config unchanged when worker replacement cannot start", async () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
-    const service = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const service = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
     const store = new RigConfigStoreClass({ homeDir: home });
     await store.ensure();
     await writeFile(paths.cronDir, "blocks cron directory creation\n", "utf8");
@@ -578,12 +611,12 @@ describe("cron tool commands", () => {
   test("restores config after local removal failure without a configured job", async () => {
     const home = await homes.create();
     const registrar = new FakeCronRegistrar();
-    const service = new RigCronServiceClass({ homeDir: home }, registrar);
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
 
     await new RigConfigStoreClass({ homeDir: home }).ensure();
     rejectNextConfigUpdate("config unavailable");
 
-    await expect(service.remove("missing")).rejects.toThrow("config unavailable");
+    await expect(service.remove({ name: "missing" })).rejects.toThrow("config unavailable");
     expect((await new RigConfigStoreClass({ homeDir: home }).read()).cronJobs).toEqual([]);
     expect(registrar.removed).toEqual(["missing"]);
     expect(registrar.registered).toEqual([]);
@@ -592,7 +625,10 @@ describe("cron tool commands", () => {
   test("reports local rollback failures after registration fails", async () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
-    const initialService = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const initialService = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     await initialService.add({
@@ -604,12 +640,12 @@ describe("cron tool commands", () => {
     const workerPath = paths.cronWorkerPath("weekly-jira");
     const originalWorker = await readFile(workerPath, "utf8");
     const register = vi
-      .fn<(path: string, schedule: string, title: string) => Promise<void>>()
+      .fn<(params: { path: string; schedule: string; title: string }) => Promise<void>>()
       .mockRejectedValueOnce(new Error("replacement unavailable"))
       .mockResolvedValueOnce();
     const service = new RigCronServiceClass(
       { homeDir: home },
-      { validate: () => {}, register, remove: () => Promise.resolve() },
+      { registrar: { validate: () => {}, register, remove: () => Promise.resolve() } },
     );
     const originalUpdate = RigConfigStoreClass.prototype.update;
     const update = vi.spyOn(RigConfigStoreClass.prototype, "update");
@@ -635,7 +671,10 @@ describe("cron tool commands", () => {
   test("reports incomplete rollback while restoring local replacement state", async () => {
     const home = await homes.create();
     const paths = new RigPathsClass({ homeDir: home });
-    const initialService = new RigCronServiceClass({ homeDir: home }, new FakeCronRegistrar());
+    const initialService = new RigCronServiceClass(
+      { homeDir: home },
+      { registrar: new FakeCronRegistrar() },
+    );
 
     await new ToolCreatorClass({ homeDir: home }).create("sample");
     const original = await initialService.add({
@@ -647,12 +686,12 @@ describe("cron tool commands", () => {
     const workerPath = paths.cronWorkerPath("weekly-jira");
     const originalWorker = await readFile(workerPath, "utf8");
     const register = vi
-      .fn<(path: string, schedule: string, title: string) => Promise<void>>()
+      .fn<(params: { path: string; schedule: string; title: string }) => Promise<void>>()
       .mockRejectedValueOnce(new Error("replacement unavailable"))
       .mockRejectedValueOnce("restore unavailable");
     const service = new RigCronServiceClass(
       { homeDir: home },
-      { validate: () => {}, register, remove: () => Promise.resolve() },
+      { registrar: { validate: () => {}, register, remove: () => Promise.resolve() } },
     );
 
     await expect(
