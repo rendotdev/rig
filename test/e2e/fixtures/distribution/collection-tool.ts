@@ -5,7 +5,8 @@ const tool: RigToolFactory = (rig) =>
     collections: {
       notes: {
         schema: rig.z.object({ title: rig.z.string() }),
-        generateId: (data) => String(data.title).toLowerCase().replaceAll(" ", "-"),
+        generateId: (data: Record<string, unknown>) =>
+          String(data.title).toLowerCase().replaceAll(" ", "-"),
       },
     },
     commands: {

@@ -49,6 +49,7 @@ export class CliApplicationClass {
     this.configureRunCommand();
     this.configureCronCommands();
     this.configureTypecheckCommand();
+    this.configureMigrateCommand();
     this.configureDevCommands();
     this.configureUpdateCommand();
     this.program
@@ -350,6 +351,22 @@ export class CliApplicationClass {
       });
   }
 
+  private configureMigrateCommand(): void {
+    this.program
+      .command("migrate")
+      .description("Inspect local tools for Rig tool API migrations.")
+      .option("--json", "Print the migration report as JSON.")
+      .action(async (commandOptions: { json?: boolean }) => {
+        const { ToolApiMigrationServiceClass } =
+          await import("../../tools/migration/tool-api-migration");
+        const service = new ToolApiMigrationServiceClass(this.pathOptions(), {});
+        const report = await service.inspect();
+        if (commandOptions.json) this.printJson(report);
+        else console.log(service.renderCli({ report }));
+        process.exitCode = report.unsupported.length > 0 ? 2 : 0;
+      });
+  }
+
   /* v8 ignore next 20 */
   private configureUpdateCommand(): void {
     this.program
@@ -493,6 +510,7 @@ export class CliApplicationClass {
     console.log("\nNext steps:");
     console.log("  rig list");
     console.log('\nRun "rig doctor" if you want to verify your setup.');
+    await this.printToolApiMigrationNotice();
     await this.printUpdateNotice(currentVersion);
   }
 
@@ -540,6 +558,7 @@ export class CliApplicationClass {
     }
     console.log(`Tools:         ${tools.length}`);
     console.log("\nStatus: OK");
+    await this.printToolApiMigrationNotice();
     await this.printUpdateNotice(this.version());
   }
 
@@ -572,6 +591,14 @@ export class CliApplicationClass {
       /* v8 ignore next */
       if (notice) console.log(`\n${notice.message}`);
     });
+  }
+
+  private async printToolApiMigrationNotice(): Promise<void> {
+    const { ToolApiMigrationServiceClass } =
+      await import("../../tools/migration/tool-api-migration");
+    const service = new ToolApiMigrationServiceClass(this.pathOptions(), {});
+    const report = await service.inspect();
+    if (!report.ready) console.log(`\n${service.renderCli({ report })}`);
   }
 
   private requestGeneratedSync(): void {

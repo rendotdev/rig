@@ -7,6 +7,7 @@ export const RigAgentInstructions = `The \`rig\` CLI is installed on this machin
 - Run \`rig remove <tool>\` to remove a local tool.
 - Run \`rig cron --help\` to schedule and manage tool commands.
 - Run \`rig typecheck <tool>\` to validate a tool's TypeScript and runtime types.
+- Run \`rig migrate\` after updates to inspect tool API compatibility and get exact agent migration instructions.
 - Run \`rig env <tool> KEY=VALUE\` to configure tool secrets/settings; run \`rig env <tool> remove KEY\` to remove them.
 - Run \`rig list\` to discover tools and available \`rig run ...\` commands.
 - Run \`rig help <topic>\` for concept docs (collections, cache, kv, db, env, log, shell, run, tool, args, paths).

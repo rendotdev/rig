@@ -236,6 +236,62 @@ describe("cli application", () => {
     expect(await cli.run(["list"])).toContain("No Rig tools found.");
   });
 
+  test("reports versioned tool API migrations with an agent-ready prompt", async () => {
+    const home = await workspaces.create();
+    const cli = new CliHarness(home);
+    await new ToolCreatorClass({ homeDir: home }).create("current");
+
+    expect(await cli.run(["migrate"])).toContain("All tools use Rig tool API v2.");
+
+    const legacyDir = join(home, "rig", "tools", "legacy");
+    await mkdir(legacyDir, { recursive: true });
+    await writeFile(
+      join(legacyDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "legacy",
+  description: "Legacy tool.",
+  commands: {
+    read: rig.defineCommand({
+      description: "Read.",
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async () => ({ ok: true }),
+    }),
+  },
+});
+`,
+      "utf8",
+    );
+
+    cli.logs.length = 0;
+    const prompt = await cli.run(["migrate"]);
+    expect(prompt).toContain("Rig tool migration required");
+    expect(prompt).toContain("legacy: v1 to v2");
+    expect(prompt).toContain("Remove the redundant `name`");
+    expect(prompt).toContain("`commands` as `(command) => ({ ... })`");
+    expect(prompt).toContain("Move predeclared commands into the `commands` callback");
+    expect(prompt).toContain("pass `command` into them");
+    expect(prompt).toContain("rig typecheck <tool>");
+
+    cli.logs.length = 0;
+    const report = await cli.run(["migrate", "--json"]);
+    expect(report).toContain('"currentVersion": 2');
+    expect(report).toContain('"name": "legacy"');
+
+    const futureDir = join(home, "rig", "tools", "future");
+    await mkdir(futureDir, { recursive: true });
+    await writeFile(
+      join(futureDir, "index.rig.ts"),
+      "// rig:tool-api-version 3\nexport default {};\n",
+      "utf8",
+    );
+    cli.logs.length = 0;
+    const unsupported = await cli.run(["migrate"]);
+    expect(unsupported).toContain("newer API than this Rig installation supports");
+    expect(unsupported).toContain("future: v3");
+    expect(process.exitCode).toBe(2);
+  });
+
   test("syncs agent instruction files after commands", async () => {
     const home = await workspaces.create();
     const project = join(home, "project");
@@ -259,6 +315,31 @@ describe("cli application", () => {
     expect(synced).toContain("The `rig` CLI is installed on this machine. It is *your* CLI.");
     expect(synced).toContain("sample.example");
 
+    const legacyDir = join(home, "rig", "tools", "legacy");
+    await mkdir(legacyDir, { recursive: true });
+    await writeFile(
+      join(legacyDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "legacy",
+  description: "Legacy tool.",
+  commands: {
+    read: rig.defineCommand({
+      description: "Read.",
+      input: rig.z.object({}),
+      output: rig.z.object({ ok: rig.z.boolean() }),
+      run: async () => ({ ok: true }),
+    }),
+  },
+});
+`,
+      "utf8",
+    );
+    expect(await cli.run(["init"])).toContain("Rig tool migration required");
+    const migratedInstructions = await readFile(join(project, "AGENTS.md"), "utf8");
+    expect(migratedInstructions).toContain("### Rig tool migration required");
+    expect(migratedInstructions).toContain("legacy: v1 to v2");
+
+    expect(await cli.run(["remove", "legacy"])).toContain("Removed tool legacy");
     expect(await cli.run(["remove", "sample"])).toContain("Removed tool sample");
     const updated = await readFile(join(project, "AGENTS.md"), "utf8");
     expect(updated).toContain("No Rig tools found.");

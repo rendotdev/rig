@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { RigConfigStoreClass, type ConfigOptions } from "../../config/config";
 import { RigErrorClass } from "../../errors/RigError";
 import { RigToolEntryFiles, ToolDiscoveryServiceClass } from "../../registry/discover";
+import { CurrentRigToolApiVersion } from "../domain/tool-api";
 import { ToolLoaderClass } from "../loader";
 
 export type ToolFileResult = {
@@ -33,7 +34,7 @@ export class ToolCreatorClass {
     }
 
     await mkdir(toolDir, { recursive: true });
-    await writeFile(toolPath, this.generatedToolSource(name), "utf8");
+    await writeFile(toolPath, this.generatedToolSource(), "utf8");
 
     return {
       name,
@@ -45,12 +46,12 @@ export class ToolCreatorClass {
     };
   }
 
-  private generatedToolSource(name: string): string {
-    return `const tool: RigToolFactory = (rig) => rig.defineTool({
-  name: ${JSON.stringify(name)},
+  private generatedToolSource(): string {
+    return `// rig:tool-api-version ${CurrentRigToolApiVersion}
+export default (rig: RigToolKit) => rig.defineTool({
   description: "Describe what this tool does.",
-  commands: {
-    example: rig.defineCommand({
+  commands: (command) => ({
+    example: command({
       description: "Example command. Replace this with a real command.",
       input: rig.z.object({
         text: rig.z.string().default("example"),
@@ -65,23 +66,15 @@ export class ToolCreatorClass {
           input: { text: "example" },
           output: { text: "example" },
         },
-        {
-          title: "Pass custom text",
-          text: "Use this to see how arguments map into command input.",
-          input: { text: "custom" },
-          output: { text: "custom" },
-        },
       ],
-      run: async (context) => {
+      run: async ({ input }) => {
         return {
-          text: context.input.text,
+          text: input.text,
         };
       },
     }),
-  },
+  }),
 });
-
-export default tool;
 `;
   }
 }

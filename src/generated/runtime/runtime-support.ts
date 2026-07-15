@@ -239,7 +239,9 @@ const rigShell = new RigShellRuntimeClass();
 
 export const rig: RigToolKit = {
   z,
-  defineTool: (definition) => definition,
+  defineTool: (definition) => typeof definition.commands === "function"
+    ? { ...definition, commands: definition.commands((command) => command) }
+    : definition,
   defineCommand: (definition) => definition,
   run: (options) => new RigCommandRunnerRuntimeClass().run(options),
   $: (strings, ...values) => rigShell.$(strings, ...values),
@@ -268,6 +270,42 @@ import type { Database } from "bun:sqlite";
 import type { z } from "zod";
 
 export type RigSchema = z.ZodTypeAny;
+
+export type RigCollectionDefinition<T extends z.ZodObject<any> = z.ZodObject<any>> = {
+  schema?: T;
+  generateId?: (data: z.input<T>) => string;
+};
+
+export type RigCollectionEntry<T = Record<string, unknown>> = {
+  id: string;
+  data: T;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RigCollectionHandle<T = Record<string, unknown>> = {
+  readonly name: string;
+  readonly path: string;
+  create(entry: { id?: string; data: T; body?: string }): Promise<RigCollectionEntry<T>>;
+  getEntry(id: string): Promise<RigCollectionEntry<T> | null>;
+  update(id: string, patch: { data?: Partial<T>; body?: string }): Promise<RigCollectionEntry<T>>;
+  upsert(entry: { id: string; data: T; body?: string }): Promise<{ id: string; created: boolean }>;
+  remove(id: string): Promise<boolean>;
+  list(options?: { where?: Record<string, unknown>; sort?: string; limit?: number; offset?: number }): Promise<{ entries: RigCollectionEntry<T>[]; total: number }>;
+  search(query: string, options?: { limit?: number }): Promise<{ entries: Array<RigCollectionEntry<T> & { snippet: string; rank: number }> }>;
+  count(where?: Record<string, unknown>): Promise<number>;
+  getCollection(filter?: (entry: RigCollectionEntry<T>) => boolean): Promise<RigCollectionEntry<T>[]>;
+  clear(): Promise<void>;
+};
+
+export type RigToolCollectionDefinitions = Record<string, RigCollectionDefinition>;
+
+export type RigToolCollectionHandles<Collections extends RigToolCollectionDefinitions> = {
+  [Name in keyof Collections]: Collections[Name] extends RigCollectionDefinition<infer Schema>
+    ? RigCollectionHandle<z.output<Schema>>
+    : RigCollectionHandle;
+};
 
 export type RigShellOptions = {
   cwd?: string;
@@ -359,7 +397,11 @@ export type RigToolLogger = {
   child(bindings: Record<string, unknown>): RigToolLogger;
 };
 
-export type RigToolRunContext<Input, Env = unknown> = {
+export type RigToolRunContext<
+  Input,
+  Env = unknown,
+  Collections = Record<string, RigCollectionHandle>,
+> = {
   input: Input;
   env: Env;
   processEnv: NodeJS.ProcessEnv;
@@ -369,6 +411,7 @@ export type RigToolRunContext<Input, Env = unknown> = {
   cache: RigToolCache;
   log: RigToolLogger;
   rig: RigToolKit;
+  collections: Collections;
 };
 
 export type RigToolExample<Input = any, Output = any> = {
@@ -382,25 +425,60 @@ export type RigCommandDefinition<
   Input extends RigSchema = RigSchema,
   Output extends RigSchema = RigSchema,
   Env = unknown,
+  Collections = Record<string, RigCollectionHandle>,
 > = {
   description: string;
   input: Input;
   output: Output;
   examples?: RigToolExample<z.input<Input>, z.output<Output>>[];
-  run: (ctx: RigToolRunContext<z.output<Input>, Env>) => z.input<Output> | Promise<z.input<Output>>;
+  run: (ctx: RigToolRunContext<z.output<Input>, Env, Collections>) => z.input<Output> | Promise<z.input<Output>>;
 };
 
-export type RigToolDefinition<Env extends RigSchema = RigSchema> = {
-  name: string;
+export type RigToolCommandBuilder<
+  Env,
+  Collections,
+> = <Input extends RigSchema, Output extends RigSchema>(
+  definition: RigCommandDefinition<Input, Output, Env, Collections>,
+) => RigCommandDefinition<Input, Output, Env, Collections>;
+
+export type RigToolCommandMap = Record<string, RigCommandDefinition<any, any, any, any>>;
+
+export type RigToolCommandsFactory<
+  Env,
+  Collections,
+  Commands extends RigToolCommandMap,
+> = (command: RigToolCommandBuilder<Env, Collections>) => Commands;
+
+export type RigToolDefinition<
+  Env extends RigSchema = RigSchema,
+  Collections extends RigToolCollectionDefinitions = RigToolCollectionDefinitions,
+  Commands extends RigToolCommandMap = RigToolCommandMap,
+> = {
+  name?: string;
   description: string;
   env?: Env;
   setupDb?: (db: RigToolDatabase) => void | Promise<void>;
-  commands: Record<string, RigCommandDefinition<RigSchema, RigSchema, z.output<Env>>>;
+  collections?: Collections;
+  commands:
+    | Commands
+    | RigToolCommandsFactory<z.output<Env>, RigToolCollectionHandles<Collections>, Commands>;
+};
+
+export type RigNormalizedToolDefinition<
+  Env extends RigSchema = RigSchema,
+  Collections extends RigToolCollectionDefinitions = RigToolCollectionDefinitions,
+  Commands extends RigToolCommandMap = RigToolCommandMap,
+> = Omit<RigToolDefinition<Env, Collections, Commands>, "commands"> & {
+  commands: Commands;
 };
 
 export type RigToolKit = {
   z: typeof z;
-  defineTool<T extends RigToolDefinition>(definition: T): T;
+  defineTool<
+    Env extends RigSchema = RigSchema,
+    Collections extends RigToolCollectionDefinitions = RigToolCollectionDefinitions,
+    const Commands extends RigToolCommandMap = RigToolCommandMap,
+  >(definition: RigToolDefinition<Env, Collections, Commands>): RigNormalizedToolDefinition<Env, Collections, Commands>;
   defineCommand<I extends RigSchema, O extends RigSchema>(definition: RigCommandDefinition<I, O>): RigCommandDefinition<I, O>;
   run<T = unknown>(options: RigRunOptions): Promise<T>;
   $(strings: TemplateStringsArray, ...values: unknown[]): Promise<RigShellResult>;
@@ -409,7 +487,7 @@ export type RigToolKit = {
   shell: RigShell;
 };
 
-export type RigToolFactory = (rig: RigToolKit) => RigToolDefinition | Promise<RigToolDefinition>;
+export type RigToolFactory = (rig: RigToolKit) => RigToolDefinition<any, any, any> | Promise<RigToolDefinition<any, any, any>>;
 `;
   }
 

@@ -121,29 +121,82 @@ export type CommandDefinition<
   Input extends RigSchema = RigSchema,
   Output extends RigSchema = RigSchema,
   Env = unknown,
+  Collections = Record<string, CollectionHandle>,
 > = {
   description: string;
   input: Input;
   output: Output;
   examples?: ToolExample<z.input<Input>, z.output<Output>>[];
-  run: (ctx: ToolRunContext<z.output<Input>, Env>) => MaybePromise<z.input<Output>>;
+  run: (ctx: ToolRunContext<z.output<Input>, Env, Collections>) => MaybePromise<z.input<Output>>;
 };
 
-export type ToolDefinition<Env extends RigSchema = RigSchema> = {
-  name: string;
+export type ToolCollectionDefinitions = Record<string, CollectionDefinition>;
+
+export type ToolCollectionHandles<Collections extends ToolCollectionDefinitions> = {
+  [Name in keyof Collections]: Collections[Name] extends CollectionDefinition<infer Schema>
+    ? CollectionHandle<z.output<Schema>>
+    : CollectionHandle;
+};
+
+export type ToolCommandBuilder<Env, Collections> = <
+  Input extends RigSchema,
+  Output extends RigSchema,
+>(
+  definition: CommandDefinition<Input, Output, Env, Collections>,
+) => CommandDefinition<Input, Output, Env, Collections>;
+
+export type ToolCommandMap = Record<string, CommandDefinition<any, any, any, any>>;
+
+export type ToolCommandsFactory<Env, Collections, Commands extends ToolCommandMap> = (
+  command: ToolCommandBuilder<Env, Collections>,
+) => Commands;
+
+export type ToolDefinitionInput<
+  Env extends RigSchema = RigSchema,
+  Collections extends ToolCollectionDefinitions = ToolCollectionDefinitions,
+  Commands extends ToolCommandMap = ToolCommandMap,
+> = {
+  name?: string;
   description: string;
   env?: Env;
   setupDb?: (db: RigToolDatabase) => MaybePromise<void>;
-  collections?: Record<string, CollectionDefinition>;
-  commands: Record<string, CommandDefinition<RigSchema, RigSchema, z.output<Env>>>;
+  collections?: Collections;
+  commands:
+    | Commands
+    | ToolCommandsFactory<z.output<Env>, ToolCollectionHandles<Collections>, Commands>;
 };
 
-export type ToolFactory = (rig: RigToolKit) => ToolDefinition | Promise<ToolDefinition>;
-export type ToolModuleDefault = ToolDefinition | ToolFactory;
+export type NormalizedToolDefinitionInput<
+  Env extends RigSchema = RigSchema,
+  Collections extends ToolCollectionDefinitions = ToolCollectionDefinitions,
+  Commands extends ToolCommandMap = ToolCommandMap,
+> = Omit<ToolDefinitionInput<Env, Collections, Commands>, "commands"> & {
+  commands: Commands;
+};
+
+export type ToolDefinition = {
+  name: string;
+  description: string;
+  env?: RigSchema;
+  setupDb?: (db: RigToolDatabase) => MaybePromise<void>;
+  collections?: ToolCollectionDefinitions;
+  commands: Record<string, CommandDefinition>;
+};
+
+export type ToolFactory = (
+  rig: RigToolKit,
+) => ToolDefinitionInput<any, any, any> | Promise<ToolDefinitionInput<any, any, any>>;
+export type ToolModuleDefault = ToolDefinitionInput | ToolDefinition | ToolFactory;
 
 export type RigToolKit = {
   z: typeof z;
-  defineTool<T extends ToolDefinition>(definition: T): T;
+  defineTool<
+    Env extends RigSchema = RigSchema,
+    Collections extends ToolCollectionDefinitions = ToolCollectionDefinitions,
+    const Commands extends ToolCommandMap = ToolCommandMap,
+  >(
+    definition: ToolDefinitionInput<Env, Collections, Commands>,
+  ): NormalizedToolDefinitionInput<Env, Collections, Commands>;
   defineCommand<I extends RigSchema, O extends RigSchema>(
     definition: CommandDefinition<I, O>,
   ): CommandDefinition<I, O>;

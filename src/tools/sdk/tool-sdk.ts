@@ -15,7 +15,10 @@ import {
   type RigRunOptions,
   type RigSchema,
   type RigToolKit,
-  type ToolDefinition,
+  type ToolCollectionDefinitions,
+  type ToolCommandMap,
+  type ToolDefinitionInput,
+  type NormalizedToolDefinitionInput,
   type ToolFactory,
   type ToolModuleDefault,
 } from "../types";
@@ -126,7 +129,16 @@ class RigToolKitFactoryClass {
     const shell = new BunRigShellClass();
     return {
       z,
-      defineTool: <T extends ToolDefinition>(definition: T) => definition,
+      defineTool: <
+        Env extends RigSchema = RigSchema,
+        Collections extends ToolCollectionDefinitions = ToolCollectionDefinitions,
+        const Commands extends ToolCommandMap = ToolCommandMap,
+      >(
+        definition: ToolDefinitionInput<Env, Collections, Commands>,
+      ) =>
+        typeof definition.commands === "function"
+          ? { ...definition, commands: definition.commands((command) => command) }
+          : definition,
       defineCommand: <I extends RigSchema, O extends RigSchema>(
         definition: CommandDefinition<I, O>,
       ) => definition,
@@ -142,10 +154,16 @@ class RigToolKitFactoryClass {
 
 export const rig = new RigToolKitFactoryClass().create();
 
-export function defineTool(definition: ToolDefinition): ToolDefinition;
+export function defineTool<
+  Env extends RigSchema = RigSchema,
+  Collections extends ToolCollectionDefinitions = ToolCollectionDefinitions,
+  const Commands extends ToolCommandMap = ToolCommandMap,
+>(
+  definition: ToolDefinitionInput<Env, Collections, Commands>,
+): NormalizedToolDefinitionInput<Env, Collections, Commands>;
 export function defineTool(factory: ToolFactory): ToolFactory;
 export function defineTool(value: ToolModuleDefault): ToolModuleDefault {
-  return typeof value === "function" ? value : rig.defineTool(value);
+  return typeof value === "function" ? value : rig.defineTool(value as never);
 }
 
 export const defineCommand = rig.defineCommand;
@@ -154,7 +172,7 @@ export const args = rig.args;
 export const paths = rig.paths;
 
 export class RigToolClass {
-  define(value: ToolDefinition): ToolDefinition;
+  define(value: ToolDefinitionInput): ToolDefinitionInput;
   define(value: ToolFactory): ToolFactory;
   define(value: ToolModuleDefault): ToolModuleDefault {
     return defineTool(value as never);
