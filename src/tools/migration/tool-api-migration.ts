@@ -68,9 +68,10 @@ export class ToolApiMigrationServiceClass extends DomainClass<
         "",
         "1. Export the factory directly as `(rig: RigToolKit) => rig.defineTool({ ... })`.",
         "2. Remove the redundant `name`; Rig derives it from the folder.",
-        "3. Define `commands` as `(command) => ({ ... })` and replace each `rig.defineCommand({ ... })` with `command({ ... })`.",
-        `4. Set the header to \`// rig:tool-api-version ${params.report.currentVersion}\`.`,
-        "5. Run `rig typecheck <tool>` and execute the command examples before considering the migration complete.",
+        "3. Define `commands` as `(command) => ({ ... })` and replace each inline `rig.defineCommand({ ... })` with `command({ ... })`.",
+        "4. Move predeclared commands into the `commands` callback. Declare reusable command factories inside the callback or pass `command` into them.",
+        `5. Set the header to \`// rig:tool-api-version ${params.report.currentVersion}\`.`,
+        "6. Run `rig typecheck <tool>` and execute the command examples before considering the migration complete.",
       );
     }
 

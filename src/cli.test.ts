@@ -269,6 +269,8 @@ describe("cli application", () => {
     expect(prompt).toContain("legacy: v1 to v2");
     expect(prompt).toContain("Remove the redundant `name`");
     expect(prompt).toContain("`commands` as `(command) => ({ ... })`");
+    expect(prompt).toContain("Move predeclared commands into the `commands` callback");
+    expect(prompt).toContain("pass `command` into them");
     expect(prompt).toContain("rig typecheck <tool>");
 
     cli.logs.length = 0;
