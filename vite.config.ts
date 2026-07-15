@@ -1,8 +1,15 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   ssr: {
     external: ["typescript", "bun:sqlite"],
+  },
+  lint: {
+    ignorePatterns: ["dist/**"],
+    options: {
+      typeAware: true,
+      typeCheck: true,
+    },
   },
   test: {
     environment: "node",
@@ -27,5 +34,18 @@ export default defineConfig({
         perFile: true,
       },
     },
+  },
+  pack: {
+    entry: {
+      rig: "src/cli.ts",
+    },
+    format: "esm",
+    platform: "node",
+    target: "node22",
+    deps: {
+      neverBundle: ["bun:sqlite"],
+    },
+    outDir: "dist",
+    clean: true,
   },
 });

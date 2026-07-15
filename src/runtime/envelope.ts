@@ -1,7 +1,5 @@
-import type { ErrorCode } from "../errors/codes";
-
 export type RigIssue = {
-  code: ErrorCode | string;
+  code: string;
   message: string;
   details?: unknown;
 };
@@ -24,11 +22,7 @@ export class EnvelopeFactory {
     };
   }
 
-  static error(params: {
-    code: ErrorCode | string;
-    message: string;
-    details?: unknown;
-  }): ErrorEnvelope {
+  static error(params: { code: string; message: string; details?: unknown }): ErrorEnvelope {
     return {
       data: null,
       errors: [

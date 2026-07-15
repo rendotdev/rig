@@ -79,7 +79,7 @@ class CronJobName {
 }
 
 class CronInputReader {
-  async read(options: { input?: string; inputFile?: string }): Promise<unknown | undefined> {
+  async read(options: { input?: string; inputFile?: string }): Promise<unknown> {
     if (options.input && options.inputFile) {
       throw new RigError("INPUT_ERROR", "Use --input or --input-file, not both.");
     }
@@ -229,10 +229,7 @@ export class RigCronService {
     return { job, envelope: result.envelope, exitCode: result.exitCode };
   }
 
-  private async validateCommand(
-    target: CronCommandTarget,
-    input: unknown | undefined,
-  ): Promise<void> {
+  private async validateCommand(target: CronCommandTarget, input: unknown): Promise<void> {
     const result = await new ToolRunner(this.options).run(target.tool, target.command, {
       ...this.options,
       input: input === undefined ? undefined : JSON.stringify(input),

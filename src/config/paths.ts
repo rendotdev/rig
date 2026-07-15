@@ -59,6 +59,10 @@ export class RigPaths {
     return join(this.runtimeDir, "tsconfig.tools.json");
   }
 
+  get runtimeTypecheckAmbientPath(): string {
+    return join(this.runtimeDir, "typecheck-ambient.d.ts");
+  }
+
   get cronDir(): string {
     return join(this.rigDir, "cron");
   }

@@ -132,9 +132,11 @@ export function defineTool(value: ToolModuleDefault): ToolModuleDefault {
   return typeof value === "function" ? value : rig.defineTool(value);
 }
 
-export const defineCommand = rig.defineCommand;
-export const run = rig.run;
-export const args = rig.args;
+export const defineCommand = <I extends RigSchema, O extends RigSchema>(
+  definition: CommandDefinition<I, O>,
+): CommandDefinition<I, O> => rig.defineCommand(definition);
+export const run = <T = unknown>(options: RigRunOptions): Promise<T> => rig.run<T>(options);
+export const args = (): RigArgBuilder => rig.args();
 export const paths = rig.paths;
 
 export class RigTool {

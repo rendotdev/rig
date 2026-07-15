@@ -108,13 +108,25 @@ export type CommandDefinition<
   run: (ctx: ToolRunContext<z.output<Input>, Env>) => MaybePromise<z.input<Output>>;
 };
 
+// Raw command literals cannot retain contextual Zod inference for a callback whose
+// input schema is a sibling property. Keep them runtime-schema-safe while making
+// the callback context compatible with existing tools. `defineCommand()` below is
+// the strict authoring path and preserves per-command schema inference.
+export type CompatibilityCommandDefinition = {
+  description: string;
+  input: RigSchema;
+  output: RigSchema;
+  examples?: ToolExample<unknown, unknown>[];
+  run: (ctx: ToolRunContext<any, any>) => MaybePromise<any>;
+};
+
 export type ToolDefinition<Env extends RigSchema = RigSchema> = {
   name: string;
   description: string;
   env?: Env;
   setupDb?: (db: RigToolDatabase) => MaybePromise<void>;
   collections?: Record<string, CollectionDefinition>;
-  commands: Record<string, CommandDefinition<RigSchema, RigSchema, z.output<Env>>>;
+  commands: Record<string, CompatibilityCommandDefinition>;
 };
 
 export type ToolFactory = (rig: RigToolKit) => ToolDefinition | Promise<ToolDefinition>;

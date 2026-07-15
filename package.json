@@ -12,7 +12,7 @@
     "url": "git+https://github.com/rendotdev/rig.git"
   },
   "bin": {
-    "rig": "dist/rig.js"
+    "rig": "dist/rig.mjs"
   },
   "files": [
     "dist/**/*",
@@ -24,21 +24,21 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "bun --install=fallback --watch run src/cli.ts",
-    "build": "bun run scripts/build.ts",
+    "dev": "vp pack --watch",
+    "build": "vp pack",
     "bench": "bun run scripts/bench.ts",
     "release": "bun run scripts/release.ts",
     "release:patch": "bun run scripts/release.ts patch",
     "release:minor": "bun run scripts/release.ts minor",
     "release:major": "bun run scripts/release.ts major",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "coverage": "vitest run --coverage",
-    "check": "oxfmt . --check && oxlint . --deny-warnings && tsc --noEmit && vitest run --coverage",
-    "test": "vitest run --coverage",
-    "prepack": "bun run build"
+    "test:unit": "vp test run",
+    "test:watch": "vp test",
+    "test:coverage": "vp test run --coverage",
+    "coverage": "vp test run --coverage",
+    "check": "vp check",
+    "test": "vp test run --coverage",
+    "prepack": "vp pack"
   },
   "dependencies": {
     "@types/bun": "latest",
@@ -48,13 +48,18 @@
     "zod": "latest"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.9",
-    "oxfmt": "^0.56.0",
-    "oxlint": "^1.71.0",
+    "@vitest/coverage-v8": "4.1.10",
     "pino": "^10.3.1",
-    "vitest": "^4.1.9"
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
+    "vite-plus": "0.2.4",
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
+    "vitest": "4.1.10"
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "packageManager": "npm@11.12.1"
 }

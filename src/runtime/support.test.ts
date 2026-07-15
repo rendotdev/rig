@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -632,6 +632,9 @@ describe("coverage support", () => {
     expect(runtimeTypes).toContain("kv: RigToolKvStore");
     expect(runtimeTypes).toContain("log: RigToolLogger");
     expect(runtimeTypes).toContain("shell: RigShell");
+    expect(runtimeTypes).toContain("RigCollectionHandle");
+    expect(runtimeTypes).toContain("collections: Record<string, RigCollectionHandle>");
+    expect(runtimeTypes).toContain("run<T = unknown>");
     await writeFile(join(registry, "tsconfig.json"), "{}\n", "utf8");
     await support.ensure([registry]);
     expect(await readFile(join(registry, "tsconfig.json"), "utf8")).toBe("{}\n");

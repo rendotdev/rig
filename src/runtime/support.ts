@@ -296,8 +296,38 @@ export type RigToolLogger = {
   child(bindings: Record<string, unknown>): RigToolLogger;
 };
 
+export type RigCollectionDefinition = {
+  schema?: z.ZodObject<any>;
+  generateId?: (data: any) => string;
+};
+
+export type RigCollectionEntry<T = Record<string, unknown>> = {
+  id: string;
+  data: T;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RigCollectionHandle<T = Record<string, unknown>> = {
+  readonly name: string;
+  readonly path: string;
+  create(entry: { id?: string; data: T; body?: string }): Promise<RigCollectionEntry<T>>;
+  getEntry(id: string): Promise<RigCollectionEntry<T> | null>;
+  update(id: string, patch: { data?: Partial<T>; body?: string }): Promise<RigCollectionEntry<T>>;
+  upsert(entry: { id: string; data: T; body?: string }): Promise<{ id: string; created: boolean }>;
+  remove(id: string): Promise<boolean>;
+  list(opts?: { where?: Record<string, unknown>; sort?: string; limit?: number; offset?: number }): Promise<{ entries: RigCollectionEntry<T>[]; total: number }>;
+  search(query: string, opts?: { limit?: number }): Promise<{ entries: Array<RigCollectionEntry<T> & { snippet: string; rank: number }> }>;
+  count(where?: Record<string, unknown>): Promise<number>;
+  getCollection(filter?: (entry: RigCollectionEntry<T>) => boolean): Promise<RigCollectionEntry<T>[]>;
+  clear(): Promise<void>;
+};
+
 export type RigToolRunContext<Input, Env = unknown> = {
-  input: Input;
+  // Raw command literals cannot infer a callback type from a sibling Zod schema.
+  // Rig validates input at runtime; use rig.defineCommand() for strict inference.
+  input: any;
   env: Env;
   processEnv: NodeJS.ProcessEnv;
   cwd: string;
@@ -305,6 +335,7 @@ export type RigToolRunContext<Input, Env = unknown> = {
   kv: RigToolKvStore;
   log: RigToolLogger;
   rig: RigToolKit;
+  collections: Record<string, RigCollectionHandle>;
 };
 
 export type RigToolExample<Input = any, Output = any> = {
@@ -326,12 +357,21 @@ export type RigCommandDefinition<
   run: (ctx: RigToolRunContext<z.output<Input>, Env>) => z.input<Output> | Promise<z.input<Output>>;
 };
 
+export type RigCompatibilityCommandDefinition = {
+  description: string;
+  input: RigSchema;
+  output: RigSchema;
+  examples?: RigToolExample<unknown, unknown>[];
+  run: (ctx: RigToolRunContext<any, any>) => any | Promise<any>;
+};
+
 export type RigToolDefinition<Env extends RigSchema = RigSchema> = {
   name: string;
   description: string;
   env?: Env;
   setupDb?: (db: RigToolDatabase) => void | Promise<void>;
-  commands: Record<string, RigCommandDefinition<RigSchema, RigSchema, z.output<Env>>>;
+  collections?: Record<string, RigCollectionDefinition>;
+  commands: Record<string, RigCompatibilityCommandDefinition>;
 };
 
 export type RigToolKit = {

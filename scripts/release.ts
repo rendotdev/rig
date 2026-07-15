@@ -101,7 +101,9 @@ class VersionBumpResolver {
 
     const explicit = SemverVersion.parse(bump);
     if (explicit.compare(current) <= 0) {
-      throw new ReleaseError(`Next version must be greater than ${current}: ${explicit}`);
+      throw new ReleaseError(
+        `Next version must be greater than ${current.toString()}: ${explicit.toString()}`,
+      );
     }
     return explicit.toString();
   }

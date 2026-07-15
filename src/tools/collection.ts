@@ -239,7 +239,8 @@ class FrontmatterCodec {
     if (value === null || value === undefined) return "null";
     if (typeof value === "boolean") return String(value);
     if (typeof value === "number") return String(value);
-    const str = String(value);
+    if (typeof value !== "string") return JSON.stringify(value) ?? "null";
+    const str = value;
     // Quote if it contains special chars
     if (/[:{},&*#?|><!%@`\n[\]]/.test(str) || str.includes(": ")) {
       return `"${str.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;

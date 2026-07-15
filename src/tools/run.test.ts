@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 import { existsSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -206,6 +206,87 @@ describe("tool commands", () => {
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.checked).toHaveLength(1);
+  });
+
+  test("type-checks raw commands, collections, strict commands, and Bun versioned imports", async () => {
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "typed-surface");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(join(toolDir, "helper.ts"), "export {};\n", "utf8");
+    await writeFile(
+      join(toolDir, "index.rig.ts"),
+      `import { marked } from "marked@18.0.6";
+import puppeteer from "puppeteer@25.3.0";
+import * as lightningcss from "lightningcss@1.32.0";
+import "side-effect@1.0.0";
+import "./helper.ts";
+
+const tool: RigToolFactory = (rig) => rig.defineTool({
+  name: "typed-surface",
+  description: "Type surface fixture.",
+  collections: {
+    notes: { schema: rig.z.object({ title: rig.z.string() }) },
+  },
+  commands: {
+    legacy: {
+      description: "Raw commands remain compatible.",
+      input: rig.z.object({ value: rig.z.string() }),
+      output: rig.z.object({ text: rig.z.string() }),
+      run: async (context) => {
+        await context.collections.notes.create({ id: "note", data: { title: context.input.value } });
+        const nested = await context.rig.run<{ text: string }>({ command: "typed-surface.legacy" });
+        void puppeteer;
+        void lightningcss;
+        return { text: marked.parse(context.input.value) + nested.text };
+      },
+    },
+    strict: rig.defineCommand({
+      description: "Strict command inference.",
+      input: rig.z.object({ count: rig.z.number() }),
+      output: rig.z.object({ text: rig.z.string() }),
+      run: ({ input }) => ({ text: input.count.toFixed() }),
+    }),
+  },
+});
+
+export default tool;
+`,
+      "utf8",
+    );
+
+    const result = await new ToolTypecheckService({ homeDir: home }).typecheck("typed-surface");
+    expect(result.ok).toBe(true);
+  });
+
+  test("keeps untyped nested rig.run results unknown", async () => {
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "nested-unknown");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(
+      join(toolDir, "index.rig.ts"),
+      `const tool: RigToolFactory = (rig) => rig.defineTool({
+  name: "nested-unknown",
+  description: "Nested result safety fixture.",
+  commands: {
+    example: {
+      description: "Example.",
+      input: rig.z.object({}),
+      output: rig.z.object({ text: rig.z.string() }),
+      run: async (context) => {
+        const nested = await context.rig.run({ command: "nested-unknown.example" });
+        return { text: nested.text };
+      },
+    },
+  },
+});
+export default tool;
+`,
+      "utf8",
+    );
+
+    const result = await new ToolTypecheckService({ homeDir: home }).typecheck("nested-unknown");
+    expect(result.ok).toBe(false);
+    expect(result.stdout).toContain("'nested' is of type 'unknown'");
   });
 
   test("type-checks command output against output schemas", async () => {
