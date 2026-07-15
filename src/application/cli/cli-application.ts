@@ -285,7 +285,7 @@ export class CliApplicationClass {
       .description("List scheduled Rig tool commands as JSON.")
       .action(async () => {
         const { RigCronServiceClass } = await import("../../tools/cron");
-        this.printJson(await new RigCronServiceClass(this.pathOptions()).list());
+        this.printJson(await new RigCronServiceClass(this.pathOptions(), {}).list());
       });
 
     cronCommand
@@ -304,7 +304,7 @@ export class CliApplicationClass {
           commandOptions: { input?: string; inputFile?: string },
         ) => {
           const { cronModuleUrl, RigCronServiceClass } = await import("../../tools/cron");
-          const result = await new RigCronServiceClass(this.pathOptions()).add({
+          const result = await new RigCronServiceClass(this.pathOptions(), {}).add({
             name,
             command: commandId,
             schedule,
@@ -322,7 +322,7 @@ export class CliApplicationClass {
       .description("Remove a scheduled Rig tool command.")
       .action(async (name: string) => {
         const { RigCronServiceClass } = await import("../../tools/cron");
-        this.printJson(await new RigCronServiceClass(this.pathOptions()).remove(name));
+        this.printJson(await new RigCronServiceClass(this.pathOptions(), {}).remove({ name }));
       });
 
     cronCommand
@@ -331,7 +331,7 @@ export class CliApplicationClass {
       .description("Run a scheduled Rig tool command now.")
       .action(async (name: string) => {
         const { RigCronServiceClass } = await import("../../tools/cron");
-        const result = await new RigCronServiceClass(this.pathOptions()).run(name);
+        const result = await new RigCronServiceClass(this.pathOptions(), {}).run({ name });
         this.printJson(result.envelope);
         process.exitCode = result.exitCode;
       });

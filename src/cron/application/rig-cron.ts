@@ -5,6 +5,7 @@ import type { ConfigOptions } from "../../config/config";
 import { RigConfigStoreClass } from "../../config/config";
 import { RigPathsClass } from "../../config/paths";
 import type { RigCronJob } from "../../config/schema";
+import { DomainClass } from "../../domain/domain-class";
 import { RigErrorClass } from "../../errors/RigError";
 import type { SuccessEnvelope } from "../../runtime/envelope";
 import { commandTargets } from "../../tools/identifiers";
@@ -38,24 +39,43 @@ type BunCronApi = {
 };
 
 export type CronRegistrar = {
-  register(path: string, schedule: string, title: string): Promise<void>;
-  remove(title: string): Promise<void>;
-  validate(schedule: string): void;
+  register(params: { path: string; schedule: string; title: string }): Promise<void>;
+  remove(params: { title: string }): Promise<void>;
+  validate(params: { schedule: string }): void;
 };
 
-class BunCronRegistrarClass implements CronRegistrar {
-  register(path: string, schedule: string, title: string): Promise<void> {
-    return this.cron()(path, schedule, title);
+export type RigCronServiceParams = ConfigOptions;
+
+export type RigCronServiceDeps = {
+  registrar?: CronRegistrar;
+};
+
+export type RigCronWorkerParams = ConfigOptions;
+
+export type RigCronWorkerDeps = {
+  service?: RigCronServiceClass;
+};
+
+class BunCronRegistrarClass
+  extends DomainClass<Record<string, never>, Record<string, never>>
+  implements CronRegistrar
+{
+  public constructor(params: Record<string, never>, deps: Record<string, never>) {
+    super(params, deps);
   }
 
-  remove(title: string): Promise<void> {
-    return this.cron().remove(title);
+  public register(params: { path: string; schedule: string; title: string }): Promise<void> {
+    return this.cron()(params.path, params.schedule, params.title);
   }
 
-  validate(schedule: string): void {
-    const next = this.cron().parse(schedule);
+  public remove(params: { title: string }): Promise<void> {
+    return this.cron().remove(params.title);
+  }
+
+  public validate(params: { schedule: string }): void {
+    const next = this.cron().parse(params.schedule);
     if (!next)
-      throw new RigErrorClass("CRON_ERROR", `Cron schedule has no future runs: ${schedule}`);
+      throw new RigErrorClass("CRON_ERROR", `Cron schedule has no future runs: ${params.schedule}`);
   }
 
   private cron(): BunCronApi {
@@ -68,48 +88,63 @@ class BunCronRegistrarClass implements CronRegistrar {
   }
 }
 
-class CronJobNameClass {
-  constructor(readonly value: string) {
-    if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+class CronJobNameClass extends DomainClass<{ value: string }, Record<string, never>> {
+  public readonly value: string;
+
+  public constructor(params: { value: string }, deps: Record<string, never>) {
+    super(params, deps);
+    this.value = this.params.value;
+    if (!/^[A-Za-z0-9_-]+$/.test(this.value)) {
       throw new RigErrorClass(
         "INPUT_ERROR",
         "Cron job names may only contain letters, numbers, hyphens, and underscores.",
-        { name: value },
+        { name: this.value },
       );
     }
   }
 }
 
-class CronInputReaderClass {
-  async read(options: { input?: string; inputFile?: string }): Promise<unknown | undefined> {
-    if (options.input && options.inputFile) {
+class CronInputReaderClass extends DomainClass<Record<string, never>, Record<string, never>> {
+  public constructor(params: Record<string, never>, deps: Record<string, never>) {
+    super(params, deps);
+  }
+
+  public async read(params: { input?: string; inputFile?: string }): Promise<unknown | undefined> {
+    if (params.input && params.inputFile) {
       throw new RigErrorClass("INPUT_ERROR", "Use --input or --input-file, not both.");
     }
 
-    if (options.inputFile) {
+    if (params.inputFile) {
       /* v8 ignore next 3 */
       return typeof Bun !== "undefined"
-        ? Bun.file(options.inputFile).json()
-        : JSON.parse(await readFile(options.inputFile, "utf8"));
+        ? Bun.file(params.inputFile).json()
+        : JSON.parse(await readFile(params.inputFile, "utf8"));
     }
 
-    return options.input === undefined ? undefined : JSON.parse(options.input);
+    return params.input === undefined ? undefined : JSON.parse(params.input);
   }
 }
 
-class CronCommandTargetClass {
-  readonly tool: string;
-  readonly command: string;
+class CronCommandTargetClass extends DomainClass<{ id: string }, Record<string, never>> {
+  public readonly id: string;
+  public readonly tool: string;
+  public readonly command: string;
 
-  constructor(readonly id: string) {
-    const target = commandTargets.parse(id);
+  public constructor(params: { id: string }, deps: Record<string, never>) {
+    super(params, deps);
+    this.id = this.params.id;
+    const target = commandTargets.parse(this.id);
     this.tool = target.tool;
     this.command = target.command;
   }
 }
 
-class CronWorkerScriptClass {
-  render(params: { name: string; homeDir?: string; moduleUrl: string }): string {
+class CronWorkerScriptClass extends DomainClass<Record<string, never>, Record<string, never>> {
+  public constructor(params: Record<string, never>, deps: Record<string, never>) {
+    super(params, deps);
+  }
+
+  public render(params: { name: string; homeDir?: string; moduleUrl: string }): string {
     const entrypoint = fileURLToPath(params.moduleUrl);
     /* v8 ignore next */
     const env = params.homeDir ? { RIG_HOME: params.homeDir } : {};
@@ -146,15 +181,22 @@ type CronWorkerSnapshot = {
   workerSource?: string;
 };
 
-class CronStateTransactionClass {
-  constructor(
-    private readonly configStore: RigConfigStoreClass,
-    private readonly registrar: CronRegistrar,
-  ) {}
+type CronStateTransactionDeps = {
+  configStore: RigConfigStoreClass;
+  registrar: CronRegistrar;
+};
 
-  async snapshot(workerPath: string): Promise<CronWorkerSnapshot> {
+class CronStateTransactionClass extends DomainClass<
+  Record<string, never>,
+  CronStateTransactionDeps
+> {
+  public constructor(params: Record<string, never>, deps: CronStateTransactionDeps) {
+    super(params, deps);
+  }
+
+  public async snapshot(params: { workerPath: string }): Promise<CronWorkerSnapshot> {
     return {
-      workerSource: await this.readWorker(workerPath),
+      workerSource: await this.readWorker(params.workerPath),
     };
   }
 
@@ -171,7 +213,7 @@ class CronStateTransactionClass {
     try {
       await this.writeWorker(params.workerPath, params.workerSource);
       workerChanged = true;
-      await this.configStore.update((config) => {
+      await this.deps.configStore.update((config) => {
         previousJob = config.cronJobs.find((existing) => existing.name === params.job.name);
         return {
           ...config,
@@ -183,7 +225,11 @@ class CronStateTransactionClass {
       });
       configChanged = true;
       registrationAttempted = true;
-      await this.registrar.register(params.workerPath, params.job.schedule, params.job.name);
+      await this.deps.registrar.register({
+        path: params.workerPath,
+        schedule: params.job.schedule,
+        title: params.job.name,
+      });
     } catch (error) {
       const rollbackErrors: unknown[] = [];
       if (configChanged) {
@@ -199,8 +245,12 @@ class CronStateTransactionClass {
       if (registrationAttempted) {
         const registrationRollback = previousJob
           ? () =>
-              this.registrar.register(params.workerPath, previousJob!.schedule, previousJob!.name)
-          : () => this.registrar.remove(params.job.name);
+              this.deps.registrar.register({
+                path: params.workerPath,
+                schedule: previousJob!.schedule,
+                title: previousJob!.name,
+              })
+          : () => this.deps.registrar.remove({ title: params.job.name });
         await this.captureRollbackError(rollbackErrors, registrationRollback);
       }
       this.throwAfterRollback(error, rollbackErrors);
@@ -214,9 +264,9 @@ class CronStateTransactionClass {
   }): Promise<boolean> {
     let previousJob: RigCronJob | undefined;
     let configChanged = false;
-    await this.registrar.remove(params.name);
+    await this.deps.registrar.remove({ title: params.name });
     try {
-      await this.configStore.update((config) => {
+      await this.deps.configStore.update((config) => {
         previousJob = config.cronJobs.find((job) => job.name === params.name);
         return {
           ...config,
@@ -235,7 +285,11 @@ class CronStateTransactionClass {
       );
       if (previousJob) {
         await this.captureRollbackError(rollbackErrors, () =>
-          this.registrar.register(params.workerPath, previousJob!.schedule, previousJob!.name),
+          this.deps.registrar.register({
+            path: params.workerPath,
+            schedule: previousJob!.schedule,
+            title: previousJob!.name,
+          }),
         );
       }
       this.throwAfterRollback(error, rollbackErrors);
@@ -255,7 +309,7 @@ class CronStateTransactionClass {
   }
 
   private async restoreReplacedJob(job: RigCronJob, previousJob?: RigCronJob): Promise<void> {
-    await this.configStore.update((config) => {
+    await this.deps.configStore.update((config) => {
       const current = config.cronJobs.find((candidate) => candidate.name === job.name);
       if (!current || !this.sameJob(current, job)) return config;
       const withoutReplacement = config.cronJobs.filter((candidate) => candidate.name !== job.name);
@@ -267,7 +321,7 @@ class CronStateTransactionClass {
   }
 
   private async restoreRemovedJob(previousJob: RigCronJob): Promise<void> {
-    await this.configStore.update((config) => {
+    await this.deps.configStore.update((config) => {
       if (config.cronJobs.some((job) => job.name === previousJob.name)) return config;
       return { ...config, cronJobs: [...config.cronJobs, previousJob] };
     });
@@ -323,51 +377,54 @@ class CronStateTransactionClass {
   }
 }
 
-export class RigCronServiceClass {
+export class RigCronServiceClass extends DomainClass<RigCronServiceParams, RigCronServiceDeps> {
   private readonly paths: RigPathsClass;
   private readonly configStore: RigConfigStoreClass;
-  private readonly inputReader = new CronInputReaderClass();
-  private readonly workerScript = new CronWorkerScriptClass();
+  private readonly inputReader = new CronInputReaderClass({}, {});
+  private readonly workerScript = new CronWorkerScriptClass({}, {});
+  private readonly registrar: CronRegistrar;
   private readonly transaction: CronStateTransactionClass;
 
-  constructor(
-    private readonly options: ConfigOptions = {},
-    private readonly registrar: CronRegistrar = new BunCronRegistrarClass(),
-  ) {
-    this.paths = new RigPathsClass(options);
-    this.configStore = new RigConfigStoreClass(options);
-    this.transaction = new CronStateTransactionClass(this.configStore, registrar);
+  public constructor(params: RigCronServiceParams, deps: RigCronServiceDeps) {
+    super(params, deps);
+    this.registrar = this.deps.registrar ?? new BunCronRegistrarClass({}, {});
+    this.paths = new RigPathsClass(this.params);
+    this.configStore = new RigConfigStoreClass(this.params);
+    this.transaction = new CronStateTransactionClass(
+      {},
+      { configStore: this.configStore, registrar: this.registrar },
+    );
   }
 
-  async list(): Promise<{ cronJobs: RigCronJob[] }> {
+  public async list(): Promise<{ cronJobs: RigCronJob[] }> {
     const config = await this.configStore.ensure();
     return {
       cronJobs: [...config.cronJobs].toSorted((left, right) => left.name.localeCompare(right.name)),
     };
   }
 
-  async add(options: CronAddOptions): Promise<{ job: RigCronJob; workerPath: string }> {
-    const name = new CronJobNameClass(options.name);
-    const target = new CronCommandTargetClass(options.command);
-    const input = await this.inputReader.read(options);
+  public async add(params: CronAddOptions): Promise<{ job: RigCronJob; workerPath: string }> {
+    const name = new CronJobNameClass({ value: params.name }, {});
+    const target = new CronCommandTargetClass({ id: params.command }, {});
+    const input = await this.inputReader.read(params);
 
-    this.registrar.validate(options.schedule);
-    await this.validateCommand(target, input);
+    this.registrar.validate({ schedule: params.schedule });
+    await this.validateCommand({ target, input });
 
     await this.configStore.ensure();
     const job: RigCronJob = {
       name: name.value,
       command: target.id,
-      schedule: options.schedule,
+      schedule: params.schedule,
       ...(input === undefined ? {} : { input }),
     };
     const workerPath = this.paths.cronWorkerPath(name.value);
     const workerSource = this.workerScript.render({
       name: name.value,
-      homeDir: this.options.homeDir,
-      moduleUrl: options.moduleUrl,
+      homeDir: this.params.homeDir,
+      moduleUrl: params.moduleUrl,
     });
-    const snapshot = await this.transaction.snapshot(workerPath);
+    const snapshot = await this.transaction.snapshot({ workerPath });
     await this.transaction.replace({
       snapshot,
       workerPath,
@@ -378,11 +435,13 @@ export class RigCronServiceClass {
     return { job, workerPath };
   }
 
-  async remove(nameValue: string): Promise<{ name: string; removed: boolean; workerPath: string }> {
-    const name = new CronJobNameClass(nameValue);
+  public async remove(params: {
+    name: string;
+  }): Promise<{ name: string; removed: boolean; workerPath: string }> {
+    const name = new CronJobNameClass({ value: params.name }, {});
     await this.configStore.ensure();
     const workerPath = this.paths.cronWorkerPath(name.value);
-    const snapshot = await this.transaction.snapshot(workerPath);
+    const snapshot = await this.transaction.snapshot({ workerPath });
     const removed = await this.transaction.remove({
       snapshot,
       workerPath,
@@ -392,44 +451,51 @@ export class RigCronServiceClass {
     return { name: name.value, removed, workerPath };
   }
 
-  async run(nameValue: string): Promise<CronRunResult> {
-    const name = new CronJobNameClass(nameValue);
+  public async run(params: { name: string }): Promise<CronRunResult> {
+    const name = new CronJobNameClass({ value: params.name }, {});
     const config = await this.configStore.ensure();
     const job = config.cronJobs.find((candidate) => candidate.name === name.value);
     if (!job) throw new RigErrorClass("CRON_ERROR", `Cron job not found: ${name.value}`, { name });
 
-    const target = new CronCommandTargetClass(job.command);
-    const result = await new ToolRunnerClass(this.options).run(target.tool, target.command, {
-      ...this.options,
+    const target = new CronCommandTargetClass({ id: job.command }, {});
+    const result = await new ToolRunnerClass(this.params).run(target.tool, target.command, {
+      ...this.params,
       input: job.input === undefined ? undefined : JSON.stringify(job.input),
     });
 
     return { job, envelope: result.envelope, exitCode: result.exitCode };
   }
 
-  private async validateCommand(
-    target: CronCommandTargetClass,
-    input: unknown | undefined,
-  ): Promise<void> {
-    const result = await new ToolRunnerClass(this.options).run(target.tool, target.command, {
-      ...this.options,
-      input: input === undefined ? undefined : JSON.stringify(input),
-      dryRun: true,
-    });
+  private async validateCommand(params: {
+    target: CronCommandTargetClass;
+    input: unknown | undefined;
+  }): Promise<void> {
+    const result = await new ToolRunnerClass(this.params).run(
+      params.target.tool,
+      params.target.command,
+      {
+        ...this.params,
+        input: params.input === undefined ? undefined : JSON.stringify(params.input),
+        dryRun: true,
+      },
+    );
 
     if (result.exitCode !== 0) {
-      throw new RigErrorClass("CRON_ERROR", `Cron command validation failed: ${target.id}`, {
+      throw new RigErrorClass("CRON_ERROR", `Cron command validation failed: ${params.target.id}`, {
         envelope: result.envelope,
       });
     }
   }
 }
 
-export class RigCronWorkerClass {
-  constructor(private readonly options: ConfigOptions = {}) {}
+export class RigCronWorkerClass extends DomainClass<RigCronWorkerParams, RigCronWorkerDeps> {
+  public constructor(params: RigCronWorkerParams, deps: RigCronWorkerDeps) {
+    super(params, deps);
+  }
 
-  async scheduled(name: string, controller?: CronControllerLike): Promise<void> {
-    const result = await new RigCronServiceClass(this.options).run(name);
+  public async scheduled(params: { name: string; controller?: CronControllerLike }): Promise<void> {
+    const service = this.deps.service ?? new RigCronServiceClass(this.params, {});
+    const result = await service.run({ name: params.name });
     const envelope = result.envelope as Partial<SuccessEnvelope>;
     console.log(
       JSON.stringify(
@@ -437,9 +503,9 @@ export class RigCronWorkerClass {
           cron: {
             name: result.job.name,
             command: result.job.command,
-            schedule: controller?.cron ?? result.job.schedule,
-            scheduledTime: controller?.scheduledTime,
-            type: controller?.type,
+            schedule: params.controller?.cron ?? result.job.schedule,
+            scheduledTime: params.controller?.scheduledTime,
+            type: params.controller?.type,
           },
           result: envelope,
         },

@@ -13,6 +13,8 @@ export type RigE2ECommandParams = {
   timeoutMs?: number;
 };
 
+export type RigE2ERuntime = "bun" | "node";
+
 export type RigE2ECommandResult = {
   command: string[];
   cwd: string;
@@ -81,6 +83,7 @@ export class RigE2EHarnessClass {
   public readonly rigHomeDir: string;
   public readonly projectDir: string;
   public readonly cliPath: string;
+  public readonly runtime: RigE2ERuntime;
 
   public constructor(
     params: {
@@ -89,6 +92,7 @@ export class RigE2EHarnessClass {
       rigHomeDir: string;
       projectDir: string;
       cliPath: string;
+      runtime: RigE2ERuntime;
     },
     private readonly deps: RigE2EHarnessDeps,
   ) {
@@ -97,10 +101,11 @@ export class RigE2EHarnessClass {
     this.rigHomeDir = params.rigHomeDir;
     this.projectDir = params.projectDir;
     this.cliPath = params.cliPath;
+    this.runtime = params.runtime;
   }
 
   public async run(params: RigE2ECommandParams = {}): Promise<RigE2ECommandResult> {
-    const command = ["bun", this.cliPath, ...(params.args ?? [])];
+    const command = [this.runtime, this.cliPath, ...(params.args ?? [])];
     const cwd = params.cwd ?? this.projectDir;
     const startedAt = this.deps.now();
     const child = spawn(command[0]!, command.slice(1), {
@@ -204,7 +209,7 @@ export class RigE2EHarnessClass {
   private processEnv(): Record<string, string> {
     return Object.fromEntries(
       Object.entries(process.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
+        (entry): entry is [string, string] => entry[0] !== "FORCE_COLOR" && entry[1] !== undefined,
       ),
     );
   }
@@ -212,7 +217,7 @@ export class RigE2EHarnessClass {
 
 export class RigE2EHarnessFactoryClass {
   constructor(
-    private readonly params: { cliPath?: string } = {},
+    private readonly params: { cliPath?: string; runtime?: RigE2ERuntime } = {},
     private readonly deps: RigE2EHarnessDeps = { now: Date.now },
   ) {}
 
@@ -232,6 +237,7 @@ export class RigE2EHarnessFactoryClass {
       rigHomeDir: join(rootDir, "rig-home"),
       projectDir: join(rootDir, "project"),
       cliPath,
+      runtime: this.params.runtime ?? "node",
     };
     await Promise.all([
       mkdir(paths.homeDir, { recursive: true }),

@@ -15,5 +15,5 @@ export { RigCronWorkerClass, RigCronWorkerClass as RigCronWorker } from "./tools
 
 /* v8 ignore next 3 */
 if (isCliEntrypoint(import.meta.url)) {
-  await new CliCompositionRootClass({ metaUrl: import.meta.url, argv: process.argv }).run();
+  await new CliCompositionRootClass({ metaUrl: import.meta.url, argv: process.argv }, {}).run();
 }

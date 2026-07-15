@@ -570,7 +570,7 @@ describe("coverage support", () => {
 
     const bounded = await shell.exec(
       ["bun", "-e", "process.stdout.write('x'.repeat(5_000_000)); console.error('y'.repeat(100))"],
-      { maxOutputBytes: 64 },
+      { env: { FORCE_COLOR: undefined }, maxOutputBytes: 64 },
     );
     expect(bounded.stdout).toBe(`${"x".repeat(64)}\n[rig: output truncated]`);
     expect(bounded.stderr).toBe(`${"y".repeat(64)}\n[rig: output truncated]`);

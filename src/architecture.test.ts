@@ -51,6 +51,36 @@ describe("architecture", () => {
     expect(violations).toEqual([]);
   });
 
+  it("keeps migrated application classes on the DomainClass contract", async () => {
+    const migratedClasses = [
+      {
+        path: "src/application/cli/composition-root.ts",
+        names: ["CliCompositionRootClass"],
+      },
+      {
+        path: "src/application/cli/runtime-bootstrap.ts",
+        names: ["BunRuntimeBootstrapClass", "CliEntrypointClass"],
+      },
+      {
+        path: "src/cron/application/rig-cron.ts",
+        names: ["RigCronServiceClass", "RigCronWorkerClass"],
+      },
+    ];
+
+    const sourcesByEntry = await Promise.all(
+      migratedClasses.map(async (entry) => ({
+        entry,
+        source: await readFile(entry.path, "utf8"),
+      })),
+    );
+
+    for (const { entry, source } of sourcesByEntry) {
+      for (const name of entry.names) {
+        expect(source).toContain(`class ${name} extends DomainClass`);
+      }
+    }
+  });
+
   it("keeps persistence independent from CLI application modules", async () => {
     const persistenceFiles = (await sources.implementationFiles()).filter((entry) =>
       entry.startsWith("src/persistence/"),

@@ -434,25 +434,39 @@ describe("cli application", () => {
     );
     expect(bootstrap.resolveBunPath()).toBe(bunPath);
     expect(bootstrap.shouldBootstrap()).toBe(true);
-    expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig", "list"])).toBe(7);
+    expect(
+      bootstrap.run({
+        metaUrl: pathToFileURL(entrypoint).href,
+        argv: ["node", "rig", "list"],
+      }),
+    ).toBe(7);
     expect(bootstrap.autoInstallFlag()).toBe("--install=fallback");
     expect(calls[0]).toMatchObject({
       command: bunPath,
       args: ["--install=fallback", entrypoint, "list"],
       env: { RIG_BUN_BOOTSTRAPPED: "1" },
     });
-    expect(bootstrap.run(pathToFileURL(entrypoint).href, ["node", "rig"])).toBe(1);
+    expect(bootstrap.run({ metaUrl: pathToFileURL(entrypoint).href, argv: ["node", "rig"] })).toBe(
+      1,
+    );
     expect(
       new BunRuntimeBootstrapClass(
         { packageRoot: join(home, "missing") },
-        { spawn, env: {}, bunGlobal: () => undefined },
-      ).run(pathToFileURL(entrypoint).href, ["node", "rig"]),
+        {
+          spawn,
+          env: {},
+          bunGlobal: () => undefined,
+          resolvePackage: () => {
+            throw new Error("missing package");
+          },
+        },
+      ).run({ metaUrl: pathToFileURL(entrypoint).href, argv: ["node", "rig"] }),
     ).toBeUndefined();
     expect(
       new BunRuntimeBootstrapClass(
         { packageRoot: home },
         { spawn, env: { RIG_BUN_BOOTSTRAPPED: "1" }, bunGlobal: () => undefined },
-      ).run(pathToFileURL(entrypoint).href, ["node", "rig"]),
+      ).run({ metaUrl: pathToFileURL(entrypoint).href, argv: ["node", "rig"] }),
     ).toBeUndefined();
     expect(
       new BunRuntimeBootstrapClass(

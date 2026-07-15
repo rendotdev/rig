@@ -124,7 +124,7 @@ class InstalledDistributionClass {
   }
 
   public harnessFactory(): RigE2EHarnessFactoryClass {
-    return new RigE2EHarnessFactoryClass({ cliPath: this.entrypoint });
+    return new RigE2EHarnessFactoryClass({ cliPath: this.entrypoint, runtime: "node" });
   }
 
   public async cleanup(): Promise<void> {
@@ -163,7 +163,7 @@ const homes: RigE2EHarnessClass[] = [];
 
 async function createHarness(params: { cron?: boolean } = {}): Promise<RigE2EHarnessClass> {
   const factory = params.cron
-    ? new RigE2EHarnessFactoryClass({ cliPath: fixture.cronEntrypoint })
+    ? new RigE2EHarnessFactoryClass({ cliPath: fixture.cronEntrypoint, runtime: "bun" })
     : distribution.harnessFactory();
   const harness = await factory.create();
   homes.push(harness);
@@ -446,7 +446,7 @@ describe("installed Rig distribution and recovery", () => {
     const add = await rig.run({
       args: ["run", "documents.add", "title=First Note", "body=Body"],
     });
-    expect(add.exitCode).toBe(0);
+    expect(add.exitCode, `${add.stdout}\n${add.stderr}`).toBe(0);
     const indexPath = join(rig.rigHomeDir, "rig", "tools", "documents", "notes", ".index.sqlite");
     await writeFile(indexPath, "corrupted sqlite\n", "utf8");
     const recovered = await Promise.all(
