@@ -7,6 +7,7 @@ import { type ConfigOptions } from "../../config/config";
 import { RigPathsClass } from "../../config/paths";
 import { RigToolEntryFiles } from "../../registry/discover";
 import { ToolListServiceClass } from "../../tools/list";
+import { ToolApiMigrationServiceClass } from "../../tools/migration/tool-api-migration";
 
 export type AgentInstructionSyncOptions = ConfigOptions & {
   cwd?: string;
@@ -128,12 +129,14 @@ export class AgentInstructionSyncServiceClass {
   private readonly cwd: string;
   private readonly paths: RigPathsClass;
   private readonly listService: ToolListServiceClass;
+  private readonly migrationService: ToolApiMigrationServiceClass;
   private readonly fingerprint: AgentSyncFingerprintClass;
 
   constructor(options: AgentInstructionSyncOptions = {}) {
     this.cwd = resolve(options.cwd ?? process.cwd());
     this.paths = new RigPathsClass(options);
     this.listService = new ToolListServiceClass(options);
+    this.migrationService = new ToolApiMigrationServiceClass(options, {});
     this.fingerprint = new AgentSyncFingerprintClass({ paths: this.paths });
   }
 
@@ -151,13 +154,16 @@ export class AgentInstructionSyncServiceClass {
       };
     }
 
+    const migrationInstructions = this.migrationService.renderAgentInstructions({
+      report: await this.migrationService.inspect(),
+    });
     const updates = await Promise.all(
       targets.map(async (target) => {
         /* v8 ignore next 3 */
         if (target.scope === "visible" && !(await this.projectHasRegistry())) {
           return { ...target, changed: await this.removeManagedBlock(target) };
         }
-        const block = this.renderBlock(await this.renderToolList(target));
+        const block = this.renderBlock(await this.renderToolList(target), migrationInstructions);
         return {
           ...target,
           changed: await this.upsertManagedBlock(target, block),
@@ -237,12 +243,12 @@ export class AgentInstructionSyncServiceClass {
     return [...targets.values()].toSorted((left, right) => left.path.localeCompare(right.path));
   }
 
-  renderBlock(toolList: string): string {
+  renderBlock(toolList: string, migrationInstructions = ""): string {
     return `${StartMarker}
 
 ## Rig local tools
 
-${RigAgentInstructions}
+${RigAgentInstructions}${migrationInstructions ? `${migrationInstructions}\n\n` : ""}
 ### Available Rig tools
 
 \`\`\`text

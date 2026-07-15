@@ -126,10 +126,12 @@ CLI pipelines:
     title: "Creating Tools",
     content: `- Tools live at rig-tools/<name>/index.rig.ts
 - Create with \`rig create <name>\`
-- Export default a RigToolFactory: \`(rig) => rig.defineTool({...})\`
+- Export the factory directly: \`export default (rig: RigToolKit) => rig.defineTool({...})\`
+- Rig derives the tool name from its folder
+- Define \`commands\` as \`(command) => ({ ... })\` and each command with \`command({...})\`
+- \`rig.defineCommand({...})\` remains supported for v1 tools
 
 Definition keys:
-- \`name\` tool name (matches folder)
 - \`description\` one-line summary
 - \`env?\` Zod schema for secrets
 - \`setupDb?\` migration function for raw sqlite

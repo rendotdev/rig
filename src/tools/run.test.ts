@@ -275,7 +275,7 @@ describe("tool commands", () => {
       /^Tool: sample\nCommand: example\nRun: rig run sample\.example \[args\.\.\.\]/,
     );
     expect(commandIdHelp).not.toContain("```bash");
-    expect(help).toContain("Pass custom text");
+    expect(help).toContain("Run the example command");
     expect(help).toContain("rig run sample.example");
     expect(help).toContain("Input:");
     expect(help).toContain("Output:");

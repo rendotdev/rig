@@ -24,44 +24,46 @@ export class ToolDefinitionValidatorClass {
     if (!this.isRecord(value)) {
       throw new RigErrorClass("TOOL_INVALID", "Tool default export must be an object.");
     }
-    if (typeof value.name !== "string" || value.name.length === 0) {
+    const name =
+      typeof value.name === "string" && value.name.length > 0 ? value.name : expectedName;
+    if (!name) {
       throw new RigErrorClass("TOOL_INVALID", "Tool needs a name.", {
-        expected: "non-empty string",
+        expected: "non-empty string or a discovered tool folder",
       });
     }
 
-    this.validateToolName(value.name);
+    this.validateToolName(name);
 
-    if (expectedName && value.name !== expectedName) {
+    if (expectedName && name !== expectedName) {
       throw new RigErrorClass(
         "TOOL_INVALID",
-        `Tool name does not match its folder: ${value.name} should be ${expectedName}.`,
+        `Tool name does not match its folder: ${name} should be ${expectedName}.`,
         {
           expectedName,
-          actualName: value.name,
+          actualName: name,
         },
       );
     }
 
     if (typeof value.description !== "string" || value.description.length === 0) {
-      throw new RigErrorClass("TOOL_INVALID", `Tool ${value.name} needs a description.`, {
+      throw new RigErrorClass("TOOL_INVALID", `Tool ${name} needs a description.`, {
         expected: "non-empty string",
       });
     }
 
     if (value.setupDb !== undefined && typeof value.setupDb !== "function") {
-      throw new RigErrorClass("TOOL_INVALID", `Tool ${value.name} setupDb must be a function.`, {
+      throw new RigErrorClass("TOOL_INVALID", `Tool ${name} setupDb must be a function.`, {
         expected: "function",
       });
     }
 
     if (value.env !== undefined) {
-      this.validateSchema(value.env, "env", value.name);
+      this.validateSchema(value.env, "env", name);
     }
 
     if (value.collections !== undefined) {
       if (!this.isRecord(value.collections)) {
-        throw new RigErrorClass("TOOL_INVALID", `Tool ${value.name} needs a collections object.`, {
+        throw new RigErrorClass("TOOL_INVALID", `Tool ${name} needs a collections object.`, {
           expected: "object",
         });
       }
@@ -71,24 +73,21 @@ export class ToolDefinitionValidatorClass {
     }
 
     if (!this.isRecord(value.commands)) {
-      throw new RigErrorClass("TOOL_INVALID", `Tool ${value.name} needs a commands object.`, {
+      throw new RigErrorClass("TOOL_INVALID", `Tool ${name} needs a commands object.`, {
         expected: "object",
       });
     }
 
     const entries = Object.entries(value.commands);
     if (entries.length === 0) {
-      throw new RigErrorClass(
-        "TOOL_INVALID",
-        `Tool ${value.name} must define at least one command.`,
-      );
+      throw new RigErrorClass("TOOL_INVALID", `Tool ${name} must define at least one command.`);
     }
 
     for (const [commandName, command] of entries) {
-      this.validateCommand(commandName, command, value.name);
+      this.validateCommand(commandName, command, name);
     }
 
-    return value as ToolDefinition;
+    return (value.name === name ? value : { ...value, name }) as ToolDefinition;
   }
 
   private validateCommand(

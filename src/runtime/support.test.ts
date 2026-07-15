@@ -33,6 +33,7 @@ import { ToolCreatorClass } from "../tools/create";
 import { ToolHelpRendererClass, ToolHelpServiceClass } from "../tools/help";
 import { ToolInspectorClass } from "../tools/inspect";
 import { ToolDefinitionValidatorClass, ToolLoaderClass } from "../tools/loader";
+import { ToolApiMigrationServiceClass } from "../tools/migration/tool-api-migration";
 import { ToolRunnerClass } from "../tools/run";
 import { ToolRuntimeInstructionSyncServiceClass } from "../tools/runtime-instruction";
 import { schemaRenderer } from "../tools/schema";
@@ -106,8 +107,15 @@ describe("coverage support", () => {
 
     expect(service.renderPrefix()).toContain("rig.$");
     expect(service.renderPrefix()).toContain("context.cache.query");
+    expect(service.renderPrefix()).toContain("// rig:tool-api-version 2");
     expect(service.upsertPrefix("#!/usr/bin/env bun\nconsole.log(1);\n")).toMatch(
       /^#!\/usr\/bin\/env bun\n\/\/ rig:runtime-reference:start/,
+    );
+    expect(service.upsertPrefix("#!/usr/bin/env bun\nconsole.log(1);\n")).toContain(
+      "// rig:tool-api-version 1",
+    );
+    expect(service.upsertPrefix("// rig:tool-api-version 0\nconsole.log(1);\n")).toContain(
+      "// rig:tool-api-version 1",
     );
     expect(service.upsertPrefix("")).toContain("Rig tool runtime");
 
@@ -115,6 +123,7 @@ describe("coverage support", () => {
     expect(first.tools).toEqual([{ name: "sample", path: created.toolPath, changed: true }]);
     const synced = await readFile(created.toolPath, "utf8");
     expect(synced).toMatch(/^\/\/ rig:runtime-reference:start/);
+    expect(synced).toContain("// rig:tool-api-version 2");
     expect(synced).toContain("Rig tool runtime");
     expect(synced).toContain("Bun Shell");
 
@@ -672,6 +681,8 @@ describe("coverage support", () => {
     expect(runtimeTypes).toContain("cache: RigToolCache");
     expect(runtimeTypes).toContain("log: RigToolLogger");
     expect(runtimeTypes).toContain("shell: RigShell");
+    expect(runtimeTypes).toContain("collections: Collections");
+    expect(runtimeTypes).toContain("collections?: Collections");
     await writeFile(join(registry, "tsconfig.json"), "{}\n", "utf8");
     await support.ensure([registry]);
     expect(await readFile(join(registry, "tsconfig.json"), "utf8")).toBe("{}\n");
@@ -882,12 +893,19 @@ describe("coverage support", () => {
       commands: { echo: validCommand },
     };
     expect(validator.validateToolDefinition(validTool, "valid")).toBe(validTool);
+    expect(
+      validator.validateToolDefinition(
+        { description: "Derived name.", commands: { echo: validCommand } },
+        "derived",
+      ).name,
+    ).toBe("derived");
+    expect(() => validator.validateToolDefinition({}, undefined)).toThrow("Tool needs a name");
     expect(() => validator.validateToolName("")).toThrow("Invalid tool name");
     expect(() => validator.validateCommandName("")).toThrow("Invalid command name");
 
     const invalidDefinitions: Array<[unknown, string]> = [
       [null, "Tool default export must be an object"],
-      [{}, "Tool needs a name"],
+      [{}, "needs a description"],
       [{ name: "bad-name", description: "x", commands: {} }, "does not match its folder"],
       [{ name: "valid", description: "", commands: {} }, "needs a description"],
       [{ name: "valid", description: "x" }, "needs a commands object"],
@@ -1179,5 +1197,88 @@ describe("coverage support", () => {
         messageText: "bad config",
       }),
     ).toThrow("Unable to parse generated Rig tool tsconfig.");
+  });
+
+  test("type-checks v2 env and collection context from a plain command definition", async () => {
+    const home = await workspaces.create();
+    const source = `// rig:tool-api-version 2
+export default (rig: RigToolKit) => rig.defineTool({
+  description: "Type-check the complete v2 authoring contract.",
+  env: rig.z.object({ TOKEN: rig.z.string() }),
+  collections: {
+    notes: { schema: rig.z.object({ title: rig.z.string() }) },
+  },
+  commands: (command) => ({
+    add: command({
+      description: "Add a note.",
+      input: rig.z.object({ title: rig.z.string() }),
+      output: rig.z.object({ title: rig.z.string(), token: rig.z.string() }),
+      run: async ({ input, env, collections }) => {
+        const entry = await collections.notes.create({ data: { title: input.title } });
+        return { title: entry.data.title, token: env.TOKEN };
+      },
+    }),
+  }),
+});
+`;
+    await writeTool(home, "contract", source);
+
+    const typecheck = await new ToolTypecheckServiceClass({ homeDir: home }).typecheck("contract");
+    expect(typecheck).toMatchObject({ ok: true, exitCode: 0 });
+    const loaded = await new ToolLoaderClass({ homeDir: home }).loadDefinition("contract");
+    expect(loaded.definition.name).toBe("contract");
+  });
+
+  test("supports injected tool API migration collaborators", async () => {
+    const home = await workspaces.create();
+    await new ToolCreatorClass({ homeDir: home }).create("current");
+    let source = "// rig:tool-api-version 2\n";
+    const service = new ToolApiMigrationServiceClass(
+      { homeDir: home },
+      {
+        discovery: new ToolDiscoveryServiceClass({ homeDir: home }),
+        readSource: async () => source,
+      },
+    );
+
+    await expect(service.inspect({ visibleFromPath: home })).resolves.toMatchObject({
+      ready: true,
+      migrations: [],
+      unsupported: [],
+    });
+
+    source = "// rig:tool-api-version 999999999999999999999999\n";
+    await expect(service.inspect()).resolves.toMatchObject({
+      ready: false,
+      migrations: [{ fromVersion: 1, toVersion: 2 }],
+    });
+
+    expect(
+      service.renderAgentInstructions({
+        report: {
+          currentVersion: 2,
+          ready: false,
+          migrations: [],
+          unsupported: [{ name: "future", path: "/future", fromVersion: 3, toVersion: 2 }],
+        },
+      }),
+    ).toContain("newer API than this Rig installation supports");
+
+    const bunDiscovery = new ToolDiscoveryServiceClass({ homeDir: home });
+    vi.spyOn(bunDiscovery, "discover").mockResolvedValue([
+      {
+        name: "bun-source",
+        registryKind: "base",
+        registryPath: home,
+        toolDir: home,
+        toolPath: join(home, "index.rig.ts"),
+      },
+    ]);
+    vi.stubGlobal("Bun", {
+      file: () => ({ text: async () => "// rig:tool-api-version 2\n" }),
+    });
+    await expect(
+      new ToolApiMigrationServiceClass({ homeDir: home }, { discovery: bunDiscovery }).inspect(),
+    ).resolves.toMatchObject({ ready: true });
   });
 });
