@@ -673,6 +673,39 @@ export default (rig) => rig.defineTool({
     expect(JSON.stringify(dryRun.envelope)).not.toContain("secret");
   });
 
+  test("renders metadata without loading required tool environment values", async () => {
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "metadata-env");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(
+      join(toolDir, "index.rig.ts"),
+      `export default (rig) => rig.defineTool({
+  name: "metadata-env",
+  description: "Metadata without env values.",
+  env: rig.z.object({ API_TOKEN: rig.z.string() }),
+  commands: {
+    read: rig.defineCommand({
+      description: "Read required env.",
+      input: rig.z.object({}),
+      output: rig.z.string(),
+      run: (context) => context.env.API_TOKEN,
+    }),
+  },
+});\n`,
+      "utf8",
+    );
+
+    expect((await new ToolListServiceClass({ homeDir: home }).list()).tools[0]?.name).toBe(
+      "metadata-env",
+    );
+    expect(await new ToolHelpServiceClass({ homeDir: home }).render("metadata-env")).toContain(
+      "# metadata-env",
+    );
+    expect(await new ToolInspectorClass({ homeDir: home }).inspect("metadata-env")).toMatchObject({
+      name: "metadata-env",
+    });
+  });
+
   test("returns tool env load errors as envelopes", async () => {
     const cases = [
       {
@@ -835,7 +868,7 @@ export default (rig) => rig.defineTool({
     expect(FakeSqliteDatabase.store(dbPath)?.closeRuns).toBe(2);
   });
 
-  test("closes earlier resources when collection setup fails", async () => {
+  test("skips collection initialization when a command does not use collections", async () => {
     new FakeSqliteEnvironment().install();
     const home = await homes.create();
     const toolDir = join(home, "rig", "tools", "partial-setup");
@@ -866,7 +899,8 @@ export default (rig) => rig.defineTool({
       homeDir: home,
     });
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.envelope).toMatchObject({ data: { ok: true } });
     expect(FakeSqliteDatabase.store(dbPath)?.closeRuns).toBe(1);
   });
 

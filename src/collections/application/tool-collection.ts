@@ -421,6 +421,31 @@ class SqliteCollectionIndexClass implements CollectionIndexInterface {
   }
 
   private validate(): void {
+    try {
+      this.db!.query(
+        "SELECT id, data_json, body, created_at, updated_at, file_mtime FROM docs LIMIT 0",
+      ).all();
+      this.db!.query(
+        "SELECT id, mtime_ms, ctime_ms, size, status FROM collection_files LIMIT 0",
+      ).all();
+      this.db!.query("SELECT rowid, id, data_json, body FROM docs_fts LIMIT 0").all();
+      this.validateIntegrityIfDue();
+    } catch (error) {
+      if (error instanceof CollectionIndexCorruptionErrorClass) throw error;
+      throw new CollectionIndexCorruptionErrorClass(
+        `Collection index schema is unusable: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
+  private validateIntegrityIfDue(): void {
+    const checkIntervalMs = 24 * 60 * 60 * 1000;
+    const checked = this.db!.query(
+      "SELECT checked_at FROM collection_health WHERE key = 'integrity'",
+    ).get() as { checked_at: number } | null;
+    if (checked && Date.now() - checked.checked_at < checkIntervalMs) return;
+
     const integrityRows = this.db!.query("PRAGMA quick_check;").all() as Array<
       Record<string, unknown>
     >;
@@ -430,21 +455,11 @@ class SqliteCollectionIndexClass implements CollectionIndexInterface {
         `Collection index integrity check failed: ${integrityResults.join(", ")}`,
       );
     }
-
-    try {
-      this.db!.query(
-        "SELECT id, data_json, body, created_at, updated_at, file_mtime FROM docs LIMIT 0",
-      ).all();
-      this.db!.query(
-        "SELECT id, mtime_ms, ctime_ms, size, status FROM collection_files LIMIT 0",
-      ).all();
-      this.db!.query("SELECT rowid, id, data_json, body FROM docs_fts LIMIT 0").all();
-    } catch (error) {
-      throw new CollectionIndexCorruptionErrorClass(
-        `Collection index schema is unusable: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
-    }
+    this.db!.query(
+      `INSERT INTO collection_health (key, checked_at)
+         VALUES ('integrity', $checkedAt)
+         ON CONFLICT(key) DO UPDATE SET checked_at = excluded.checked_at`,
+    ).run({ checkedAt: Date.now() });
   }
 
   private isRecoverable(error: unknown): boolean {
@@ -480,6 +495,12 @@ class SqliteCollectionIndexClass implements CollectionIndexInterface {
         ctime_ms REAL NOT NULL,
         size INTEGER NOT NULL,
         status TEXT NOT NULL CHECK(status IN ('indexed', 'invalid'))
+      );
+    `);
+    this.db!.run(`
+      CREATE TABLE IF NOT EXISTS collection_health (
+        key TEXT PRIMARY KEY,
+        checked_at INTEGER NOT NULL
       );
     `);
     this.db!.run(`
@@ -986,36 +1007,20 @@ export class ToolCollectionServiceClass {
     if (!definitions || Object.keys(definitions).length === 0) return undefined;
 
     const toolDir = dirname(tool.path);
-    const handles: Record<string, CollectionHandle<any>> = {};
-
-    const results = await Promise.allSettled(
-      Object.entries(definitions).map(async ([name, def]) => {
+    return Object.fromEntries(
+      Object.entries(definitions).map(([name, def]) => {
         const collectionName = new CollectionNameClass(name);
         const collectionPath = join(toolDir, collectionName.value);
         const handle = this.handleFactory.create(collectionName.value, collectionPath, def ?? {});
-        try {
-          await handle.init();
-        } catch (error) {
-          handle.close();
-          throw error;
-        }
-        handles[name] = handle;
+        return [name, new LazyCollectionHandleClass(handle)];
       }),
     );
-
-    const failure = results.find((result) => result.status === "rejected");
-    if (failure?.status === "rejected") {
-      this.close(handles);
-      throw failure.reason;
-    }
-
-    return handles;
   }
 
   close(handles: Record<string, CollectionHandle<any>> | undefined): void {
     if (!handles) return;
     for (const handle of Object.values(handles)) {
-      (handle as CollectionHandleImplClass<any>).close();
+      (handle as LazyCollectionHandleClass<any>).close();
     }
   }
 }
@@ -1027,6 +1032,93 @@ export type ManagedCollectionHandle = CollectionHandle<any> & {
 
 export interface CollectionHandleFactory {
   create(name: string, path: string, definition: CollectionDefinition): ManagedCollectionHandle;
+}
+
+export class LazyCollectionHandleClass<T = Record<string, unknown>> implements CollectionHandle<T> {
+  public readonly name: string;
+  public readonly path: string;
+  private initialization?: Promise<ManagedCollectionHandle>;
+  private initializedHandle?: ManagedCollectionHandle;
+
+  public constructor(private readonly handle: ManagedCollectionHandle) {
+    this.name = handle.name;
+    this.path = handle.path;
+  }
+
+  public async create(entry: { id?: string; data: T; body?: string }): Promise<CollectionEntry<T>> {
+    return (await this.resource()).create(entry) as Promise<CollectionEntry<T>>;
+  }
+
+  public async getEntry(id: string): Promise<CollectionEntry<T> | null> {
+    return (await this.resource()).getEntry(id) as Promise<CollectionEntry<T> | null>;
+  }
+
+  public async update(
+    id: string,
+    patch: { data?: Partial<T>; body?: string },
+  ): Promise<CollectionEntry<T>> {
+    return (await this.resource()).update(id, patch) as Promise<CollectionEntry<T>>;
+  }
+
+  public async upsert(entry: {
+    id: string;
+    data: T;
+    body?: string;
+  }): Promise<{ id: string; created: boolean }> {
+    return (await this.resource()).upsert(entry);
+  }
+
+  public async remove(id: string): Promise<boolean> {
+    return (await this.resource()).remove(id);
+  }
+
+  public async list(opts?: ListOptions): Promise<{ entries: CollectionEntry<T>[]; total: number }> {
+    return (await this.resource()).list(opts) as Promise<{
+      entries: CollectionEntry<T>[];
+      total: number;
+    }>;
+  }
+
+  public async search(
+    query: string,
+    opts?: { limit?: number },
+  ): Promise<{ entries: SearchResult<T>[] }> {
+    return (await this.resource()).search(query, opts) as Promise<{ entries: SearchResult<T>[] }>;
+  }
+
+  public async count(where?: Record<string, unknown>): Promise<number> {
+    return (await this.resource()).count(where);
+  }
+
+  public async getCollection(
+    filter?: (entry: CollectionEntry<T>) => boolean,
+  ): Promise<CollectionEntry<T>[]> {
+    return (await this.resource()).getCollection(filter) as Promise<CollectionEntry<T>[]>;
+  }
+
+  public async clear(): Promise<void> {
+    return (await this.resource()).clear();
+  }
+
+  public close(): void {
+    this.initializedHandle?.close();
+  }
+
+  private resource(): Promise<ManagedCollectionHandle> {
+    this.initialization ??= this.initialize();
+    return this.initialization;
+  }
+
+  private async initialize(): Promise<ManagedCollectionHandle> {
+    try {
+      await this.handle.init();
+      this.initializedHandle = this.handle;
+      return this.handle;
+    } catch (error) {
+      this.handle.close();
+      throw error;
+    }
+  }
 }
 
 export class CollectionHandleFactoryClass implements CollectionHandleFactory {

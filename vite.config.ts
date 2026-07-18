@@ -131,7 +131,7 @@ export default defineConfig({
       neverBundle: ["ink", "react", "typescript", /^bun:/],
       onlyBundle: false,
     },
-    entry: { rig: "src/cli.ts" },
+    entry: { bin: "src/bin.ts", rig: "src/cli.ts" },
     format: "esm",
     outDir: "dist",
     platform: "node",

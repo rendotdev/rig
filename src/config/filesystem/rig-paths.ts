@@ -75,6 +75,10 @@ export class RigPathsClass {
     return join(this.rigDir, "update-check.json");
   }
 
+  get toolMetadataCachePath(): string {
+    return join(this.rigDir, "tool-metadata.json");
+  }
+
   get migrationPromptStatePath(): string {
     return join(this.rigDir, "migration-prompts.json");
   }

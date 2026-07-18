@@ -1,9 +1,13 @@
+import { readFile, stat } from "node:fs/promises";
 import type { ConfigOptions } from "../../config/config";
+import { AtomicFileWriterClass } from "../../config/file-lock";
+import { RigPathsClass } from "../../config/paths";
+import { ToolDiscoveryServiceClass, type DiscoveredTool } from "../../registry/discover";
 import type { CollectionDefinition } from "../collection";
-import { ToolDiscoveryServiceClass } from "../../registry/discover";
+import { CurrentRigToolApiVersion } from "../domain/tool-api";
+import { ToolLoaderClass, type LoadedToolDefinition } from "../loader";
 import { schemaRenderer } from "../schema";
-import { ToolLoaderClass } from "../loader";
-import { commandIds, type CommandDefinition } from "../types";
+import { commandIds, type CommandDefinition, type ToolExample } from "../types";
 
 export type ToolListOptions = {
   visibleFromPath?: string;
@@ -106,6 +110,171 @@ export class CommandRunExampleRendererClass {
   }
 }
 
+export type ToolCommandMetadata = {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+  outputSchema: unknown;
+  examples: ToolExample[];
+  runExample: string;
+};
+
+export type ToolMetadata = {
+  name: string;
+  description: string;
+  commands: ToolCommandMetadata[];
+  collections: ListedCollection[];
+};
+
+type ToolMetadataCacheEntry = {
+  modifiedAtMs: number;
+  changedAtMs: number;
+  size: number;
+  metadata: ToolMetadata;
+};
+
+type ToolMetadataCache = {
+  version: 1;
+  toolApiVersion: number;
+  entries: Record<string, ToolMetadataCacheEntry>;
+};
+
+export class ToolMetadataCacheClass {
+  private readonly paths: RigPathsClass;
+  private readonly loader: ToolLoaderClass;
+  private readonly writer = new AtomicFileWriterClass();
+  private readonly exampleRenderer = new CommandRunExampleRendererClass();
+
+  public constructor(options: ConfigOptions = {}) {
+    this.paths = new RigPathsClass(options);
+    this.loader = new ToolLoaderClass(options);
+  }
+
+  public async load(
+    entries: DiscoveredTool[],
+    options: { prune?: boolean } = {},
+  ): Promise<ToolMetadata[]> {
+    const current = await this.read();
+    const nextEntries: Record<string, ToolMetadataCacheEntry> =
+      options.prune === false ? { ...current.entries } : {};
+    let changed = false;
+    const metadata = await Promise.all(
+      entries.map(async (entry) => {
+        const status = await stat(entry.toolPath);
+        const cached = current.entries[entry.toolPath];
+        if (
+          cached?.modifiedAtMs === status.mtimeMs &&
+          cached.changedAtMs === status.ctimeMs &&
+          cached.size === status.size &&
+          this.isMetadata(cached.metadata)
+        ) {
+          nextEntries[entry.toolPath] = cached;
+          return cached.metadata;
+        }
+
+        changed = true;
+        const loaded = await this.loader.loadDefinitionDiscovered(entry);
+        const value = this.metadata(loaded);
+        nextEntries[entry.toolPath] = {
+          modifiedAtMs: status.mtimeMs,
+          changedAtMs: status.ctimeMs,
+          size: status.size,
+          metadata: value,
+        };
+        return value;
+      }),
+    );
+    if (
+      options.prune !== false &&
+      Object.keys(current.entries).some((path) => nextEntries[path] === undefined)
+    ) {
+      changed = true;
+    }
+    if (changed)
+      await this.write({
+        version: 1,
+        toolApiVersion: CurrentRigToolApiVersion,
+        entries: nextEntries,
+      });
+    return metadata;
+  }
+
+  private metadata(loaded: LoadedToolDefinition): ToolMetadata {
+    return {
+      name: loaded.definition.name,
+      description: loaded.definition.description,
+      commands: Object.entries(loaded.definition.commands).map(([name, command]) => ({
+        name,
+        description: command.description,
+        inputSchema: schemaRenderer.toJsonSchema(command.input),
+        outputSchema: schemaRenderer.toJsonSchema(command.output),
+        examples: command.examples ?? [],
+        runExample: this.exampleRenderer.render(loaded.definition.name, name, command),
+      })),
+      collections: this.collections(loaded.definition),
+    };
+  }
+
+  private collections(
+    definition: Record<string, unknown> & {
+      collections?: Record<string, CollectionDefinition | undefined>;
+    },
+  ): ListedCollection[] {
+    const collections = definition.collections;
+    if (!collections) return [];
+    return Object.entries(collections).map(([name, value]) => ({
+      name,
+      hasSchema: Boolean(value?.schema),
+    }));
+  }
+
+  private async read(): Promise<ToolMetadataCache> {
+    try {
+      /* v8 ignore next 3 */
+      const value =
+        typeof Bun !== "undefined"
+          ? await Bun.file(this.paths.toolMetadataCachePath).json()
+          : JSON.parse(await readFile(this.paths.toolMetadataCachePath, "utf8"));
+      if (!this.isRecord(value) || value.version !== 1) return this.empty();
+      if (value.toolApiVersion !== CurrentRigToolApiVersion || !this.isRecord(value.entries)) {
+        return this.empty();
+      }
+      return value as ToolMetadataCache;
+    } catch {
+      return this.empty();
+    }
+  }
+
+  private async write(cache: ToolMetadataCache): Promise<void> {
+    try {
+      await this.writer.write(
+        this.paths.toolMetadataCachePath,
+        `${JSON.stringify(cache, null, 2)}\n`,
+      );
+    } catch {
+      // Metadata caching should never block discovery commands.
+    }
+  }
+
+  private empty(): ToolMetadataCache {
+    return { version: 1, toolApiVersion: CurrentRigToolApiVersion, entries: {} };
+  }
+
+  private isMetadata(value: unknown): value is ToolMetadata {
+    return (
+      this.isRecord(value) &&
+      typeof value.name === "string" &&
+      typeof value.description === "string" &&
+      Array.isArray(value.commands) &&
+      Array.isArray(value.collections)
+    );
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+}
+
 class ToolListPlainTextFormatterClass {
   description(value: string): string {
     return value.replace(/\s+/g, " ").trim();
@@ -156,39 +325,35 @@ class ToolListPlainRendererClass {
 
 export class ToolListServiceClass {
   private readonly discovery: ToolDiscoveryServiceClass;
-  private readonly loader: ToolLoaderClass;
-  private readonly exampleRenderer = new CommandRunExampleRendererClass();
+  private readonly metadataCache: ToolMetadataCacheClass;
   private readonly plainRenderer = new ToolListPlainRendererClass();
 
   constructor(options: ConfigOptions = {}) {
     this.discovery = new ToolDiscoveryServiceClass(options);
-    this.loader = new ToolLoaderClass(options);
+    this.metadataCache = new ToolMetadataCacheClass(options);
   }
 
   async list(options: ToolListOptions = {}): Promise<ToolListData> {
     const discovered = await this.discovery.discover({ visibleFromPath: options.visibleFromPath });
-    const tools = await Promise.all(
-      discovered.map(async (entry) => {
-        const loaded = await this.loader.loadDiscovered(entry);
-        const commands = Object.entries(loaded.definition.commands).map(([name, command]) => ({
-          name,
-          id: commandIds.from(loaded.definition.name, name),
+    const metadata = await this.metadataCache.load(discovered);
+    const tools = discovered.map((entry, index) => {
+      const tool = metadata[index]!;
+      return {
+        name: tool.name,
+        description: tool.description,
+        registryKind: entry.registryKind,
+        registryPath: entry.registryPath,
+        toolPath: entry.toolPath,
+        commands: tool.commands.map((command) => ({
+          name: command.name,
+          id: commandIds.from(tool.name, command.name),
           description: command.description,
-          runExample: this.exampleRenderer.render(loaded.definition.name, name, command),
-          helpExample: `rig help ${commandIds.from(loaded.definition.name, name)}`,
-        }));
-        const collections = this.listCollections(loaded.definition);
-        return {
-          name: loaded.definition.name,
-          description: loaded.definition.description,
-          registryKind: entry.registryKind,
-          registryPath: entry.registryPath,
-          toolPath: entry.toolPath,
-          commands,
-          collections,
-        };
-      }),
-    );
+          runExample: command.runExample,
+          helpExample: `rig help ${commandIds.from(tool.name, command.name)}`,
+        })),
+        collections: tool.collections,
+      };
+    });
 
     return { tools, visibleFromPath: options.visibleFromPath };
   }
@@ -196,19 +361,4 @@ export class ToolListServiceClass {
   renderPlain(data: ToolListData): string {
     return this.plainRenderer.render(data);
   }
-
-  /* v8 ignore start */
-  private listCollections(
-    definition: Record<string, unknown> & {
-      collections?: Record<string, CollectionDefinition | undefined>;
-    },
-  ): ListedCollection[] {
-    const collections = definition.collections;
-    if (!collections) return [];
-    return Object.entries(collections).map(([name, def]) => ({
-      name,
-      hasSchema: Boolean(def?.schema),
-    }));
-  }
-  /* v8 ignore stop */
 }

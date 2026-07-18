@@ -89,6 +89,6 @@ describe("dev link", () => {
     expect(linked.pointsToCurrentRepo).toBe(true);
     expect(shim).toContain("@echo off");
     expect(shim).toContain('set "RIG_DEV_REPO=');
-    expect(shim).toContain('run "%RIG_DEV_REPO%\\src\\cli.ts" %*');
+    expect(shim).toContain('run "%RIG_DEV_REPO%\\src\\bin.ts" %*');
   });
 });

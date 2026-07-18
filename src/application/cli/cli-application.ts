@@ -3,7 +3,6 @@ import type { Command } from "commander";
 import type { RigDirectoryMigrationResult } from "../../config/migration";
 import type { PathOptions } from "../../config/paths";
 import { rigErrors } from "../../errors/RigError";
-import { RigLoggerFactoryClass } from "../../runtime/logger";
 import { rigPackageRoot } from "../../runtime/package-root";
 import { commandTargets } from "../../tools/identifiers";
 import { RunPipelineContextServiceClass } from "./pipeline-context";
@@ -532,6 +531,7 @@ export class CliApplicationClass {
     const registries = configStore.registryEntries(config);
     const currentVersion = this.version();
 
+    const { RigLoggerFactoryClass } = await import("../../runtime/logger");
     new RigLoggerFactoryClass(options)
       .app("cli")
       .info({ version: currentVersion, tools: tools.length }, "Default status rendered.");
@@ -590,6 +590,7 @@ export class CliApplicationClass {
     const registries = configStore.registryEntries(config);
     const tools = await new ToolDiscoveryServiceClass(options).discover();
 
+    const { RigLoggerFactoryClass } = await import("../../runtime/logger");
     new RigLoggerFactoryClass(options)
       .app("doctor")
       .info({ registries: registries.length, tools: tools.length }, "Doctor check completed.");

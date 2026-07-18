@@ -162,6 +162,7 @@ describe("rig logger", () => {
     })
       .app("second")
       .info("Second factory line.");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
 
     const entries = (await readdir(logDir)).toSorted();
     expect(entries).not.toContain("rig-old.log");
@@ -206,15 +207,17 @@ describe("rig logger", () => {
     );
 
     const fallbackHome = await workspaces.create();
-    new RigLoggerFactoryClass({
+    const fallbackLogger = new RigLoggerFactoryClass({
       homeDir: fallbackHome,
       env: {
         RIG_LOG_MAX_BYTES: "not-a-number",
         RIG_LOG_RETENTION_DAYS: "not-a-number",
       } as NodeJS.ProcessEnv,
-    })
-      .app("fallback")
-      .info("Fallback configured line.");
+    }).app("fallback");
+    fallbackLogger.info("Fallback configured line.");
+    fallbackLogger.info("Second buffered line.");
+    fallbackLogger.info("Third buffered line.");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     expect(await readFile(join(fallbackHome, "rig", ".logs", "rig.log"), "utf8")).toContain(
       "Fallback configured line.",
     );

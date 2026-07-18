@@ -172,24 +172,53 @@ class RollingLogFileDestinationClass extends Writable {
     callback: (error?: Error | null) => void,
   ): void {
     try {
-      const buffer = Buffer.from(chunk);
-      this.rotateIfNeeded(buffer.byteLength);
-      appendFileSync(this.activePath(), buffer);
-      this.activeSize += buffer.byteLength;
-      callback();
+      this.appendBuffers([Buffer.from(chunk)]);
+      queueMicrotask(callback);
     } catch (error) {
       /* v8 ignore next */
       callback(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
-  private rotateIfNeeded(nextBytes: number): void {
-    const observedSize = this.fileSize(this.activePath());
-    this.activeSize = observedSize;
-    if (observedSize === 0 || observedSize + nextBytes <= this.options.maxFileSizeBytes) {
-      return;
+  override _writev(
+    chunks: Array<{ chunk: Buffer | string; encoding: BufferEncoding }>,
+    callback: (error?: Error | null) => void,
+  ): void {
+    try {
+      this.appendBuffers(chunks.map((entry) => Buffer.from(entry.chunk)));
+      queueMicrotask(callback);
+    } catch (error) {
+      /* v8 ignore next */
+      callback(error instanceof Error ? error : new Error(String(error)));
     }
+  }
 
+  private appendBuffers(buffers: Buffer[]): void {
+    let pending: Buffer[] = [];
+    let pendingBytes = 0;
+    const flush = () => {
+      if (pendingBytes === 0) return;
+      appendFileSync(
+        this.activePath(),
+        pending.length === 1 ? pending[0]! : Buffer.concat(pending, pendingBytes),
+      );
+      this.activeSize += pendingBytes;
+      pending = [];
+      pendingBytes = 0;
+    };
+
+    for (const buffer of buffers) {
+      if (this.activeSize + pendingBytes + buffer.byteLength > this.options.maxFileSizeBytes) {
+        flush();
+        this.rotateIfNeeded(buffer.byteLength);
+      }
+      pending.push(buffer);
+      pendingBytes += buffer.byteLength;
+    }
+    flush();
+  }
+
+  private rotateIfNeeded(nextBytes: number): void {
     this.rotationLock.run(() => {
       const lockedSize = this.fileSize(this.activePath());
       if (lockedSize === 0 || lockedSize + nextBytes <= this.options.maxFileSizeBytes) {

@@ -277,7 +277,21 @@ class DryRunPresenterClass {
 }
 
 class ToolExecutionSessionClass {
+  private readonly commands = new Map<
+    string,
+    Awaited<ReturnType<ToolLoaderClass["loadCommand"]>>
+  >();
+
   constructor(readonly loader: ToolLoaderClass) {}
+
+  async loadCommand(toolName: string, commandName: string) {
+    const id = commandIds.from(toolName, commandName);
+    const cached = this.commands.get(id);
+    if (cached) return cached;
+    const loaded = await this.loader.loadCommand(toolName, commandName);
+    this.commands.set(id, loaded);
+    return loaded;
+  }
 }
 
 export class ToolRunnerClass {
@@ -315,7 +329,7 @@ export class ToolRunnerClass {
     let collectionHandles: Record<string, CollectionHandle<any>> | undefined;
     const log = this.loggerFactory.tool(toolName, commandName);
     try {
-      const { tool, command } = await session.loader.loadCommand(toolName, commandName);
+      const { tool, command } = await session.loadCommand(toolName, commandName);
       const input = await this.inputReader.read(command, options);
 
       const inputResult = command.input.safeParse(input.value);

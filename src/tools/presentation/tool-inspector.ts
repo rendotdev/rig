@@ -14,7 +14,7 @@ export class ToolInspectorClass {
 
   async inspect(toolName: string, commandName?: string) {
     const target = this.inspectTarget(toolName, commandName);
-    const loaded = await this.loader.load(target.toolName);
+    const loaded = await this.loader.loadDefinition(target.toolName);
     const definition = loaded.definition;
 
     if (target.commandName) {

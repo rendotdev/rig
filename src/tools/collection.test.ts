@@ -788,6 +788,7 @@ console.log(JSON.stringify({ before, after }));`,
 
 class FaultInjectingCollectionHandleClass implements ManagedCollectionHandle {
   readonly path = "/tmp/test";
+  readonly calls: string[] = [];
   initialized = false;
   closeRuns = 0;
 
@@ -805,35 +806,44 @@ class FaultInjectingCollectionHandleClass implements ManagedCollectionHandle {
     this.closeRuns++;
   }
 
-  create(): never {
-    throw new Error("unused");
+  async create(): Promise<never> {
+    this.calls.push("create");
+    return { id: "created" } as never;
   }
-  getEntry(): never {
-    throw new Error("unused");
+  async getEntry(): Promise<never> {
+    this.calls.push("getEntry");
+    return null as never;
   }
-  update(): never {
-    throw new Error("unused");
+  async update(): Promise<never> {
+    this.calls.push("update");
+    return { id: "updated" } as never;
   }
-  upsert(): never {
-    throw new Error("unused");
+  async upsert(): Promise<never> {
+    this.calls.push("upsert");
+    return { id: "upserted", created: true } as never;
   }
-  remove(): never {
-    throw new Error("unused");
+  async remove(): Promise<boolean> {
+    this.calls.push("remove");
+    return true;
   }
-  list(): never {
-    throw new Error("unused");
+  async list(): Promise<never> {
+    this.calls.push("list");
+    return { entries: [], total: 0 } as never;
   }
-  search(): never {
-    throw new Error("unused");
+  async search(): Promise<never> {
+    this.calls.push("search");
+    return { entries: [] } as never;
   }
-  count(): never {
-    throw new Error("unused");
+  async count(): Promise<number> {
+    this.calls.push("count");
+    return 1;
   }
-  getCollection(): never {
-    throw new Error("unused");
+  async getCollection(): Promise<never> {
+    this.calls.push("getCollection");
+    return [] as never;
   }
-  clear(): never {
-    throw new Error("unused");
+  async clear(): Promise<void> {
+    this.calls.push("clear");
   }
 }
 
@@ -851,38 +861,58 @@ class FaultInjectingCollectionHandleFactoryClass implements CollectionHandleFact
 }
 
 describe("ToolCollectionServiceClass cleanup", () => {
-  it("closes the failing handle and initialized siblings after partial setup", async () => {
+  it("initializes collections on first use and closes failures", async () => {
     const factory = new FaultInjectingCollectionHandleFactoryClass();
     const service = new ToolCollectionServiceClass(factory);
+    const handles = await service.setup({
+      path: "/tmp/tool/index.rig.ts",
+      definition: { collections: { ready: {}, broken: {}, unused: undefined } },
+    } as never);
 
-    await expect(
-      service.setup({
-        path: "/tmp/tool/index.rig.ts",
-        definition: { collections: { ready: {}, broken: {}, alsoReady: {} } },
-      } as never),
-    ).rejects.toThrow("collection initialization failed");
+    expect(factory.handles.every((handle) => !handle.initialized)).toBe(true);
+    await expect(handles?.broken?.count()).rejects.toThrow("collection initialization failed");
+    expect(factory.handles.find((handle) => handle.name === "broken")?.closeRuns).toBe(1);
 
+    const ready = handles!.ready!;
+    await ready.create({ data: {} });
+    await ready.getEntry("created");
+    await ready.update("created", { body: "updated" });
+    await ready.upsert({ id: "upserted", data: {} });
+    await ready.remove("created");
+    await ready.list({ limit: 1 });
+    await ready.search("query", { limit: 1 });
+    expect(await ready.count({ status: "ready" })).toBe(1);
+    await ready.getCollection(() => true);
+    await ready.clear();
+
+    expect(factory.handles.find((handle) => handle.name === "ready")?.calls).toEqual([
+      "create",
+      "getEntry",
+      "update",
+      "upsert",
+      "remove",
+      "list",
+      "search",
+      "count",
+      "getCollection",
+      "clear",
+    ]);
+    service.close(handles);
     expect(
       factory.handles.map((handle) => [handle.name, handle.initialized, handle.closeRuns]),
     ).toEqual([
       ["ready", true, 1],
       ["broken", false, 1],
-      ["alsoReady", true, 1],
+      ["unused", false, 0],
     ]);
   });
 
-  it("returns every initialized handle after successful setup", async () => {
-    const factory = new FaultInjectingCollectionHandleFactoryClass();
-    const service = new ToolCollectionServiceClass(factory);
-
-    const handles = await service.setup({
-      path: "/tmp/tool/index.rig.ts",
-      definition: { collections: { ready: {}, optional: undefined } },
-    } as never);
-
-    expect(Object.keys(handles ?? {})).toEqual(["ready", "optional"]);
-    service.close(handles);
-    expect(factory.handles.every((handle) => handle.closeRuns === 1)).toBe(true);
+  it("returns undefined for tools without collections", async () => {
+    const service = new ToolCollectionServiceClass();
+    expect(
+      await service.setup({ path: "/tmp/tool/index.rig.ts", definition: {} } as never),
+    ).toBeUndefined();
+    service.close(undefined);
   });
 });
 

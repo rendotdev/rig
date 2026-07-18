@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "vite-plus/test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RegistryConfigServiceClass } from "./registry";
 import { ToolDiscoveryServiceClass } from "./discover";
 import { ToolCreatorClass } from "../tools/create";
-import { ToolListServiceClass } from "../tools/list";
+import { CurrentRigToolApiVersion } from "../tools/domain/tool-api";
+import { ToolListServiceClass, ToolMetadataCacheClass } from "../tools/list";
 
 class TestHomeStore {
   private readonly homes: string[] = [];
@@ -62,7 +63,8 @@ describe("registries", () => {
     await mkdir(toolDir, { recursive: true });
     await writeFile(join(toolDir, "index.rig.tsx"), "export default {};\n", "utf8");
 
-    const tools = await new ToolDiscoveryServiceClass({ homeDir: home }).discover();
+    const discovery = new ToolDiscoveryServiceClass({ homeDir: home });
+    const tools = await discovery.discover();
 
     expect(tools).toMatchObject([
       {
@@ -70,6 +72,10 @@ describe("registries", () => {
         toolPath: join(toolDir, "index.rig.tsx"),
       },
     ]);
+    expect(await discovery.find("view-tool")).toMatchObject({
+      name: "view-tool",
+      toolPath: join(toolDir, "index.rig.tsx"),
+    });
   });
 
   test("rejects legacy tool.ts entry files", async () => {
@@ -78,7 +84,11 @@ describe("registries", () => {
     await mkdir(toolDir, { recursive: true });
     await writeFile(join(toolDir, "tool.ts"), "export default {};\n", "utf8");
 
-    await expect(new ToolDiscoveryServiceClass({ homeDir: home }).discover()).rejects.toThrow(
+    const discovery = new ToolDiscoveryServiceClass({ homeDir: home });
+    await expect(discovery.discover()).rejects.toThrow(
+      "Tool legacy must use index.rig.ts or index.rig.tsx.",
+    );
+    await expect(discovery.find("legacy")).rejects.toThrow(
       "Tool legacy must use index.rig.ts or index.rig.tsx.",
     );
   });
@@ -220,6 +230,74 @@ describe("registries", () => {
     expect(rendered).toContain("rig run local-only.example");
   });
 
+  test("reuses serialized metadata until a tool entry changes", async () => {
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "cached");
+    const toolPath = join(toolDir, "index.rig.ts");
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(
+      toolPath,
+      `export default (rig) => {
+  globalThis.__rigMetadataLoads = (globalThis.__rigMetadataLoads ?? 0) + 1;
+  const load = globalThis.__rigMetadataLoads;
+  return rig.defineTool({
+    name: "cached",
+    description: "Cached metadata load " + load + ".",
+    collections: {
+      notes: { schema: rig.z.object({ title: rig.z.string() }) },
+      optional: undefined,
+    },
+    commands: {
+      read: rig.defineCommand({
+        description: "Read cached metadata.",
+        input: rig.z.object({}),
+        output: rig.z.number(),
+        run: () => load,
+      }),
+    },
+  });
+};\n`,
+      "utf8",
+    );
+
+    const first = await new ToolListServiceClass({ homeDir: home }).list();
+    const second = await new ToolListServiceClass({ homeDir: home }).list();
+    expect(first.tools[0]?.description).toBe("Cached metadata load 1.");
+    expect(first.tools[0]?.collections).toEqual([
+      { name: "notes", hasSchema: true },
+      { name: "optional", hasSchema: false },
+    ]);
+    expect(second.tools[0]?.description).toBe("Cached metadata load 1.");
+
+    await writeFile(
+      toolPath,
+      (await readFile(toolPath, "utf8")).replace(
+        'description: "Cached metadata load " + load + ".",',
+        'description: "Updated metadata load " + load + ".",',
+      ),
+    );
+    const updated = await new ToolListServiceClass({ homeDir: home }).list();
+    expect(updated.tools[0]?.description).toBe("Updated metadata load 2.");
+  });
+
+  test("discards incompatible metadata cache documents", async () => {
+    const incompatible = [
+      [],
+      { version: 2 },
+      { version: 1, toolApiVersion: 999, entries: {} },
+      { version: 1, toolApiVersion: CurrentRigToolApiVersion, entries: null },
+    ];
+    const results = await Promise.all(
+      incompatible.map(async (value) => {
+        const home = await homes.create();
+        await mkdir(join(home, "rig"), { recursive: true });
+        await writeFile(join(home, "rig", "tool-metadata.json"), JSON.stringify(value), "utf8");
+        return new ToolMetadataCacheClass({ homeDir: home }).load([]);
+      }),
+    );
+    expect(results).toEqual(incompatible.map(() => []));
+  });
+
   test("renders plain list entries without embedded line breaks", async () => {
     const rendered = new ToolListServiceClass().renderPlain({
       tools: [
@@ -257,8 +335,34 @@ describe("registries", () => {
     await mkdir(join(custom, "sample"), { recursive: true });
     await writeFile(join(custom, "sample", "index.rig.ts"), "export default {};\n", "utf8");
 
-    await expect(new ToolDiscoveryServiceClass({ homeDir: home }).discover()).rejects.toThrow(
-      "Duplicate tool name: sample",
+    const discovery = new ToolDiscoveryServiceClass({ homeDir: home });
+    await expect(discovery.discover()).rejects.toThrow("Duplicate tool name: sample");
+    await expect(discovery.find("sample")).rejects.toThrow("Duplicate tool name: sample");
+    await expect(discovery.find("../sample")).rejects.toThrow("Tool not found: ../sample");
+  });
+
+  test("returns no direct match for a file in the registry", async () => {
+    const home = await homes.create();
+    const toolsDir = join(home, "rig", "tools");
+    await mkdir(toolsDir, { recursive: true });
+    await writeFile(join(toolsDir, "plain-file"), "not a tool\n", "utf8");
+
+    await expect(
+      new ToolDiscoveryServiceClass({ homeDir: home }).find("plain-file"),
+    ).rejects.toThrow("Tool not found: plain-file");
+  });
+
+  test("rejects multiple direct entry files", async () => {
+    const home = await homes.create();
+    const toolDir = join(home, "rig", "tools", "multiple");
+    await mkdir(toolDir, { recursive: true });
+    await Promise.all([
+      writeFile(join(toolDir, "index.rig.ts"), "export default {};\n", "utf8"),
+      writeFile(join(toolDir, "index.rig.tsx"), "export default {};\n", "utf8"),
+    ]);
+
+    await expect(new ToolDiscoveryServiceClass({ homeDir: home }).find("multiple")).rejects.toThrow(
+      "multiple Rig entry files",
     );
   });
 });

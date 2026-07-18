@@ -21,6 +21,17 @@ export type ToolSearchRankedDocument = {
   matches: ToolSearchFieldMatch[];
 };
 
+type CompiledToolSearchField = ToolSearchField & {
+  normalizedValue: string;
+  tokens: string[];
+};
+
+type CompiledToolSearchDocument = {
+  id: string;
+  fields: CompiledToolSearchField[];
+  tokens: string[];
+};
+
 class ToolSearchTextClass {
   private readonly stopWords = new Set([
     "a",
@@ -46,16 +57,23 @@ class ToolSearchTextClass {
       .trim();
   }
 
-  public tokens(params: { value: string; removeStopWords?: boolean }): string[] {
-    const tokens = this.normalize(params).split(/\s+/).filter(Boolean);
+  public tokensFromNormalized(params: { value: string; removeStopWords?: boolean }): string[] {
+    const tokens = params.value.split(/\s+/).filter(Boolean);
     if (!params.removeStopWords) return [...new Set(tokens)];
     const meaningful = tokens.filter((token) => !this.stopWords.has(token));
     return [...new Set(meaningful.length > 0 ? meaningful : tokens)];
   }
 }
 
+type ToolSearchSimilarityParams = {
+  query: string;
+  candidate: string;
+  queryTrigrams: Set<string>;
+  candidateTrigrams: Set<string>;
+};
+
 class ToolSearchSimilarityClass {
-  public score(params: { query: string; candidate: string }): number {
+  public score(params: ToolSearchSimilarityParams): number {
     if (params.query === params.candidate) return 1;
     if (
       Math.min(params.query.length, params.candidate.length) >= 3 &&
@@ -67,26 +85,29 @@ class ToolSearchSimilarityClass {
     const longest = Math.max(params.query.length, params.candidate.length);
     /* v8 ignore next -- empty normalized queries return before similarity scoring */
     if (longest === 0) return 0;
-    const editSimilarity = 1 - this.distance(params) / longest;
+    const minimumDistance = Math.abs(params.query.length - params.candidate.length);
+    const editSimilarity =
+      1 - minimumDistance / longest >= 0.58 ? 1 - this.distance(params) / longest : 0;
     const trigramSimilarity = this.trigramDice(params);
     const similarity = Math.max(editSimilarity, trigramSimilarity);
     return similarity >= 0.58 ? similarity * 0.82 : 0;
   }
 
   private distance(params: { query: string; candidate: string }): number {
-    const rows = params.query.length + 1;
     const columns = params.candidate.length + 1;
-    const matrix = Array.from({ length: rows }, () => Array<number>(columns).fill(0));
-    for (let row = 0; row < rows; row++) matrix[row]![0] = row;
-    for (let column = 0; column < columns; column++) matrix[0]![column] = column;
+    let previousPrevious = new Uint32Array(columns);
+    let previous = new Uint32Array(columns);
+    let current = new Uint32Array(columns);
+    for (let column = 0; column < columns; column++) previous[column] = column;
 
-    for (let row = 1; row < rows; row++) {
+    for (let row = 1; row <= params.query.length; row++) {
+      current[0] = row;
       for (let column = 1; column < columns; column++) {
         const substitution = params.query[row - 1] === params.candidate[column - 1] ? 0 : 1;
-        matrix[row]![column] = Math.min(
-          matrix[row - 1]![column]! + 1,
-          matrix[row]![column - 1]! + 1,
-          matrix[row - 1]![column - 1]! + substitution,
+        current[column] = Math.min(
+          previous[column]! + 1,
+          current[column - 1]! + 1,
+          previous[column - 1]! + substitution,
         );
         if (
           row > 1 &&
@@ -94,36 +115,63 @@ class ToolSearchSimilarityClass {
           params.query[row - 1] === params.candidate[column - 2] &&
           params.query[row - 2] === params.candidate[column - 1]
         ) {
-          matrix[row]![column] = Math.min(
-            matrix[row]![column]!,
-            matrix[row - 2]![column - 2]! + substitution,
+          current[column] = Math.min(
+            current[column]!,
+            previousPrevious[column - 2]! + substitution,
           );
         }
       }
+      const recycled = previousPrevious;
+      previousPrevious = previous;
+      previous = current;
+      current = recycled;
     }
-    return matrix[rows - 1]![columns - 1]!;
+    return previous[columns - 1]!;
   }
 
-  private trigramDice(params: { query: string; candidate: string }): number {
-    const left = this.trigrams(params.query);
-    const right = this.trigrams(params.candidate);
-    if (left.size === 0 || right.size === 0) return 0;
+  private trigramDice(params: ToolSearchSimilarityParams): number {
+    if (params.queryTrigrams.size === 0 || params.candidateTrigrams.size === 0) return 0;
     let intersection = 0;
-    for (const value of left) if (right.has(value)) intersection++;
-    return (2 * intersection) / (left.size + right.size);
+    for (const value of params.queryTrigrams)
+      if (params.candidateTrigrams.has(value)) intersection++;
+    return (2 * intersection) / (params.queryTrigrams.size + params.candidateTrigrams.size);
+  }
+}
+
+class ToolSearchSimilarityMemoClass {
+  private readonly similarity = new ToolSearchSimilarityClass();
+  private readonly scores = new Map<string, number>();
+  private readonly trigramSets = new Map<string, Set<string>>();
+
+  public score(params: { query: string; candidate: string }): number {
+    const key = `${params.query}\0${params.candidate}`;
+    const cached = this.scores.get(key);
+    if (cached !== undefined) return cached;
+    const score = this.similarity.score({
+      ...params,
+      queryTrigrams: this.trigrams(params.query),
+      candidateTrigrams: this.trigrams(params.candidate),
+    });
+    this.scores.set(key, score);
+    return score;
   }
 
   private trigrams(value: string): Set<string> {
-    if (value.length < 3) return new Set();
-    return new Set(
-      Array.from({ length: value.length - 2 }, (_, index) => value.slice(index, index + 3)),
-    );
+    const cached = this.trigramSets.get(value);
+    if (cached) return cached;
+    const trigrams =
+      value.length < 3
+        ? new Set<string>()
+        : new Set(
+            Array.from({ length: value.length - 2 }, (_, index) => value.slice(index, index + 3)),
+          );
+    this.trigramSets.set(value, trigrams);
+    return trigrams;
   }
 }
 
 export class ToolSearchEngineClass {
   private readonly text = new ToolSearchTextClass();
-  private readonly similarity = new ToolSearchSimilarityClass();
 
   public search(params: {
     query: string;
@@ -131,20 +179,48 @@ export class ToolSearchEngineClass {
     limit: number;
   }): ToolSearchRankedDocument[] {
     const normalizedQuery = this.text.normalize({ value: params.query });
-    const queryTokens = this.text.tokens({ value: params.query, removeStopWords: true });
+    const queryTokens = this.text.tokensFromNormalized({
+      value: normalizedQuery,
+      removeStopWords: true,
+    });
     if (!normalizedQuery || queryTokens.length === 0) return [];
 
+    const similarity = new ToolSearchSimilarityMemoClass();
     return params.documents
-      .map((document) => this.rank({ document, normalizedQuery, queryTokens }))
+      .map((document) =>
+        this.rank({
+          document: this.compile(document),
+          normalizedQuery,
+          queryTokens,
+          similarity,
+        }),
+      )
       .filter((result): result is ToolSearchRankedDocument => result !== undefined)
       .toSorted((left, right) => right.score - left.score || left.id.localeCompare(right.id))
       .slice(0, params.limit);
   }
 
+  private compile(document: ToolSearchDocument): CompiledToolSearchDocument {
+    const fields = document.fields.map((field) => {
+      const normalizedValue = this.text.normalize({ value: field.value });
+      return {
+        ...field,
+        normalizedValue,
+        tokens: this.text.tokensFromNormalized({ value: normalizedValue }),
+      };
+    });
+    return {
+      id: document.id,
+      fields,
+      tokens: [...new Set(fields.flatMap((field) => field.tokens))],
+    };
+  }
+
   private rank(params: {
-    document: ToolSearchDocument;
+    document: CompiledToolSearchDocument;
     normalizedQuery: string;
     queryTokens: string[];
+    similarity: ToolSearchSimilarityMemoClass;
   }): ToolSearchRankedDocument | undefined {
     const rawMatches = params.document.fields
       .map((field) =>
@@ -152,6 +228,7 @@ export class ToolSearchEngineClass {
           field,
           normalizedQuery: params.normalizedQuery,
           queryTokens: params.queryTokens,
+          similarity: params.similarity,
         }),
       )
       .filter((match): match is ToolSearchFieldMatch => match !== undefined)
@@ -160,12 +237,9 @@ export class ToolSearchEngineClass {
       ...new Map(rawMatches.map((match) => [match.field, match] as const)).values(),
     ].toSorted((left, right) => right.score - left.score);
     if (matches.length === 0) return undefined;
-    const documentTokens = params.document.fields.flatMap((field) =>
-      this.text.tokens({ value: field.value }),
-    );
     const coveredTokens = params.queryTokens.filter((queryToken) =>
-      documentTokens.some(
-        (candidate) => this.similarity.score({ query: queryToken, candidate }) > 0,
+      params.document.tokens.some(
+        (candidate) => params.similarity.score({ query: queryToken, candidate }) > 0,
       ),
     ).length;
     const coverage = coveredTokens / params.queryTokens.length;
@@ -180,21 +254,22 @@ export class ToolSearchEngineClass {
   }
 
   private matchField(params: {
-    field: ToolSearchField;
+    field: CompiledToolSearchField;
     normalizedQuery: string;
     queryTokens: string[];
+    similarity: ToolSearchSimilarityMemoClass;
   }): ToolSearchFieldMatch | undefined {
-    const normalizedField = this.text.normalize({ value: params.field.value });
-    if (!normalizedField) return undefined;
-    const fieldTokens = this.text.tokens({ value: params.field.value });
+    if (!params.field.normalizedValue) return undefined;
     const tokenScores = params.queryTokens.map((queryToken) =>
       Math.max(
         0,
-        ...fieldTokens.map((candidate) => this.similarity.score({ query: queryToken, candidate })),
+        ...params.field.tokens.map((candidate) =>
+          params.similarity.score({ query: queryToken, candidate }),
+        ),
       ),
     );
     const matchedTokens = tokenScores.filter((score) => score > 0);
-    const phraseBonus = normalizedField.includes(params.normalizedQuery) ? 0.5 : 0;
+    const phraseBonus = params.field.normalizedValue.includes(params.normalizedQuery) ? 0.5 : 0;
     if (matchedTokens.length === 0 && phraseBonus === 0) return undefined;
     const coverage = matchedTokens.length / params.queryTokens.length;
     const similarity =

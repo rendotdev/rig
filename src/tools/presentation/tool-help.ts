@@ -175,7 +175,7 @@ export class ToolHelpServiceClass {
 
   async render(toolName: string, commandName?: string): Promise<string> {
     const target = this.helpTarget(toolName, commandName);
-    const tool = await this.loader.load(target.toolName);
+    const tool = await this.loader.loadDefinition(target.toolName);
     return this.renderer.render(tool.definition, target.commandName);
   }
 

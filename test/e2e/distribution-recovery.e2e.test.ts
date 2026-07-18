@@ -237,7 +237,7 @@ describe("installed Rig distribution and recovery", () => {
         "utf8",
       ),
     ) as { bin?: Record<string, string> };
-    expect(installedPackage.bin).toEqual({ rig: "dist/rig.mjs" });
+    expect(installedPackage.bin).toEqual({ rig: "dist/bin.mjs" });
     const installedFiles = await readdir(installedDistDir);
     expect(installedFiles).toContain("rig.mjs");
     expect(installedFiles.some((file) => file.endsWith(".js"))).toBe(false);

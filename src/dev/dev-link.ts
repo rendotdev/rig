@@ -146,13 +146,13 @@ export class DevLinkServiceClass {
       return `@echo off
 rem Rig dev shim. Safe to overwrite with \`rig dev link\`.
 set "RIG_DEV_REPO=${repoRoot}"
-bun --install=fallback run "%RIG_DEV_REPO%\\src\\cli.ts" %*
+bun --install=fallback run "%RIG_DEV_REPO%\\src\\bin.ts" %*
 `;
     }
     return `#!/bin/sh
 # Rig dev shim. Safe to overwrite with \`rig dev link\`.
 RIG_DEV_REPO=${JSON.stringify(repoRoot)}
-exec bun --install=fallback run "$RIG_DEV_REPO/src/cli.ts" "$@"
+exec bun --install=fallback run "$RIG_DEV_REPO/src/bin.ts" "$@"
 `;
   }
 

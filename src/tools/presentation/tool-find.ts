@@ -3,10 +3,8 @@ import { RigErrorClass } from "../../errors/RigError";
 import { ToolDiscoveryServiceClass } from "../../registry/discover";
 import { toolSearchEngine, type ToolSearchDocument } from "../domain/tool-search";
 import { ToolNameClass } from "../identifiers";
-import { ToolLoaderClass } from "../loader";
-import { schemaRenderer } from "../schema";
-import { commandIds, type CommandDefinition, type ToolExample } from "../types";
-import { CommandRunExampleRendererClass } from "./tool-list";
+import { commandIds, type ToolExample } from "../types";
+import { ToolMetadataCacheClass, type ToolCommandMetadata } from "./tool-list";
 
 export type ToolFindOptions = {
   limit?: number | string;
@@ -47,13 +45,11 @@ type SearchableCommand = {
 };
 
 class ToolFindMetadataClass {
-  private readonly exampleRenderer = new CommandRunExampleRendererClass();
-
   public command(params: {
     toolName: string;
     toolDescription: string;
     commandName: string;
-    command: CommandDefinition;
+    command: ToolCommandMetadata;
   }): SearchableCommand {
     const id = commandIds.from(params.toolName, params.commandName);
     return {
@@ -61,7 +57,7 @@ class ToolFindMetadataClass {
       tool: params.toolName,
       command: params.commandName,
       description: params.command.description,
-      runExample: this.exampleRenderer.render(params.toolName, params.commandName, params.command),
+      runExample: params.command.runExample,
       document: {
         id,
         fields: [
@@ -70,8 +66,8 @@ class ToolFindMetadataClass {
           { name: "tool.name", value: params.toolName, weight: 8 },
           { name: "command.description", value: params.command.description, weight: 7 },
           { name: "tool.description", value: params.toolDescription, weight: 5 },
-          ...this.exampleFields(params.command.examples ?? []),
-          ...this.inputFields(params.command.input),
+          ...this.exampleFields(params.command.examples),
+          ...this.inputFields(params.command.inputSchema),
         ],
       },
     };
@@ -94,8 +90,7 @@ class ToolFindMetadataClass {
   }
 
   private inputFields(schema: unknown): ToolSearchDocument["fields"] {
-    const jsonSchema = schemaRenderer.toJsonSchema(schema);
-    return this.walkSchema({ schema: jsonSchema, path: [] });
+    return this.walkSchema({ schema, path: [] });
   }
 
   private walkSchema(params: { schema: unknown; path: string[] }): ToolSearchDocument["fields"] {
@@ -167,13 +162,13 @@ class ToolFindPlainRendererClass {
 
 export class ToolFindServiceClass {
   private readonly discovery: ToolDiscoveryServiceClass;
-  private readonly loader: ToolLoaderClass;
+  private readonly metadataCache: ToolMetadataCacheClass;
   private readonly metadata = new ToolFindMetadataClass();
   private readonly renderer = new ToolFindPlainRendererClass();
 
   constructor(options: ConfigOptions = {}) {
     this.discovery = new ToolDiscoveryServiceClass(options);
-    this.loader = new ToolLoaderClass(options);
+    this.metadataCache = new ToolMetadataCacheClass(options);
   }
 
   public async find(params: { query: string; options?: ToolFindOptions }): Promise<ToolFindData> {
@@ -189,21 +184,17 @@ export class ToolFindServiceClass {
       });
     }
 
-    const searchable = (
-      await Promise.all(
-        selected.map(async (entry) => {
-          const loaded = await this.loader.loadDiscovered(entry);
-          return Object.entries(loaded.definition.commands).map(([commandName, command]) =>
-            this.metadata.command({
-              toolName: loaded.definition.name,
-              toolDescription: loaded.definition.description,
-              commandName,
-              command,
-            }),
-          );
+    const loadedMetadata = await this.metadataCache.load(selected, { prune: tool === undefined });
+    const searchable = loadedMetadata.flatMap((loaded) =>
+      loaded.commands.map((command) =>
+        this.metadata.command({
+          toolName: loaded.name,
+          toolDescription: loaded.description,
+          commandName: command.name,
+          command,
         }),
-      )
-    ).flat();
+      ),
+    );
     const byId = new Map(searchable.map((command) => [command.id, command]));
     const ranked = toolSearchEngine.search({
       query,

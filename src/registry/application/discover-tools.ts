@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, lstatSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { RigConfigStoreClass, type ConfigOptions, type RegistryEntry } from "../../config/config";
@@ -57,8 +57,21 @@ export class ToolDiscoveryServiceClass {
   }
 
   async find(name: string): Promise<DiscoveredTool> {
-    const tools = await this.discover();
-    const tool = tools.find((entry) => entry.name === name);
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+      throw new RigErrorClass("TOOL_NOT_FOUND", `Tool not found: ${name}`, { name });
+    }
+    const config = await this.configStore.ensure();
+    const entries = this.configStore.registryEntries(config);
+    const discovered = entries
+      .map((entry) => this.discoverNamedTool(entry, name))
+      .filter((tool): tool is DiscoveredTool => tool !== undefined);
+    if (discovered.length > 1) {
+      throw new RigErrorClass("DUPLICATE_TOOL", `Duplicate tool name: ${name}`, {
+        name,
+        paths: discovered.map((tool) => tool.toolPath),
+      });
+    }
+    const tool = discovered[0];
     if (!tool) {
       throw new RigErrorClass("TOOL_NOT_FOUND", `Tool not found: ${name}`, { name });
     }
@@ -105,6 +118,36 @@ export class ToolDiscoveryServiceClass {
     return dirname(absolute);
   }
   /* v8 ignore stop */
+
+  private discoverNamedTool(entry: RegistryEntry, name: string): DiscoveredTool | undefined {
+    const toolDir = join(entry.path, name);
+    try {
+      if (!lstatSync(toolDir).isDirectory()) return undefined;
+    } catch {
+      return undefined;
+    }
+    const toolPaths = RigToolEntryFiles.map((file) => join(toolDir, file)).filter((path) =>
+      existsSync(path),
+    );
+    if (toolPaths.length > 1) {
+      throw new RigErrorClass("TOOL_INVALID", `Tool ${name} has multiple Rig entry files.`, {
+        toolDir,
+        found: toolPaths,
+        expected: RigToolEntryFiles,
+      });
+    }
+    if (toolPaths.length === 0) {
+      this.rejectLegacyEntry(name, toolDir);
+      return undefined;
+    }
+    return {
+      name,
+      registryKind: entry.kind,
+      registryPath: entry.path,
+      toolDir,
+      toolPath: toolPaths[0]!,
+    };
+  }
 
   private async discoverRegistry(entry: RegistryEntry): Promise<DiscoveredTool[]> {
     if (!existsSync(entry.path)) return [];
