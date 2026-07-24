@@ -1,1 +1,1 @@
-export * from "./filesystem/rig-paths";
+export * from "../domains/settings/index.ts";

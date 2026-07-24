@@ -1,3 +1,4 @@
+import { defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 
 export type CompiledCollectionFieldPath = {
@@ -6,21 +7,29 @@ export type CompiledCollectionFieldPath = {
   read(value: unknown): unknown;
 };
 
-export class CollectionFieldPathCompilerClass {
-  compile(value: string): CompiledCollectionFieldPath {
-    if (typeof value !== "string" || value.length === 0) {
-      throw this.invalid(value);
+function invalidFieldPath(value: unknown): InstanceType<typeof RigErrorClass> {
+  return new RigErrorClass("INPUT_ERROR", `Invalid collection field path: ${String(value)}`, {
+    expected: "dot-separated field names beginning with a letter or underscore",
+  });
+}
+
+export const CollectionFieldPathSingleton = defineSingleton({
+  params: {},
+  deps: {},
+  compile(params: { value: string }): CompiledCollectionFieldPath {
+    if (typeof params.value !== "string" || params.value.length === 0) {
+      throw invalidFieldPath(params.value);
     }
 
-    const segments = value.split(".");
+    const segments = params.value.split(".");
     if (segments.some((segment) => !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(segment))) {
-      throw this.invalid(value);
+      throw invalidFieldPath(params.value);
     }
 
     return {
       segments,
       sqliteJsonPath: `$${segments.map((segment) => `.${segment}`).join("")}`,
-      read: (input: unknown) => {
+      read(input: unknown) {
         let current = input;
         for (const segment of segments) {
           if (typeof current !== "object" || current === null || Array.isArray(current)) {
@@ -31,13 +40,32 @@ export class CollectionFieldPathCompilerClass {
         return current;
       },
     };
-  }
+  },
+});
 
-  private invalid(value: unknown): RigErrorClass {
-    return new RigErrorClass("INPUT_ERROR", `Invalid collection field path: ${String(value)}`, {
-      expected: "dot-separated field names beginning with a letter or underscore",
-    });
-  }
-}
+type CollectionFieldPathCompilerConstructor = {
+  new (): CollectionFieldPathCompilerClass;
+  readonly prototype: CollectionFieldPathCompilerClass;
+};
+
+export type CollectionFieldPathCompilerClass = {
+  compile(value: string): CompiledCollectionFieldPath;
+};
+
+const CollectionFieldPathCompilerClassAdapter =
+  function constructCollectionFieldPathCompiler(): void {};
+Object.defineProperty(CollectionFieldPathCompilerClassAdapter, "name", {
+  value: "CollectionFieldPathCompilerClass",
+});
+Object.defineProperty(CollectionFieldPathCompilerClassAdapter.prototype, "compile", {
+  configurable: true,
+  value: function compile(value: string): CompiledCollectionFieldPath {
+    return CollectionFieldPathSingleton.compile({ value });
+  },
+  writable: true,
+});
+
+export const CollectionFieldPathCompilerClass =
+  CollectionFieldPathCompilerClassAdapter as unknown as CollectionFieldPathCompilerConstructor;
 
 export const collectionFieldPathCompiler = new CollectionFieldPathCompilerClass();

@@ -19,7 +19,7 @@ import { RigAgentInstructions } from "../agents/instructions";
 import { AgentInstructionSyncServiceClass } from "../agents/sync";
 import { RigConfigStoreClass } from "../config/config";
 import { RigPathsClass } from "../config/paths";
-import { rigConfigDefaults } from "../config/schema";
+import { rigConfigDefaults } from "../domains/settings/index.ts";
 import { DevLinkServiceClass } from "../dev/dev-link";
 import { ErrorCodes } from "../errors/codes";
 import { RigErrorClass, rigErrors } from "../errors/RigError";
@@ -792,6 +792,13 @@ describe("coverage support", () => {
       ).renderCommand("sample", "example", command),
     ).toContain("### sample.example");
     expect(
+      new (await import("../tools/list")).CommandRunExampleRendererClass().render(
+        "sample",
+        "example",
+        command,
+      ),
+    ).toContain("rig run sample.example");
+    expect(
       (renderer as unknown as { renderExampleArgs(input: unknown): string }).renderExampleArgs({
         first: "two words",
         second: "ok",
@@ -972,6 +979,8 @@ describe("coverage support", () => {
     );
     await expect(loader.load("factory")).rejects.toThrow("Could not evaluate tool factory factory");
     await writeTool(home, "valid", simpleToolSource("valid"));
+    const discoveredValid = await new ToolDiscoveryServiceClass({ homeDir: home }).find("valid");
+    await expect(loader.loadDiscovered(discoveredValid)).resolves.toMatchObject({ name: "valid" });
     await expect(loader.loadCommand("valid", "missing")).rejects.toThrow(
       "Command not found: valid.missing",
     );

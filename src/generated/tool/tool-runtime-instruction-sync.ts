@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { defineService, defineSingleton } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { ToolDiscoveryServiceClass } from "../../registry/discover";
 import { CurrentRigToolApiVersion } from "../../tools/domain/tool-api";
@@ -82,97 +83,192 @@ Command run context:
 - Return a value that matches the output schema.
 `;
 
-export class ToolRuntimeInstructionSyncServiceClass {
-  private readonly discovery: ToolDiscoveryServiceClass;
+function escapeRegExp(params: { value: string }): string {
+  return params.value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-  constructor(options: ConfigOptions = {}) {
-    this.discovery = new ToolDiscoveryServiceClass(options);
+function managedBlockPattern(_params: {}): RegExp {
+  return new RegExp(
+    `${escapeRegExp({ value: StartMarker })}[\\s\\S]*?${escapeRegExp({ value: EndMarker })}\\n*`,
+  );
+}
+
+function sourceVersion(params: { source: string }): number {
+  const match = /^\/\/ rig:tool-api-version (\d+)\s*$/m.exec(params.source);
+  if (!match) return 1;
+  const version = Number.parseInt(match[1]!, 10);
+  return Number.isSafeInteger(version) && version > 0 ? version : 1;
+}
+
+function renderRuntimePrefix(params: { version?: number }): string {
+  const version = params.version ?? CurrentRigToolApiVersion;
+  return [
+    StartMarker,
+    `${ToolApiVersionMarker} ${version}`,
+    ...RuntimeReference.trimEnd()
+      .split("\n")
+      .map(function commentLine(line) {
+        return line ? `// ${line}` : "//";
+      }),
+    EndMarker,
+  ].join("\n");
+}
+
+function upsertRuntimePrefix(params: { source: string }): string {
+  const version = sourceVersion(params);
+  const withoutExisting = params.source
+    .replace(managedBlockPattern({}), "")
+    .replace(/^\/\/ rig:tool-api-version \d+\s*$/gm, "")
+    .trimStart();
+  const shebang = withoutExisting.match(/^(#!.*\n)/);
+  const prefix = renderRuntimePrefix({ version });
+  const body = shebang ? withoutExisting.slice(shebang[0].length).trimStart() : withoutExisting;
+  const next = [prefix, body.trimEnd()].filter(Boolean).join("\n\n");
+  return `${shebang?.[0] ?? ""}${next}\n`;
+}
+
+export const ToolRuntimeInstructionSingleton = defineSingleton({
+  params: {},
+  deps: {},
+  renderPrefix: renderRuntimePrefix,
+  upsertPrefix: upsertRuntimePrefix,
+});
+
+function bunFileApi(_params: {}): BunFileApi | undefined {
+  const candidate = (globalThis as typeof globalThis & { Bun?: Partial<BunFileApi> }).Bun;
+  /* v8 ignore next 3 */
+  if (typeof candidate?.file === "function" && typeof candidate.write === "function") {
+    return candidate as BunFileApi;
+  }
+  return undefined;
+}
+
+async function readText(params: { path: string }): Promise<string> {
+  const bun = bunFileApi({});
+  /* v8 ignore next */
+  if (bun) return await bun.file(params.path).text();
+  return await readFile(params.path, "utf8");
+}
+
+async function writeText(params: { path: string; content: string }): Promise<void> {
+  const bun = bunFileApi({});
+  /* v8 ignore next 4 */
+  if (bun) {
+    await bun.write(params.path, params.content);
+    return;
+  }
+  await writeFile(params.path, params.content, "utf8");
+}
+
+type ToolRuntimeInstructionSyncDeps = {
+  discover: () => ReturnType<ToolDiscoveryServiceClass["discover"]>;
+  readText: typeof readText;
+  writeText: typeof writeText;
+};
+
+function createToolRuntimeInstructionSyncDeps(
+  options: ConfigOptions,
+): ToolRuntimeInstructionSyncDeps {
+  const discovery = new ToolDiscoveryServiceClass(options);
+  return {
+    discover() {
+      return discovery.discover();
+    },
+    readText,
+    writeText,
+  };
+}
+
+const ToolRuntimeInstructionSyncProductionDeps = createToolRuntimeInstructionSyncDeps({});
+
+export class ToolRuntimeInstructionSyncService extends defineService({
+  params: {},
+  deps: ToolRuntimeInstructionSyncProductionDeps,
+}) {
+  private async updateFile(params: { path: string }): Promise<boolean> {
+    const existing = await this.deps.readText(params);
+    const next = ToolRuntimeInstructionSingleton.upsertPrefix({ source: existing });
+    if (next === existing) return false;
+    await this.deps.writeText({ path: params.path, content: next });
+    return true;
   }
 
-  async sync(): Promise<ToolRuntimeInstructionSyncResult> {
-    const tools = await this.discovery.discover();
+  public async sync(_params: {}): Promise<ToolRuntimeInstructionSyncResult> {
+    const tools = await this.deps.discover();
     const updates = await Promise.all(
-      tools.map(async (tool) => ({
-        name: tool.name,
-        path: tool.toolPath,
-        changed: await this.updateFile(tool.toolPath),
-      })),
+      tools.map(async (tool) => {
+        return {
+          name: tool.name,
+          path: tool.toolPath,
+          changed: await this.updateFile({ path: tool.toolPath }),
+        };
+      }),
     );
     return { tools: updates };
   }
 
-  renderPrefix(version = CurrentRigToolApiVersion): string {
-    return [
-      StartMarker,
-      `${ToolApiVersionMarker} ${version}`,
-      ...RuntimeReference.trimEnd()
-        .split("\n")
-        .map((line) => (line ? `// ${line}` : "//")),
-      EndMarker,
-    ].join("\n");
+  public renderPrefix(params: { version?: number }): string {
+    return renderRuntimePrefix(params);
   }
 
-  upsertPrefix(source: string): string {
-    const version = this.sourceVersion(source);
-    const withoutExisting = source
-      .replace(this.managedBlockPattern(), "")
-      .replace(/^\/\/ rig:tool-api-version \d+\s*$/gm, "")
-      .trimStart();
-    const shebang = withoutExisting.match(/^(#!.*\n)/);
-    const prefix = this.renderPrefix(version);
-    const body = shebang ? withoutExisting.slice(shebang[0].length).trimStart() : withoutExisting;
-    const next = [prefix, body.trimEnd()].filter(Boolean).join("\n\n");
-    return `${shebang?.[0] ?? ""}${next}\n`;
-  }
-
-  private async updateFile(path: string): Promise<boolean> {
-    const existing = await this.readText(path);
-    const next = this.upsertPrefix(existing);
-    if (next === existing) return false;
-    await this.writeText(path, next);
-    return true;
-  }
-
-  private async readText(path: string): Promise<string> {
-    const bun = this.bunFileApi();
-    /* v8 ignore next */
-    if (bun) return bun.file(path).text();
-    return readFile(path, "utf8");
-  }
-
-  private async writeText(path: string, content: string): Promise<void> {
-    const bun = this.bunFileApi();
-    /* v8 ignore next 4 */
-    if (bun) {
-      await bun.write(path, content);
-      return;
-    }
-    await writeFile(path, content, "utf8");
-  }
-
-  private bunFileApi(): BunFileApi | undefined {
-    const candidate = (globalThis as typeof globalThis & { Bun?: Partial<BunFileApi> }).Bun;
-    /* v8 ignore next 3 */
-    if (typeof candidate?.file === "function" && typeof candidate.write === "function") {
-      return candidate as BunFileApi;
-    }
-    return undefined;
-  }
-
-  private managedBlockPattern(): RegExp {
-    return new RegExp(
-      `${this.escapeRegExp(StartMarker)}[\\s\\S]*?${this.escapeRegExp(EndMarker)}\\n*`,
-    );
-  }
-
-  private sourceVersion(source: string): number {
-    const match = /^\/\/ rig:tool-api-version (\d+)\s*$/m.exec(source);
-    if (!match) return 1;
-    const version = Number.parseInt(match[1]!, 10);
-    return Number.isSafeInteger(version) && version > 0 ? version : 1;
-  }
-
-  private escapeRegExp(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  public upsertPrefix(params: { source: string }): string {
+    return upsertRuntimePrefix(params);
   }
 }
+
+export type ToolRuntimeInstructionSyncServiceClass = {
+  sync(): Promise<ToolRuntimeInstructionSyncResult>;
+  renderPrefix(version?: number): string;
+  upsertPrefix(source: string): string;
+};
+
+type ToolRuntimeInstructionSyncServiceConstructor = {
+  new (options?: ConfigOptions): ToolRuntimeInstructionSyncServiceClass;
+  readonly prototype: ToolRuntimeInstructionSyncServiceClass;
+};
+
+type ToolRuntimeInstructionSyncServiceAdapter = ToolRuntimeInstructionSyncServiceClass & {
+  readonly resource: ToolRuntimeInstructionSyncService;
+};
+
+const ToolRuntimeInstructionSyncServiceClassAdapter =
+  function constructToolRuntimeInstructionSyncService(
+    this: ToolRuntimeInstructionSyncServiceAdapter,
+    options: ConfigOptions = {},
+  ): void {
+    Object.defineProperty(this, "resource", {
+      value: new ToolRuntimeInstructionSyncService({
+        params: {},
+        deps: createToolRuntimeInstructionSyncDeps(options),
+      }),
+    });
+  };
+Object.defineProperty(ToolRuntimeInstructionSyncServiceClassAdapter, "name", {
+  value: "ToolRuntimeInstructionSyncServiceClass",
+});
+Object.defineProperties(ToolRuntimeInstructionSyncServiceClassAdapter.prototype, {
+  sync: {
+    configurable: true,
+    value: function sync(this: ToolRuntimeInstructionSyncServiceAdapter) {
+      return this.resource.sync({});
+    },
+    writable: true,
+  },
+  renderPrefix: {
+    configurable: true,
+    value: function renderPrefix(this: ToolRuntimeInstructionSyncServiceAdapter, version?: number) {
+      return this.resource.renderPrefix({ version });
+    },
+    writable: true,
+  },
+  upsertPrefix: {
+    configurable: true,
+    value: function upsertPrefix(this: ToolRuntimeInstructionSyncServiceAdapter, source: string) {
+      return this.resource.upsertPrefix({ source });
+    },
+    writable: true,
+  },
+});
+
+export const ToolRuntimeInstructionSyncServiceClass =
+  ToolRuntimeInstructionSyncServiceClassAdapter as unknown as ToolRuntimeInstructionSyncServiceConstructor;

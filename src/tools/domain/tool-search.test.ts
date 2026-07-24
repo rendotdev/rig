@@ -1,8 +1,13 @@
 import { describe, expect, test } from "vite-plus/test";
-import { ToolSearchEngineClass, type ToolSearchDocument } from "./tool-search";
+import {
+  ToolSearchEngineClass,
+  ToolSearchSingleton,
+  type ToolSearchDocument,
+  toolSearchEngine,
+} from "./tool-search";
 
-describe("ToolSearchEngineClass", () => {
-  const engine = new ToolSearchEngineClass();
+describe("tool search", () => {
+  const engine = ToolSearchSingleton;
   const documents: ToolSearchDocument[] = [
     {
       id: "languagetool.check-file",
@@ -33,6 +38,16 @@ describe("ToolSearchEngineClass", () => {
 
   test("ranks typo-tolerant multi-token matches", () => {
     const results = engine.search({ query: "grammer chek markdown", documents, limit: 3 });
+    const adapter = new ToolSearchEngineClass();
+
+    expect(adapter).toBeInstanceOf(ToolSearchEngineClass);
+    expect(adapter.search({ query: "grammer chek markdown", documents, limit: 1 })[0]?.id).toBe(
+      results[0]?.id,
+    );
+    expect(toolSearchEngine).toBeInstanceOf(ToolSearchEngineClass);
+    expect(ToolSearchSingleton.search({ query: "markdown", documents, limit: 1 })[0]?.id).toBe(
+      "languagetool.check-file",
+    );
 
     expect(results[0]?.id).toBe("languagetool.check-file");
     expect(results[0]?.matches.map((match) => match.field)).toContain("command.description");

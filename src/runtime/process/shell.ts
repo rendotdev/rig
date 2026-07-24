@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { defineProvider, defineService, defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 import type { RigShell, ShellOptions, ShellResult } from "../../tools/types";
 
@@ -7,120 +8,271 @@ const DefaultMaxOutputBytes = 1_048_576;
 const TerminationGraceMs = 100;
 const TruncationMarker = "\n[rig: output truncated]";
 
-class BoundedOutputCollectorClass {
-  private readonly chunks: Buffer[] = [];
-  private capturedBytes = 0;
-  private truncated = false;
-
-  constructor(private readonly maxBytes: number) {}
-
-  capture(buffer: Buffer): void {
-    const remaining = Math.max(0, this.maxBytes - this.capturedBytes);
-    if (remaining > 0) {
-      const captured = buffer.subarray(0, remaining);
-      this.chunks.push(captured);
-      this.capturedBytes += captured.byteLength;
-    }
-    if (buffer.byteLength > remaining) this.truncated = true;
-  }
-
-  result(): string {
-    const content = this.decodeUtf8Prefix(Buffer.concat(this.chunks, this.capturedBytes));
-    return this.truncated ? `${content}${TruncationMarker}` : content;
-  }
-
-  private decodeUtf8Prefix(buffer: Buffer): string {
-    const strictDecoder = new TextDecoder("utf-8", { fatal: true });
-    for (let removed = 0; removed <= Math.min(3, buffer.byteLength); removed++) {
-      try {
-        return strictDecoder.decode(buffer.subarray(0, buffer.byteLength - removed));
-      } catch {
-        // A UTF-8 code point may be split at the byte boundary. Try the preceding boundary.
-      }
-    }
-    return new TextDecoder().decode(buffer);
-  }
-}
-
-class ManagedProcessClass {
-  private readonly processGroup = process.platform !== "win32";
-  private timedOut = false;
-  private timeout?: NodeJS.Timeout;
-  private escalation?: NodeJS.Timeout;
-  private spawnError?: Error;
-
-  constructor(
-    private readonly child: ChildProcess,
-    private readonly command: string[],
-    private readonly timeoutMs: number,
-  ) {}
-
-  async wait(): Promise<number> {
-    this.child.once("error", (error) => {
-      this.spawnError = error;
-    });
-    this.timeout = setTimeout(() => this.terminate(), this.timeoutMs);
-
+function decodeUtf8Prefix(params: { buffer: Buffer }): string {
+  const strictDecoder = new TextDecoder("utf-8", { fatal: true });
+  for (let removed = 0; removed <= Math.min(3, params.buffer.byteLength); removed++) {
     try {
-      const exitCode = await new Promise<number>((resolve) => {
-        this.child.once("close", (code) => resolve(code ?? 1));
-      });
-      if (this.spawnError) {
-        throw new RigErrorClass("SHELL_ERROR", `Command could not start: ${this.command[0]}`, {
-          command: this.command,
-          message: this.spawnError.message,
-        });
-      }
-      if (this.timedOut) {
-        throw new RigErrorClass("SHELL_ERROR", `Command timed out after ${this.timeoutMs}ms.`, {
-          command: this.command,
-        });
-      }
-      return exitCode;
-    } finally {
-      /* v8 ignore else -- every managed process installs a timeout */
-      if (this.timeout) clearTimeout(this.timeout);
-      if (this.escalation) clearTimeout(this.escalation);
-    }
-  }
-
-  private terminate(): void {
-    this.timedOut = true;
-    this.signal("SIGTERM");
-    /* v8 ignore next -- process exit timing before forced escalation differs by platform */
-    this.escalation = setTimeout(() => this.signal("SIGKILL"), TerminationGraceMs);
-  }
-
-  private signal(signal: NodeJS.Signals): void {
-    try {
-      /* v8 ignore else -- Windows does not expose POSIX process groups */
-      if (this.processGroup && this.child.pid) process.kill(-this.child.pid, signal);
-      else this.child.kill(signal);
+      return strictDecoder.decode(params.buffer.subarray(0, params.buffer.byteLength - removed));
     } catch {
-      /* v8 ignore next -- the process may exit between close detection and signaling */
-      return;
+      // A UTF-8 code point may be split at the byte boundary. Try the preceding boundary.
     }
+  }
+  return new TextDecoder().decode(params.buffer);
+}
+
+export const BoundedOutputCollectorSingleton = defineSingleton({
+  params: {},
+  deps: {},
+  create(params: { maxBytes: number }) {
+    const chunks: Buffer[] = [];
+    let capturedBytes = 0;
+    let truncated = false;
+
+    function capture(captureParams: { buffer: Buffer }): void {
+      const remaining = Math.max(0, params.maxBytes - capturedBytes);
+      if (remaining > 0) {
+        const captured = captureParams.buffer.subarray(0, remaining);
+        chunks.push(captured);
+        capturedBytes += captured.byteLength;
+      }
+      if (captureParams.buffer.byteLength > remaining) truncated = true;
+    }
+
+    function result(_params: {}): string {
+      const content = decodeUtf8Prefix({
+        buffer: Buffer.concat(chunks, capturedBytes),
+      });
+      return truncated ? `${content}${TruncationMarker}` : content;
+    }
+
+    return { capture, result };
+  },
+});
+
+type ManagedProcessFactoryDeps = {
+  processGroup: boolean;
+  killProcessGroup: (pid: number, signal: NodeJS.Signals) => void;
+  setTimer: (callback: () => void, delay: number) => NodeJS.Timeout;
+  clearTimer: (timer: NodeJS.Timeout) => void;
+};
+
+const ManagedProcessFactoryProductionDeps: ManagedProcessFactoryDeps = {
+  processGroup: process.platform !== "win32",
+  killProcessGroup(pid, signal) {
+    process.kill(-pid, signal);
+  },
+  setTimer(callback, delay) {
+    return setTimeout(callback, delay);
+  },
+  clearTimer(timer) {
+    clearTimeout(timer);
+  },
+};
+
+export class ManagedProcessFactoryService extends defineService({
+  params: {},
+  deps: ManagedProcessFactoryProductionDeps,
+}) {
+  public create(params: { child: ChildProcess; command: string[]; timeoutMs: number }) {
+    let timedOut = false;
+    let timeout: NodeJS.Timeout | undefined;
+    let escalation: NodeJS.Timeout | undefined;
+    let spawnError: Error | undefined;
+
+    const signal = (signalParams: { signal: NodeJS.Signals }): void => {
+      try {
+        /* v8 ignore else -- Windows does not expose POSIX process groups */
+        if (this.deps.processGroup && params.child.pid) {
+          this.deps.killProcessGroup(params.child.pid, signalParams.signal);
+        } else {
+          params.child.kill(signalParams.signal);
+        }
+      } catch {
+        /* v8 ignore next -- the process may exit between close detection and signaling */
+        return;
+      }
+    };
+
+    const terminate = (_params: {}): void => {
+      timedOut = true;
+      signal({ signal: "SIGTERM" });
+      /* v8 ignore next -- process exit timing before forced escalation differs by platform */
+      escalation = this.deps.setTimer(function forceTermination() {
+        signal({ signal: "SIGKILL" });
+      }, TerminationGraceMs);
+    };
+
+    const wait = async (_params: {}): Promise<number> => {
+      params.child.once("error", function captureSpawnError(error) {
+        spawnError = error;
+      });
+      timeout = this.deps.setTimer(function terminateOnTimeout() {
+        terminate({});
+      }, params.timeoutMs);
+
+      try {
+        const exitCode = await new Promise<number>(function waitForClose(resolveClose) {
+          params.child.once("close", function handleClose(code) {
+            resolveClose(code ?? 1);
+          });
+        });
+        if (spawnError) {
+          throw new RigErrorClass("SHELL_ERROR", `Command could not start: ${params.command[0]}`, {
+            command: params.command,
+            message: spawnError.message,
+          });
+        }
+        if (timedOut) {
+          throw new RigErrorClass("SHELL_ERROR", `Command timed out after ${params.timeoutMs}ms.`, {
+            command: params.command,
+          });
+        }
+        return exitCode;
+      } finally {
+        /* v8 ignore else -- every managed process installs a timeout */
+        if (timeout) this.deps.clearTimer(timeout);
+        if (escalation) this.deps.clearTimer(escalation);
+      }
+    };
+
+    return { wait };
   }
 }
 
-export class BunRigShellClass implements RigShell {
-  constructor(private readonly defaults: ShellOptions = {}) {}
+export const ManagedProcessFactory = new ManagedProcessFactoryService();
 
-  async $(strings: TemplateStringsArray, ...values: unknown[]): Promise<ShellResult> {
-    return this.bash(this.renderTemplateCommand(strings, values));
+function shellQuote(params: { value: string }): string {
+  if (/^[A-Za-z0-9_./:=@%+,-]+$/.test(params.value)) return params.value;
+  return `'${params.value.replaceAll("'", "'\\''")}'`;
+}
+
+function renderTemplateValue(params: { value: unknown }): string {
+  if (Array.isArray(params.value)) {
+    return params.value
+      .map(function quoteItem(item) {
+        return shellQuote({ value: String(item) });
+      })
+      .join(" ");
+  }
+  return shellQuote({ value: String(params.value) });
+}
+
+function renderTemplateCommand(params: {
+  strings: TemplateStringsArray;
+  values: unknown[];
+}): string {
+  return params.strings.reduce(function appendTemplatePart(command, part, index) {
+    const value =
+      index < params.values.length ? renderTemplateValue({ value: params.values[index] }) : "";
+    return `${command}${part}${value}`;
+  }, "");
+}
+
+function validateArgs(params: { args: string[] }): void {
+  if (
+    !Array.isArray(params.args) ||
+    params.args.length === 0 ||
+    params.args.some(function invalidArgument(argument) {
+      return typeof argument !== "string" || argument.length === 0;
+    })
+  ) {
+    throw new RigErrorClass(
+      "SHELL_ERROR",
+      "shell.exec expects a non-empty array of command arguments.",
+      { args: params.args },
+    );
+  }
+}
+
+type BunRigShellDeps = {
+  spawn: typeof spawn;
+  env: NodeJS.ProcessEnv;
+  cwd: () => string;
+  detached: boolean;
+  createCollector: typeof BoundedOutputCollectorSingleton.create;
+  createManagedProcess: (params: { child: ChildProcess; command: string[]; timeoutMs: number }) => {
+    wait(params: {}): Promise<number>;
+  };
+};
+
+const BunRigShellProductionDeps: BunRigShellDeps = {
+  spawn,
+  env: process.env,
+  cwd: process.cwd.bind(process),
+  detached: process.platform !== "win32",
+  createCollector(params) {
+    return BoundedOutputCollectorSingleton.create(params);
+  },
+  createManagedProcess(params) {
+    return ManagedProcessFactory.create(params);
+  },
+};
+
+export class BunRigShellProvider extends defineProvider({
+  params: {} as ShellOptions,
+  deps: BunRigShellProductionDeps,
+}) {
+  private async runProcess(params: {
+    args: string[];
+    options?: ShellOptions;
+    reportedCommand?: string[];
+  }): Promise<ShellResult> {
+    const options = params.options ?? {};
+    const reportedCommand = params.reportedCommand ?? params.args;
+    const timeoutMs = options.timeoutMs ?? this.params.timeoutMs ?? DefaultTimeoutMs;
+    const maxOutputBytes =
+      options.maxOutputBytes ?? this.params.maxOutputBytes ?? DefaultMaxOutputBytes;
+    const child = this.deps.spawn(params.args[0]!, params.args.slice(1), {
+      cwd: options.cwd ?? this.params.cwd ?? this.deps.cwd(),
+      env: { ...this.deps.env, ...this.params.env, ...options.env },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: this.deps.detached,
+    });
+    const stdout = this.deps.createCollector({ maxBytes: maxOutputBytes });
+    const stderr = this.deps.createCollector({ maxBytes: maxOutputBytes });
+    child.stdout.on("data", function captureStdout(chunk: Buffer) {
+      stdout.capture({ buffer: chunk });
+    });
+    child.stderr.on("data", function captureStderr(chunk: Buffer) {
+      stderr.capture({ buffer: chunk });
+    });
+    const managed = this.deps.createManagedProcess({
+      child,
+      command: reportedCommand,
+      timeoutMs,
+    });
+    const exitCode = await managed.wait({});
+
+    return {
+      command: reportedCommand,
+      stdout: stdout.result({}),
+      stderr: stderr.result({}),
+      exitCode,
+    };
   }
 
-  async exec(args: string[], options: ShellOptions = {}): Promise<ShellResult> {
-    this.validateArgs(args);
-    return this.runProcess(args, options);
+  public async exec(params: { args: string[]; options?: ShellOptions }): Promise<ShellResult> {
+    validateArgs({ args: params.args });
+    return await this.runProcess(params);
   }
 
-  async bash(command: string, options: ShellOptions = {}): Promise<ShellResult> {
-    return this.runProcess(["bash", "-lc", command], options, [command]);
+  public async bash(params: { command: string; options?: ShellOptions }): Promise<ShellResult> {
+    return await this.runProcess({
+      args: ["bash", "-lc", params.command],
+      options: params.options,
+      reportedCommand: [params.command],
+    });
   }
 
-  async json(args: string[], options: ShellOptions = {}): Promise<unknown> {
-    const result = await this.exec(args, options);
+  public async template(params: {
+    strings: TemplateStringsArray;
+    values: unknown[];
+  }): Promise<ShellResult> {
+    return await this.bash({ command: renderTemplateCommand(params) });
+  }
+
+  public async json(params: { args: string[]; options?: ShellOptions }): Promise<unknown> {
+    const result = await this.exec(params);
     if (result.exitCode !== 0) {
       throw new RigErrorClass("SHELL_ERROR", "Command failed before JSON could be parsed.", result);
     }
@@ -133,65 +285,59 @@ export class BunRigShellClass implements RigShell {
       });
     }
   }
-
-  private async runProcess(
-    args: string[],
-    options: ShellOptions = {},
-    reportedCommand = args,
-  ): Promise<ShellResult> {
-    const timeoutMs = options.timeoutMs ?? this.defaults.timeoutMs ?? DefaultTimeoutMs;
-    const maxOutputBytes =
-      options.maxOutputBytes ?? this.defaults.maxOutputBytes ?? DefaultMaxOutputBytes;
-    const child = spawn(args[0]!, args.slice(1), {
-      cwd: options.cwd ?? this.defaults.cwd ?? process.cwd(),
-      env: { ...process.env, ...this.defaults.env, ...options.env },
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-    });
-    const stdout = new BoundedOutputCollectorClass(maxOutputBytes);
-    const stderr = new BoundedOutputCollectorClass(maxOutputBytes);
-    child.stdout.on("data", (chunk: Buffer) => stdout.capture(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.capture(chunk));
-    const exitCode = await new ManagedProcessClass(child, reportedCommand, timeoutMs).wait();
-
-    return {
-      command: reportedCommand,
-      stdout: stdout.result(),
-      stderr: stderr.result(),
-      exitCode,
-    };
-  }
-
-  private renderTemplateCommand(strings: TemplateStringsArray, values: unknown[]): string {
-    return strings.reduce((command, part, index) => {
-      const value = index < values.length ? this.renderTemplateValue(values[index]) : "";
-      return `${command}${part}${value}`;
-    }, "");
-  }
-
-  private renderTemplateValue(value: unknown): string {
-    if (Array.isArray(value)) return value.map((item) => this.shellQuote(String(item))).join(" ");
-    return this.shellQuote(String(value));
-  }
-
-  private shellQuote(value: string): string {
-    if (/^[A-Za-z0-9_./:=@%+,-]+$/.test(value)) return value;
-    return `'${value.replaceAll("'", "'\\''")}'`;
-  }
-
-  private validateArgs(args: string[]): void {
-    if (
-      !Array.isArray(args) ||
-      args.length === 0 ||
-      args.some((arg) => typeof arg !== "string" || arg.length === 0)
-    ) {
-      throw new RigErrorClass(
-        "SHELL_ERROR",
-        "shell.exec expects a non-empty array of command arguments.",
-        {
-          args,
-        },
-      );
-    }
-  }
 }
+
+export type BunRigShellClass = RigShell;
+
+type BunRigShellConstructor = {
+  new (defaults?: ShellOptions): BunRigShellClass;
+  readonly prototype: BunRigShellClass;
+};
+
+type BunRigShellAdapter = BunRigShellClass & { readonly resource: BunRigShellProvider };
+
+const BunRigShellClassAdapter = function constructBunRigShell(
+  this: BunRigShellAdapter,
+  defaults: ShellOptions = {},
+): void {
+  Object.defineProperty(this, "resource", {
+    value: new BunRigShellProvider({ params: defaults, deps: BunRigShellProductionDeps }),
+  });
+};
+Object.defineProperty(BunRigShellClassAdapter, "name", { value: "BunRigShellClass" });
+Object.defineProperties(BunRigShellClassAdapter.prototype, {
+  $: {
+    configurable: true,
+    value: function template(
+      this: BunRigShellAdapter,
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) {
+      return this.resource.template({ strings, values });
+    },
+    writable: true,
+  },
+  exec: {
+    configurable: true,
+    value: function exec(this: BunRigShellAdapter, args: string[], options: ShellOptions = {}) {
+      return this.resource.exec({ args, options });
+    },
+    writable: true,
+  },
+  bash: {
+    configurable: true,
+    value: function bash(this: BunRigShellAdapter, command: string, options: ShellOptions = {}) {
+      return this.resource.bash({ command, options });
+    },
+    writable: true,
+  },
+  json: {
+    configurable: true,
+    value: function json(this: BunRigShellAdapter, args: string[], options: ShellOptions = {}) {
+      return this.resource.json({ args, options });
+    },
+    writable: true,
+  },
+});
+
+export const BunRigShellClass = BunRigShellClassAdapter as unknown as BunRigShellConstructor;

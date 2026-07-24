@@ -1,4 +1,3 @@
-import { Writable } from "node:stream";
 import {
   appendFileSync,
   existsSync,
@@ -10,7 +9,9 @@ import {
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import pino, { type Logger } from "pino";
+import { defineRuntime, defineService, defineSingleton } from "../../define";
 import { RigPathsClass, type PathOptions } from "../../config/paths";
 
 export type RigLoggerOptions = PathOptions & {
@@ -35,39 +36,41 @@ const DefaultMaxFileSizeBytes = 5 * 1024 * 1024;
 const DefaultRetentionDays = 7;
 const MillisecondsPerDay = 24 * 60 * 60 * 1000;
 
-class RigLoggerOptionResolverClass {
-  constructor(private readonly options: RigLoggerOptions) {}
-
-  resolve(): ResolvedRigLoggerOptions {
-    const env = this.options.env ?? process.env;
-    const paths = new RigPathsClass(this.options);
-    return {
-      enabled: env.RIG_LOG !== "0",
-      level: this.options.level ?? env.RIG_LOG_LEVEL ?? "info",
-      logDir: this.options.logDir ?? env.RIG_LOG_DIR ?? paths.logsDir,
-      maxFileSizeBytes: this.positiveNumber(
-        this.options.maxFileSizeBytes,
-        env.RIG_LOG_MAX_BYTES,
-        DefaultMaxFileSizeBytes,
-      ),
-      retentionDays: this.positiveNumber(
-        this.options.retentionDays,
-        env.RIG_LOG_RETENTION_DAYS,
-        DefaultRetentionDays,
-      ),
-      now: this.options.now ?? Date.now,
-    };
-  }
-
-  private positiveNumber(
-    optionValue: number | undefined,
-    envValue: string | undefined,
-    fallback: number,
-  ): number {
-    const value = optionValue ?? (envValue ? Number(envValue) : undefined);
-    return value && Number.isFinite(value) && value > 0 ? value : fallback;
-  }
+function positiveNumber(params: {
+  optionValue: number | undefined;
+  envValue: string | undefined;
+  fallback: number;
+}): number {
+  const value = params.optionValue ?? (params.envValue ? Number(params.envValue) : undefined);
+  return value && Number.isFinite(value) && value > 0 ? value : params.fallback;
 }
+
+function resolveLoggerOptions(params: { options: RigLoggerOptions }): ResolvedRigLoggerOptions {
+  const env = params.options.env ?? process.env;
+  const paths = new RigPathsClass(params.options);
+  return {
+    enabled: env.RIG_LOG !== "0",
+    level: params.options.level ?? env.RIG_LOG_LEVEL ?? "info",
+    logDir: params.options.logDir ?? env.RIG_LOG_DIR ?? paths.logsDir,
+    maxFileSizeBytes: positiveNumber({
+      optionValue: params.options.maxFileSizeBytes,
+      envValue: env.RIG_LOG_MAX_BYTES,
+      fallback: DefaultMaxFileSizeBytes,
+    }),
+    retentionDays: positiveNumber({
+      optionValue: params.options.retentionDays,
+      envValue: env.RIG_LOG_RETENTION_DAYS,
+      fallback: DefaultRetentionDays,
+    }),
+    now: params.options.now ?? Date.now,
+  };
+}
+
+export const RigLoggerOptionResolverSingleton = defineSingleton({
+  params: {},
+  deps: {},
+  resolve: resolveLoggerOptions,
+});
 
 export type LogRotationLockParams = {
   logDir: string;
@@ -86,51 +89,48 @@ export type LogRotationLockDeps = {
 
 const logRotationLockDeps: LogRotationLockDeps = {
   now: Date.now,
-  wait: (buffer, index, value, timeout) => Atomics.wait(buffer, index, value, timeout),
-  makeDirectory: (path) => mkdirSync(path),
-  readStatus: (path) => statSync(path),
-  rename: (from, to) => renameSync(from, to),
-  remove: (path) => rmSync(path, { recursive: true, force: true }),
+  wait(buffer, index, value, timeout) {
+    return Atomics.wait(buffer, index, value, timeout);
+  },
+  makeDirectory(path) {
+    mkdirSync(path);
+  },
+  readStatus(path) {
+    return statSync(path);
+  },
+  rename(from, to) {
+    renameSync(from, to);
+  },
+  remove(path) {
+    rmSync(path, { recursive: true, force: true });
+  },
 };
 
-export class LogRotationLockClass {
-  private readonly lockPath: string;
+function errorCode(params: { error: unknown }): string | undefined {
+  if (typeof params.error !== "object" || params.error === null || !("code" in params.error)) {
+    return undefined;
+  }
+  return typeof params.error.code === "string" ? params.error.code : undefined;
+}
+
+export class LogRotationLockRuntime extends defineRuntime({
+  params: { logDir: "" } as LogRotationLockParams,
+  deps: logRotationLockDeps,
+}) {
+  private readonly lockPath = join(this.params.logDir, ".rig.log.rotation.lock");
   private readonly waitBuffer = new Int32Array(new SharedArrayBuffer(4));
 
-  constructor(
-    private readonly params: LogRotationLockParams,
-    private readonly deps: LogRotationLockDeps = logRotationLockDeps,
-  ) {
-    this.lockPath = join(this.params.logDir, ".rig.log.rotation.lock");
-  }
-
-  run(operation: () => void): boolean {
-    const startedAt = this.deps.now();
-    while (!this.tryAcquire()) {
-      this.recoverStaleLock();
-      if (this.deps.now() - startedAt >= (this.params.waitTimeoutMs ?? 1_000)) return false;
-      this.deps.wait(this.waitBuffer, 0, 0, 10);
-    }
-
-    try {
-      operation();
-      return true;
-    } finally {
-      this.deps.remove(this.lockPath);
-    }
-  }
-
-  private tryAcquire(): boolean {
+  private tryAcquire(_params: {}): boolean {
     try {
       this.deps.makeDirectory(this.lockPath);
       return true;
     } catch (error) {
-      if (this.errorCode(error) === "EEXIST") return false;
+      if (errorCode({ error }) === "EEXIST") return false;
       throw error;
     }
   }
 
-  private recoverStaleLock(): void {
+  private recoverStaleLock(_params: {}): void {
     try {
       if (
         this.deps.now() - this.deps.readStatus(this.lockPath).mtimeMs <=
@@ -142,99 +142,92 @@ export class LogRotationLockClass {
       this.deps.rename(this.lockPath, stalePath);
       this.deps.remove(stalePath);
     } catch (error) {
-      if (["ENOENT", "EEXIST"].includes(this.errorCode(error) ?? "")) return;
+      if (["ENOENT", "EEXIST"].includes(errorCode({ error }) ?? "")) return;
       throw error;
     }
   }
 
-  private errorCode(error: unknown): string | undefined {
-    if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
-    return typeof error.code === "string" ? error.code : undefined;
+  public run(params: { operation: () => void }): boolean {
+    const startedAt = this.deps.now();
+    while (!this.tryAcquire({})) {
+      this.recoverStaleLock({});
+      if (this.deps.now() - startedAt >= (this.params.waitTimeoutMs ?? 1_000)) return false;
+      this.deps.wait(this.waitBuffer, 0, 0, 10);
+    }
+
+    try {
+      params.operation();
+      return true;
+    } finally {
+      this.deps.remove(this.lockPath);
+    }
   }
 }
 
-class RollingLogFileDestinationClass extends Writable {
-  private readonly activeFileName = "rig.log";
-  private activeSize = 0;
-  private readonly rotationLock: LogRotationLockClass;
+export type LogRotationLockClass = { run(operation: () => void): boolean };
 
-  constructor(private readonly options: ResolvedRigLoggerOptions) {
-    super();
-    mkdirSync(this.options.logDir, { recursive: true });
-    this.rotationLock = new LogRotationLockClass({ logDir: this.options.logDir });
-    this.rotationLock.run(() => this.cleanupExpiredLogs());
-    this.activeSize = this.fileSize(this.activePath());
+type LogRotationLockConstructor = {
+  new (params: LogRotationLockParams, deps?: LogRotationLockDeps): LogRotationLockClass;
+  readonly prototype: LogRotationLockClass;
+};
+
+type LogRotationLockAdapter = LogRotationLockClass & {
+  readonly resource: LogRotationLockRuntime;
+};
+
+const LogRotationLockClassAdapter = function constructLogRotationLock(
+  this: LogRotationLockAdapter,
+  params: LogRotationLockParams,
+  deps: LogRotationLockDeps = logRotationLockDeps,
+): void {
+  Object.defineProperty(this, "resource", {
+    value: new LogRotationLockRuntime({ params, deps }),
+  });
+};
+Object.defineProperty(LogRotationLockClassAdapter, "name", { value: "LogRotationLockClass" });
+Object.defineProperty(LogRotationLockClassAdapter.prototype, "run", {
+  configurable: true,
+  value: function run(this: LogRotationLockAdapter, operation: () => void) {
+    return this.resource.run({ operation });
+  },
+  writable: true,
+});
+
+export const LogRotationLockClass =
+  LogRotationLockClassAdapter as unknown as LogRotationLockConstructor;
+
+function logFileSize(params: { path: string }): number {
+  try {
+    return statSync(params.path).size;
+  } catch {
+    return 0;
+  }
+}
+
+function createRollingLogDestination(options: ResolvedRigLoggerOptions): Writable {
+  const activeFileName = "rig.log";
+  const rotationLock = new LogRotationLockClass({ logDir: options.logDir });
+  let activeSize = 0;
+
+  function activePath(): string {
+    return join(options.logDir, activeFileName);
   }
 
-  override _write(
-    chunk: Buffer | string,
-    _encoding: BufferEncoding,
-    callback: (error?: Error | null) => void,
-  ): void {
+  function logEntries(): string[] {
     try {
-      this.appendBuffers([Buffer.from(chunk)]);
-      queueMicrotask(callback);
-    } catch (error) {
+      return readdirSync(options.logDir).filter(function isArchive(entry) {
+        return entry.startsWith("rig-") && entry.endsWith(".log");
+      });
+    } catch {
       /* v8 ignore next */
-      callback(error instanceof Error ? error : new Error(String(error)));
+      return [];
     }
   }
 
-  override _writev(
-    chunks: Array<{ chunk: Buffer | string; encoding: BufferEncoding }>,
-    callback: (error?: Error | null) => void,
-  ): void {
-    try {
-      this.appendBuffers(chunks.map((entry) => Buffer.from(entry.chunk)));
-      queueMicrotask(callback);
-    } catch (error) {
-      /* v8 ignore next */
-      callback(error instanceof Error ? error : new Error(String(error)));
-    }
-  }
-
-  private appendBuffers(buffers: Buffer[]): void {
-    let pending: Buffer[] = [];
-    let pendingBytes = 0;
-    const flush = () => {
-      if (pendingBytes === 0) return;
-      appendFileSync(
-        this.activePath(),
-        pending.length === 1 ? pending[0]! : Buffer.concat(pending, pendingBytes),
-      );
-      this.activeSize += pendingBytes;
-      pending = [];
-      pendingBytes = 0;
-    };
-
-    for (const buffer of buffers) {
-      if (this.activeSize + pendingBytes + buffer.byteLength > this.options.maxFileSizeBytes) {
-        flush();
-        this.rotateIfNeeded(buffer.byteLength);
-      }
-      pending.push(buffer);
-      pendingBytes += buffer.byteLength;
-    }
-    flush();
-  }
-
-  private rotateIfNeeded(nextBytes: number): void {
-    this.rotationLock.run(() => {
-      const lockedSize = this.fileSize(this.activePath());
-      if (lockedSize === 0 || lockedSize + nextBytes <= this.options.maxFileSizeBytes) {
-        this.activeSize = lockedSize;
-        return;
-      }
-      renameSync(this.activePath(), this.archivePath());
-      this.activeSize = 0;
-      this.cleanupExpiredLogs();
-    });
-  }
-
-  private cleanupExpiredLogs(): void {
-    const cutoff = this.options.now() - this.options.retentionDays * MillisecondsPerDay;
-    for (const entry of this.logEntries()) {
-      const path = join(this.options.logDir, entry);
+  function cleanupExpiredLogs(): void {
+    const cutoff = options.now() - options.retentionDays * MillisecondsPerDay;
+    for (const entry of logEntries()) {
+      const path = join(options.logDir, entry);
       try {
         if (statSync(path).mtimeMs < cutoff) unlinkSync(path);
       } catch {
@@ -244,95 +237,199 @@ class RollingLogFileDestinationClass extends Writable {
     }
   }
 
-  private logEntries(): string[] {
-    try {
-      return readdirSync(this.options.logDir).filter(
-        (entry) => entry.startsWith("rig-") && entry.endsWith(".log"),
-      );
-    } catch {
-      /* v8 ignore next */
-      return [];
-    }
-  }
-
-  private archivePath(): string {
-    const timestamp = new Date(this.options.now()).toISOString().replace(/[:.]/g, "-");
+  function archivePath(): string {
+    const timestamp = new Date(options.now()).toISOString().replace(/[:.]/g, "-");
     for (let index = 0; ; index++) {
       const suffix = index === 0 ? "" : `-${index}`;
-      const candidate = join(this.options.logDir, `rig-${timestamp}${suffix}.log`);
+      const candidate = join(options.logDir, `rig-${timestamp}${suffix}.log`);
       if (!existsSync(candidate)) return candidate;
     }
   }
 
-  private activePath(): string {
-    return join(this.options.logDir, this.activeFileName);
-  }
-
-  private fileSize(path: string): number {
-    try {
-      return statSync(path).size;
-    } catch {
-      return 0;
-    }
-  }
-}
-
-class RigLoggerDestinationRegistryClass {
-  private readonly destinations = new Map<string, RollingLogFileDestinationClass>();
-
-  get(options: ResolvedRigLoggerOptions): RollingLogFileDestinationClass {
-    const key = [options.logDir, options.maxFileSizeBytes, options.retentionDays].join("\0");
-    const existing = this.destinations.get(key);
-    if (existing) return existing;
-
-    const destination = new RollingLogFileDestinationClass(options);
-    this.destinations.set(key, destination);
-    return destination;
-  }
-}
-
-const rigLoggerDestinationRegistry = new RigLoggerDestinationRegistryClass();
-
-export class RigLoggerFactoryClass {
-  private readonly options: ResolvedRigLoggerOptions;
-  private readonly destinations = rigLoggerDestinationRegistry;
-  private logger?: Logger;
-
-  constructor(options: RigLoggerOptions = {}) {
-    this.options = new RigLoggerOptionResolverClass(options).resolve();
-  }
-
-  app(component = "app"): Logger {
-    return this.base().child({ prefix: `rig:${component}`, component });
-  }
-
-  tool(tool: string, command: string): Logger {
-    return this.base().child({
-      prefix: `tool:${tool}.${command}`,
-      component: "tool",
-      tool,
-      command,
+  function rotateIfNeeded(nextBytes: number): void {
+    rotationLock.run(function rotate() {
+      const lockedSize = logFileSize({ path: activePath() });
+      if (lockedSize === 0 || lockedSize + nextBytes <= options.maxFileSizeBytes) {
+        activeSize = lockedSize;
+        return;
+      }
+      renameSync(activePath(), archivePath());
+      activeSize = 0;
+      cleanupExpiredLogs();
     });
   }
 
-  private base(): Logger {
-    if (this.logger) return this.logger;
-
-    if (!this.options.enabled) {
-      this.logger = pino({ enabled: false });
-      return this.logger;
+  function appendBuffers(buffers: Buffer[]): void {
+    let pending: Buffer[] = [];
+    let pendingBytes = 0;
+    function flush() {
+      if (pendingBytes === 0) return;
+      appendFileSync(
+        activePath(),
+        pending.length === 1 ? pending[0]! : Buffer.concat(pending, pendingBytes),
+      );
+      activeSize += pendingBytes;
+      pending = [];
+      pendingBytes = 0;
     }
 
-    this.logger = pino(
+    for (const buffer of buffers) {
+      if (activeSize + pendingBytes + buffer.byteLength > options.maxFileSizeBytes) {
+        flush();
+        rotateIfNeeded(buffer.byteLength);
+      }
+      pending.push(buffer);
+      pendingBytes += buffer.byteLength;
+    }
+    flush();
+  }
+
+  mkdirSync(options.logDir, { recursive: true });
+  rotationLock.run(cleanupExpiredLogs);
+  activeSize = logFileSize({ path: activePath() });
+
+  return new Writable({
+    write(chunk, _encoding, callback) {
+      try {
+        appendBuffers([Buffer.from(chunk)]);
+        queueMicrotask(callback);
+      } catch (error) {
+        /* v8 ignore next */
+        callback(error instanceof Error ? error : new Error(String(error)));
+      }
+    },
+    writev(chunks, callback) {
+      try {
+        appendBuffers(chunks.map((entry) => Buffer.from(entry.chunk)));
+        queueMicrotask(callback);
+      } catch (error) {
+        /* v8 ignore next */
+        callback(error instanceof Error ? error : new Error(String(error)));
+      }
+    },
+  });
+}
+
+const destinations = new Map<string, Writable>();
+
+export const RigLoggerDestinationRegistrySingleton = defineSingleton({
+  params: {},
+  deps: {},
+  get(params: { options: ResolvedRigLoggerOptions }): Writable {
+    const key = [
+      params.options.logDir,
+      params.options.maxFileSizeBytes,
+      params.options.retentionDays,
+    ].join("\0");
+    const existing = destinations.get(key);
+    if (existing) return existing;
+    const destination = createRollingLogDestination(params.options);
+    destinations.set(key, destination);
+    return destination;
+  },
+});
+
+type RigLoggerFactoryDeps = {
+  pino: typeof pino;
+  destination: typeof RigLoggerDestinationRegistrySingleton.get;
+};
+
+const RigLoggerFactoryProductionDeps: RigLoggerFactoryDeps = {
+  pino,
+  destination(params) {
+    return RigLoggerDestinationRegistrySingleton.get(params);
+  },
+};
+
+export class RigLoggerFactoryService extends defineService({
+  params: {} as RigLoggerOptions,
+  deps: RigLoggerFactoryProductionDeps,
+}) {
+  private readonly options = RigLoggerOptionResolverSingleton.resolve({ options: this.params });
+  private logger: Logger | undefined;
+
+  private base(_params: {}): Logger {
+    if (this.logger) return this.logger;
+    if (!this.options.enabled) {
+      this.logger = this.deps.pino({ enabled: false });
+      return this.logger;
+    }
+    this.logger = this.deps.pino(
       {
         name: "rig",
         level: this.options.level,
         base: { app: "rig", pid: process.pid },
-        timestamp: pino.stdTimeFunctions.isoTime,
-        serializers: { err: pino.stdSerializers.err },
+        timestamp: this.deps.pino.stdTimeFunctions.isoTime,
+        serializers: { err: this.deps.pino.stdSerializers.err },
       },
-      this.destinations.get(this.options),
+      this.deps.destination({ options: this.options }),
     );
     return this.logger;
   }
+
+  public app(params: { component: string }): Logger {
+    return this.base({}).child({
+      prefix: `rig:${params.component}`,
+      component: params.component,
+    });
+  }
+
+  public tool(params: { tool: string; command: string }): Logger {
+    return this.base({}).child({
+      prefix: `tool:${params.tool}.${params.command}`,
+      component: "tool",
+      tool: params.tool,
+      command: params.command,
+    });
+  }
 }
+
+export type RigLoggerFactoryClass = {
+  app(component?: string): Logger;
+  tool(tool: string, command: string): Logger;
+};
+
+type RigLoggerFactoryConstructor = {
+  new (options?: RigLoggerOptions): RigLoggerFactoryClass;
+  readonly prototype: RigLoggerFactoryClass;
+};
+
+type RigLoggerFactoryAdapter = RigLoggerFactoryClass & {
+  readonly resource: RigLoggerFactoryService;
+};
+
+const RigLoggerFactoryClassAdapter = function constructRigLoggerFactory(
+  this: RigLoggerFactoryAdapter,
+  options: RigLoggerOptions = {},
+): void {
+  Object.defineProperty(this, "resource", {
+    value: new RigLoggerFactoryService({
+      params: options,
+      deps: RigLoggerFactoryProductionDeps,
+    }),
+  });
+};
+Object.defineProperty(RigLoggerFactoryClassAdapter, "name", { value: "RigLoggerFactoryClass" });
+Object.defineProperties(RigLoggerFactoryClassAdapter.prototype, {
+  app: {
+    configurable: true,
+    value: function app(this: RigLoggerFactoryAdapter, component = "app") {
+      return this.resource.app({ component });
+    },
+    writable: true,
+  },
+  tool: {
+    configurable: true,
+    value: function createToolLogger(
+      this: RigLoggerFactoryAdapter,
+      toolName: string,
+      command: string,
+    ) {
+      return this.resource.tool({ tool: toolName, command });
+    },
+    writable: true,
+  },
+});
+
+export const RigLoggerFactoryClass =
+  RigLoggerFactoryClassAdapter as unknown as RigLoggerFactoryConstructor;

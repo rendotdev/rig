@@ -1,3 +1,5 @@
+import { defineSingleton } from "../../define";
+
 type HelpTopic = {
   title: string;
   content: string;
@@ -173,28 +175,74 @@ API:
   },
 };
 
-export class HelpTopicServiceClass {
-  isKnownTopic(name: string): boolean {
-    return name in TOPICS;
-  }
-
-  listTopics(): string[] {
+export const HelpTopicSingleton = defineSingleton({
+  params: {},
+  deps: {},
+  isKnownTopic(params: { name: string }): boolean {
+    return params.name in TOPICS;
+  },
+  listTopics(_params: {}): string[] {
     return Object.keys(TOPICS);
-  }
-
-  render(name: string): string | undefined {
-    const topic = TOPICS[name];
+  },
+  render(params: { name: string }): string | undefined {
+    const topic = TOPICS[params.name];
     if (!topic) return undefined;
     return `# Help \u2022 ${topic.title}\n\n${topic.content}`;
-  }
-
-  renderTopicList(): string {
+  },
+  renderTopicList(_params: {}): string {
     const lines = ["# Help Topics", "", "Usage: `rig help <topic>`", ""];
     for (const [name, topic] of Object.entries(TOPICS)) {
       lines.push(`  ${name.padEnd(14)} ${topic.title}`);
     }
     return lines.join("\n");
-  }
-}
+  },
+});
 
+export type HelpTopicServiceClass = {
+  isKnownTopic(name: string): boolean;
+  listTopics(): string[];
+  render(name: string): string | undefined;
+  renderTopicList(): string;
+};
+
+type HelpTopicServiceConstructor = {
+  new (): HelpTopicServiceClass;
+  readonly prototype: HelpTopicServiceClass;
+};
+
+const HelpTopicServiceClassAdapter = function constructHelpTopicService(): void {};
+Object.defineProperty(HelpTopicServiceClassAdapter, "name", { value: "HelpTopicServiceClass" });
+Object.defineProperties(HelpTopicServiceClassAdapter.prototype, {
+  isKnownTopic: {
+    configurable: true,
+    value: function isKnownTopic(name: string): boolean {
+      return HelpTopicSingleton.isKnownTopic({ name });
+    },
+    writable: true,
+  },
+  listTopics: {
+    configurable: true,
+    value: function listTopics(): string[] {
+      return HelpTopicSingleton.listTopics({});
+    },
+    writable: true,
+  },
+  render: {
+    configurable: true,
+    value: function render(name: string): string | undefined {
+      return HelpTopicSingleton.render({ name });
+    },
+    writable: true,
+  },
+  renderTopicList: {
+    configurable: true,
+    value: function renderTopicList(): string {
+      return HelpTopicSingleton.renderTopicList({});
+    },
+    writable: true,
+  },
+});
+
+export const HelpTopicServiceClass =
+  HelpTopicServiceClassAdapter as unknown as HelpTopicServiceConstructor;
 export const helpTopicService = new HelpTopicServiceClass();

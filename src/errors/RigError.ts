@@ -1,1 +1,1 @@
-export * from "../runtime/errors/rig-error";
+export * from "../providers/errors/index.ts";

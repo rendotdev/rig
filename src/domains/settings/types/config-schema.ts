@@ -16,16 +16,3 @@ export const RigConfigSchema = z.object({
 
 export type RigConfig = z.infer<typeof RigConfigSchema>;
 export type RigCronJob = z.infer<typeof RigCronJobSchema>;
-
-export class RigConfigDefaultsClass {
-  create(): RigConfig {
-    return {
-      version: 1,
-      baseRegistryDir: "~/rig/tools",
-      customRegistries: [],
-      cronJobs: [],
-    };
-  }
-}
-
-export const rigConfigDefaults = new RigConfigDefaultsClass();

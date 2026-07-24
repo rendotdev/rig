@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
 import type { z } from "zod";
+import { defineSingleton } from "../../define";
 import type { CollectionDefinition, CollectionHandle } from "../collection";
-import { commandTargets } from "../identifiers";
+import { CommandTargetSingleton } from "../identifiers";
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -214,10 +215,31 @@ export type LoadedTool = {
   definition: ToolDefinition;
 };
 
-export class CommandIdsClass {
-  from(tool: string, command: string): string {
-    return commandTargets.from(tool, command).id;
-  }
-}
+export const CommandIdsSingleton = defineSingleton({
+  params: {},
+  deps: { CommandTargetSingleton },
+  from(params: { tool: string; command: string }) {
+    return this.deps.CommandTargetSingleton.from(params).id;
+  },
+});
+
+export type CommandIdsClass = {
+  from(tool: string, command: string): string;
+};
+
+type CommandIdsConstructor = {
+  new (): CommandIdsClass;
+  readonly prototype: CommandIdsClass;
+};
+
+export const CommandIdsClass = function () {} as unknown as CommandIdsConstructor;
+
+Object.defineProperty(CommandIdsClass.prototype, "from", {
+  configurable: true,
+  value: function from(tool: string, command: string) {
+    return CommandIdsSingleton.from({ tool, command });
+  },
+  writable: true,
+});
 
 export const commandIds = new CommandIdsClass();

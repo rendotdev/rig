@@ -43,9 +43,9 @@ class ArchitectureSourceSetClass {
 describe("architecture", () => {
   const sources = new ArchitectureSourceSetClass();
 
-  it("uses the Class suffix for implementation class declarations", async () => {
+  it("uses architectural suffixes for implementation class declarations", async () => {
     const violations = await sources.violations(/\bclass\s+([A-Za-z_$][\w$]*)/g, (match) =>
-      match[1]!.endsWith("Class"),
+      /(?:Class|Repo|Repository|Service|Runtime|Provider|Route)$/.test(match[1]!),
     );
     expect(violations).toEqual([]);
   });
@@ -55,32 +55,46 @@ describe("architecture", () => {
     expect(violations).toEqual([]);
   });
 
-  it("keeps migrated application classes on the DomainClass contract", async () => {
-    const migratedClasses = [
+  it("uses definitions for migrated application behavior", async () => {
+    const migratedDefinitions = [
       {
         path: "src/application/cli/composition-root.ts",
-        names: ["CliCompositionRootClass"],
+        names: ["CliCompositionRootService"],
       },
       {
         path: "src/application/cli/runtime-bootstrap.ts",
-        names: ["BunRuntimeBootstrapClass", "CliEntrypointClass"],
+        names: ["BunRuntimeBootstrapService", "CliEntrypointService"],
+      },
+      {
+        path: "src/application/cli/command-ui.tsx",
+        names: ["CommandUiComponent", "CommandUiRendererService"],
       },
       {
         path: "src/cron/application/rig-cron.ts",
-        names: ["RigCronServiceClass", "RigCronWorkerClass"],
+        names: ["RigCronService", "RigCronWorkerService", "CronStateTransactionService"],
+      },
+      {
+        path: "src/runtime/updates/rig-updater.ts",
+        names: ["RigUpdateCommandRunnerService", "RigUpdaterService", "RigUpdaterFactoryService"],
+      },
+      {
+        path: "src/runtime/updates/npm-update-check.ts",
+        names: ["NpmUpdateCheckService", "VersionComparatorSingleton"],
       },
     ];
 
     const sourcesByEntry = await Promise.all(
-      migratedClasses.map(async (entry) => ({
+      migratedDefinitions.map(async (entry) => ({
         entry,
         source: await readFile(entry.path, "utf8"),
       })),
     );
 
     for (const { entry, source } of sourcesByEntry) {
+      expect(source).not.toContain("DomainClass");
       for (const name of entry.names) {
-        expect(source).toContain(`class ${name} extends DomainClass`);
+        expect(source).toContain(name);
+        expect(source).not.toContain(`${name}Builder`);
       }
     }
   });

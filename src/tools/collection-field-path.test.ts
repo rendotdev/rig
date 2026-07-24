@@ -1,17 +1,28 @@
 import { describe, expect, it } from "vite-plus/test";
-import { CollectionFieldPathCompilerClass } from "./collection-field-path";
+import {
+  CollectionFieldPathCompilerClass,
+  CollectionFieldPathSingleton,
+} from "./collection-field-path";
 
-describe("CollectionFieldPathCompilerClass", () => {
-  const compiler = new CollectionFieldPathCompilerClass();
+describe("collection field paths", () => {
+  const Compiler = CollectionFieldPathSingleton;
 
   it("compiles nested paths for SQLite and object traversal", () => {
-    const path = compiler.compile("project.owner_id");
+    const path = Compiler.compile({ value: "project.owner_id" });
 
     expect(path.segments).toEqual(["project", "owner_id"]);
     expect(path.sqliteJsonPath).toBe("$.project.owner_id");
     expect(path.read({ project: { owner_id: "rene" } })).toBe("rene");
     expect(path.read({ project: null })).toBeUndefined();
     expect(path.read({ project: [] })).toBeUndefined();
+    expect(CollectionFieldPathSingleton.compile({ value: "status" }).segments).toEqual(["status"]);
+
+    const adapter = new CollectionFieldPathCompilerClass();
+    expect(adapter).toBeInstanceOf(CollectionFieldPathCompilerClass);
+    expect(adapter.compile("project.owner_id")).toMatchObject({
+      segments: ["project", "owner_id"],
+      sqliteJsonPath: "$.project.owner_id",
+    });
   });
 
   it.each([
@@ -26,6 +37,6 @@ describe("CollectionFieldPathCompilerClass", () => {
     "status value",
     "status/owner",
   ])("rejects malformed or injection-like paths: %s", (value) => {
-    expect(() => compiler.compile(value)).toThrow("Invalid collection field path");
+    expect(() => Compiler.compile({ value })).toThrow("Invalid collection field path");
   });
 });

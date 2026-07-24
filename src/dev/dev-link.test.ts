@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DevLinkServiceClass } from "./dev-link";
+import { DevLink, DevLinkService, DevLinkServiceClass } from "./dev-link";
 
 class TestWorkspaceStore {
   private readonly paths: string[] = [];
@@ -70,6 +70,76 @@ describe("dev link", () => {
     await expect(
       new DevLinkServiceClass({ homeDir: home, repoRoot: repoPath }).link(),
     ).rejects.toThrow("Refusing to overwrite existing file");
+  });
+
+  test("builds replaceable resources and renders link results", () => {
+    expect(DevLink.create({})).toBeDefined();
+
+    const Service = new DevLinkService({
+      params: {
+        marker: "Rig dev shim",
+        unixShimName: "rig",
+        windowsShimName: "rig.cmd",
+        defaultBinDirectory: [".local", "bin"],
+      },
+      deps: {
+        createPaths() {
+          return {
+            homeDir() {
+              return "/home/rig";
+            },
+            resolve(params) {
+              return params.pathValue;
+            },
+          };
+        },
+        exists() {
+          return true;
+        },
+        async chmod() {},
+        async lstat() {
+          return { isFile: () => true };
+        },
+        async mkdir() {},
+        async readTextFile() {
+          return "";
+        },
+        async rm() {},
+        async writeTextFile() {},
+        cwd() {
+          return "/repo";
+        },
+        pathEnvironment() {
+          return "/bin";
+        },
+        platform() {
+          return "linux";
+        },
+        delimiter: ":",
+        join(...paths) {
+          return paths.join("/");
+        },
+        resolve(...paths) {
+          return paths.at(-1) ?? "";
+        },
+      },
+    });
+    const service = Service.create({ options: { repoRoot: "/repo" } });
+    const status = {
+      repoRoot: "/repo",
+      binDir: "/home/rig/.local/bin",
+      shimPath: "/home/rig/.local/bin/rig",
+      exists: true,
+      isRigDevShim: true,
+      pointsToCurrentRepo: true,
+      binDirOnPath: false,
+    };
+
+    expect(service.renderLinkResult({ status })).toContain("Add /home/rig/.local/bin to PATH");
+    expect(service.renderLinkResult({ status: { ...status, binDirOnPath: true } })).not.toContain(
+      "Add /home/rig/.local/bin to PATH",
+    );
+    expect(service.renderUnlinkResult({ status })).toContain("Rig dev link removed.");
   });
 
   test("writes a Windows command shim when requested", async () => {

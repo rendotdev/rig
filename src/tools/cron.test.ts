@@ -7,7 +7,13 @@ import { pathToFileURL } from "node:url";
 import { RigConfigStoreClass } from "../config/config";
 import { RigPathsClass } from "../config/paths";
 import { ToolCreatorClass } from "./create";
-import { cronModuleUrl, type CronRegistrar, RigCronServiceClass, RigCronWorkerClass } from "./cron";
+import {
+  cronModuleUrl,
+  type CronRegistrar,
+  type CronRunResult,
+  RigCronServiceClass,
+  RigCronWorkerClass,
+} from "./cron";
 
 class TestHomeStore {
   private readonly homes: string[] = [];
@@ -138,6 +144,20 @@ describe("cron tool commands", () => {
     expect(registrar.removed).toEqual(["weekly-jira"]);
     expect(existsSync(paths.cronWorkerPath("weekly-jira"))).toBe(false);
     expect((await new RigConfigStoreClass({ homeDir: home }).read()).cronJobs).toEqual([]);
+  });
+
+  test("runs workers through an injected service", async () => {
+    const run = vi.fn<() => Promise<CronRunResult>>(async () => ({
+      job: { name: "injected", command: "sample.example", schedule: "@daily" },
+      envelope: { data: { ok: true }, errors: [] },
+      exitCode: 0,
+    }));
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const worker = new RigCronWorkerClass({}, { service: { run } as never });
+
+    await worker.scheduled({ name: "injected" });
+
+    expect(run).toHaveBeenCalledWith({ name: "injected" });
   });
 
   test("supports input files and no explicit input", async () => {
@@ -499,24 +519,24 @@ describe("cron tool commands", () => {
 
   test("preserves a concurrent cron replacement during removal restoration", async () => {
     const home = await homes.create();
-    const service = new RigCronServiceClass(
-      { homeDir: home },
-      { registrar: new FakeCronRegistrar() },
-    );
-    const replacement = {
-      name: "weekly-jira",
-      command: "sample.example",
-      schedule: "@daily",
-    };
+    const registrar = new FakeCronRegistrar();
+    const service = new RigCronServiceClass({ homeDir: home }, { registrar });
+    const replacement = { name: "weekly-jira", command: "sample.example", schedule: "@daily" };
     const store = new RigConfigStoreClass({ homeDir: home });
     await store.update((config) => ({ ...config, cronJobs: [replacement] }));
     const transaction = (
       service as unknown as {
-        transaction: { restoreRemovedJob(job: typeof replacement): Promise<void> };
+        transaction: Record<
+          "remove" | "restoreRemovedJob" | "snapshot",
+          (...params: unknown[]) => unknown
+        >;
       }
     ).transaction;
 
     await transaction.restoreRemovedJob({ ...replacement, schedule: "@weekly" });
+    const workerPath = new RigPathsClass({ homeDir: home }).cronWorkerPath("missing");
+    expect(await transaction.snapshot({ workerPath })).toEqual({ workerSource: undefined });
+    expect(await transaction.remove({ snapshot: {}, workerPath, name: "missing" })).toBe(false);
 
     expect((await store.read()).cronJobs).toEqual([replacement]);
   });

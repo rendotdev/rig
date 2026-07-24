@@ -1,1 +1,1 @@
-export * from "./migration/directory-migration";
+export * from "../domains/settings/index.ts";

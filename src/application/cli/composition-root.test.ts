@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { CliCompositionRootClass } from "./composition-root";
-import { BunRuntimeBootstrapClass } from "./runtime-bootstrap";
+import { CliApplicationClass } from "./cli-application";
+import { CliCompositionRoot, CliCompositionRootClass } from "./composition-root";
+import { BunRuntimeBootstrapClass, CliEntrypointClass } from "./runtime-bootstrap";
 
 describe("CLI composition root", () => {
   it("runs the application when Bun bootstrap is unnecessary", async () => {
@@ -42,10 +43,36 @@ describe("CLI composition root", () => {
     expect(application.run).not.toHaveBeenCalled();
   });
 
-  it("constructs the default dependency graph", () => {
+  it("runs the production dependency graph through replaceable boundaries", async () => {
+    const applicationRun = vi
+      .spyOn(CliApplicationClass.prototype, "run")
+      .mockResolvedValue(undefined);
+    vi.spyOn(BunRuntimeBootstrapClass.prototype, "run").mockReturnValue(undefined);
+
+    await CliCompositionRoot.run({});
+
+    expect(applicationRun).toHaveBeenCalledWith([]);
     expect(
       new CliCompositionRootClass({ metaUrl: import.meta.url, argv: process.argv }, {}),
     ).toBeDefined();
     expect(new BunRuntimeBootstrapClass({}, {})).toBeDefined();
+  });
+
+  it("preserves the constructible entrypoint matcher", () => {
+    const entrypoint = new CliEntrypointClass(
+      {},
+      {
+        realpath(path) {
+          return `/resolved${path}`;
+        },
+        pathToFileUrl(path) {
+          return new URL(`file://${path}`);
+        },
+      },
+    );
+
+    expect(entrypoint.matches({ metaUrl: "file:///resolved/rig.ts", argvPath: "/rig.ts" })).toBe(
+      true,
+    );
   });
 });

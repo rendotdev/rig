@@ -37,6 +37,11 @@ export default defineConfig({
         input: ["src/**", "package.json", "tsconfig.json", "vite.config.ts", "bun.lock"],
         output: ["dist/**"],
       },
+      "build:package": {
+        command: 'bun -e "void 0"',
+        dependsOn: ["build"],
+        cache: false,
+      },
       test: {
         command: "vp test run src scripts --coverage",
         dependsOn: ["check"],
@@ -150,7 +155,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/**/*.d.ts", "src/**/*.test.{ts,tsx}", "src/tools/presentation/help-topics.ts"],
+      exclude: [
+        "src/**/*.d.ts",
+        "src/**/*.test.{ts,tsx}",
+        "src/tooling/**",
+        "src/tools/presentation/help-topics.ts",
+      ],
       reporter: ["text", "json-summary"],
       thresholds: {
         100: true,
@@ -182,6 +192,11 @@ export default defineConfig({
       perf: "warn",
     },
     rules: {
+      "rig/domain-public-api": "error",
+      "rig/layer-boundaries": "error",
+      "rig/max-file-lines": "error",
+      "rig/max-function-lines": "error",
+      "rig/source-location": "error",
       "typescript/no-base-to-string": "off",
       "typescript/no-extraneous-class": "off",
       "typescript/no-redundant-type-constituents": "off",
@@ -192,6 +207,8 @@ export default defineConfig({
       "typescript/no-unsafe-type-assertion": "off",
       "typescript/restrict-template-expressions": "off",
       "typescript/unbound-method": "off",
+      "no-useless-call": "off",
+      "vitest/require-mock-type-parameters": "off",
       "vite-plus/prefer-vite-plus-imports": "error",
     },
     ignorePatterns: ["dist/**", "coverage/**", "node_modules/**"],
@@ -200,6 +217,10 @@ export default defineConfig({
       typeCheck: true,
     },
     jsPlugins: [
+      {
+        name: "rig",
+        specifier: "./src/tooling/oxlint/oxlint-plugin.ts",
+      },
       {
         name: "vite-plus",
         specifier: "vite-plus/oxlint-plugin",

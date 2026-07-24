@@ -1,1 +1,1 @@
-export * from "./domain/config-schema";
+export * from "../domains/settings/index.ts";

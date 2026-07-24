@@ -1,1 +1,1 @@
-export * from "./filesystem/file-lock";
+export * from "../domains/settings/index.ts";

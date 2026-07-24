@@ -1,6 +1,7 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { defineService } from "../../define";
 
 export const DEFAULT_TRUNCATION_MAX_BYTES = 50 * 1024;
 export const DEFAULT_TRUNCATION_MAX_LINES = 2000;
@@ -19,39 +20,27 @@ export type OutputTruncationOptions = {
   maxLines?: number;
 };
 
-class TextMetricsClass {
-  private readonly encoder = new TextEncoder();
+// --- Internal helpers ---
 
-  byteLength(value: string): number {
-    return this.encoder.encode(value).byteLength;
-  }
-
-  lineCount(value: string): number {
-    if (value.length === 0) return 0;
-    return value.split("\n").length;
-  }
-}
-
-class TextHeadTruncatorClass {
-  private readonly metrics = new TextMetricsClass();
-  private readonly encoder = new TextEncoder();
-  private readonly decoder = new TextDecoder();
-
-  truncate(value: string, options: Required<OutputTruncationOptions>): TextTruncationResult {
-    const totalBytes = this.metrics.byteLength(value);
-    const totalLines = this.metrics.lineCount(value);
+function createTextTruncator(params: { encoder: TextEncoder; decoder: TextDecoder }) {
+  function truncate(
+    value: string,
+    options: Required<OutputTruncationOptions>,
+  ): TextTruncationResult {
+    const totalBytes = params.encoder.encode(value).byteLength;
+    const totalLines = value.length === 0 ? 0 : value.split("\n").length;
     let content = value;
 
     if (totalLines > options.maxLines) {
       content = content.split("\n").slice(0, options.maxLines).join("\n");
     }
 
-    if (this.metrics.byteLength(content) > options.maxBytes) {
-      content = this.decoder.decode(this.encoder.encode(content).slice(0, options.maxBytes));
+    if (params.encoder.encode(content).byteLength > options.maxBytes) {
+      content = params.decoder.decode(params.encoder.encode(content).slice(0, options.maxBytes));
     }
 
-    const outputBytes = this.metrics.byteLength(content);
-    const outputLines = this.metrics.lineCount(content);
+    const outputBytes = params.encoder.encode(content).byteLength;
+    const outputLines = content.length === 0 ? 0 : content.split("\n").length;
 
     return {
       content,
@@ -62,72 +51,155 @@ class TextHeadTruncatorClass {
       outputLines,
     };
   }
+
+  return { truncate };
 }
 
-class OutputTempFileStoreClass {
-  async writeJson(content: string): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), "rig-output-"));
-    const path = join(dir, "data.json");
-    /* v8 ignore next 3 */
-    if (typeof Bun !== "undefined") await Bun.write(path, `${content}\n`);
-    else await writeFile(path, `${content}\n`, "utf8");
-    return path;
-  }
-}
+const rigTextTruncatorHelper = createTextTruncator({
+  encoder: new TextEncoder(),
+  decoder: new TextDecoder(),
+});
 
-class JsonDataSerializerClass {
-  serialize(value: unknown): string {
-    return JSON.stringify(value, null, 2) ?? "null";
-  }
-}
-
-class SizeFormatterClass {
+const rigSizeFormatterHelper = {
   format(bytes: number): string {
     if (bytes < 1024) return `${bytes}B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-  }
+  },
+};
+
+// --- Bun/Node boundary helper ---
+
+/* v8 ignore next 3 */
+function getBunWrite(): ((path: string, data: string) => Promise<void>) | undefined {
+  if (typeof Bun === "undefined") return undefined;
+  return async function bunWrite(path: string, data: string) {
+    await Bun.write(path, data);
+  };
 }
 
-export class RigOutputTruncatorClass {
-  private readonly options: Required<OutputTruncationOptions>;
-  private readonly serializer = new JsonDataSerializerClass();
-  private readonly truncator = new TextHeadTruncatorClass();
-  private readonly store = new OutputTempFileStoreClass();
-  private readonly sizeFormatter = new SizeFormatterClass();
+// --- Service deps ---
 
-  constructor(options: OutputTruncationOptions = {}) {
-    this.options = {
-      maxBytes: options.maxBytes ?? DEFAULT_TRUNCATION_MAX_BYTES,
-      maxLines: options.maxLines ?? DEFAULT_TRUNCATION_MAX_LINES,
-    };
+const RigOutputTruncatorServiceDeps = {
+  tmpdir: function getTmpDir() {
+    return tmpdir();
+  },
+  mkdtemp: async function mkdtempAdapter(prefix: string) {
+    return mkdtemp(prefix);
+  },
+  nodeWriteFile: async function nodeWriteFile(path: string, data: string) {
+    await writeFile(path, data, "utf8");
+  },
+  join: function joinPaths(...paths: string[]) {
+    return join(...paths);
+  },
+  encoder: new TextEncoder(),
+  decoder: new TextDecoder(),
+  getBunWrite,
+};
+
+// --- Serializer ---
+
+function serializeOutputData(value: unknown): string {
+  return JSON.stringify(value, null, 2) ?? "null";
+}
+
+export class RigOutputTruncatorService extends defineService({
+  params: {
+    maxBytes: DEFAULT_TRUNCATION_MAX_BYTES,
+    maxLines: DEFAULT_TRUNCATION_MAX_LINES,
+  },
+  deps: RigOutputTruncatorServiceDeps,
+}) {
+  private readonly truncator = createTextTruncator({
+    encoder: this.deps.encoder,
+    decoder: this.deps.decoder,
+  });
+
+  private async writeOutputFile(params: { serialized: string }): Promise<string> {
+    const dir = await this.deps.mkdtemp(this.deps.join(this.deps.tmpdir(), "rig-output-"));
+    const path = this.deps.join(dir, "data.json");
+    const bunWrite = this.deps.getBunWrite();
+    if (bunWrite !== undefined) await bunWrite(path, `${params.serialized}\n`);
+    else await this.deps.nodeWriteFile(path, `${params.serialized}\n`);
+    return path;
   }
 
-  async truncateData(data: unknown): Promise<unknown> {
-    const serialized = this.serializer.serialize(data);
-    const truncation = this.truncator.truncate(serialized, this.options);
-    if (!truncation.truncated) return data;
+  public async truncateData(params: { data: unknown }): Promise<unknown> {
+    const serialized = serializeOutputData(params.data);
+    const result = this.truncator.truncate(serialized, {
+      maxBytes: this.params.maxBytes,
+      maxLines: this.params.maxLines,
+    });
 
-    const fullOutputPath = await this.store.writeJson(serialized);
-    const omittedBytes = truncation.totalBytes - truncation.outputBytes;
-    const omittedLines = truncation.totalLines - truncation.outputLines;
+    if (!result.truncated) return params.data;
+
+    const fullOutputPath = await this.writeOutputFile({ serialized });
+    const omittedBytes = result.totalBytes - result.outputBytes;
+    const omittedLines = result.totalLines - result.outputLines;
 
     return {
       truncated: true,
       strategy: "head",
-      preview: truncation.content,
+      preview: result.content,
       previewFormat: "partial-json",
       fullOutputPath,
       fullOutputFormat: "json",
-      maxBytes: this.options.maxBytes,
-      maxLines: this.options.maxLines,
-      totalBytes: truncation.totalBytes,
-      totalLines: truncation.totalLines,
-      shownBytes: truncation.outputBytes,
-      shownLines: truncation.outputLines,
+      maxBytes: this.params.maxBytes,
+      maxLines: this.params.maxLines,
+      totalBytes: result.totalBytes,
+      totalLines: result.totalLines,
+      shownBytes: result.outputBytes,
+      shownLines: result.outputLines,
       omittedBytes,
       omittedLines,
-      message: `Output truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${this.sizeFormatter.format(truncation.outputBytes)} of ${this.sizeFormatter.format(truncation.totalBytes)}). Full output saved to: ${fullOutputPath}`,
+      message: `Output truncated: showing ${result.outputLines} of ${result.totalLines} lines (${rigSizeFormatterHelper.format(result.outputBytes)} of ${rigSizeFormatterHelper.format(result.totalBytes)}). Full output saved to: ${fullOutputPath}`,
     };
   }
 }
+
+export const RigOutputTruncator = new RigOutputTruncatorService();
+
+// --- Class-free adapter (backward compatibility) ---
+
+type RigOutputTruncatorCompatibility = {
+  truncateData(data: unknown): Promise<unknown>;
+};
+
+type RigOutputTruncatorConstructor = {
+  new (options?: OutputTruncationOptions): RigOutputTruncatorCompatibility;
+  readonly prototype: RigOutputTruncatorCompatibility;
+};
+
+function RigOutputTruncatorClassAdapter(options: OutputTruncationOptions = {}) {
+  const maxBytes = options.maxBytes ?? DEFAULT_TRUNCATION_MAX_BYTES;
+  const maxLines = options.maxLines ?? DEFAULT_TRUNCATION_MAX_LINES;
+
+  const service =
+    maxBytes === DEFAULT_TRUNCATION_MAX_BYTES && maxLines === DEFAULT_TRUNCATION_MAX_LINES
+      ? RigOutputTruncator
+      : new RigOutputTruncatorService({
+          params: { maxBytes, maxLines },
+          deps: RigOutputTruncatorServiceDeps,
+        });
+
+  const adapter = Object.create(RigOutputTruncatorClassAdapter.prototype) as Record<
+    string,
+    unknown
+  >;
+  Object.defineProperties(adapter, {
+    truncateData: {
+      configurable: true,
+      value: function truncateData(data: unknown) {
+        return service.truncateData({ data });
+      },
+      writable: true,
+    },
+    truncator: { configurable: true, value: rigTextTruncatorHelper, writable: true },
+    sizeFormatter: { configurable: true, value: rigSizeFormatterHelper, writable: true },
+  });
+  return adapter;
+}
+
+export const RigOutputTruncatorClass =
+  RigOutputTruncatorClassAdapter as unknown as RigOutputTruncatorConstructor;
