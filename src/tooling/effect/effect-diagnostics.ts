@@ -1,11 +1,11 @@
 class EffectDiagnosticsClass {
   async run(): Promise<void> {
-    const executable = (await this.capture(["bunx", "@effect/tsgo", "get-exe-path"])).trim();
+    const executable = (await this.capture(["bunx", "effect-tsgo", "get-exe-path"])).trim();
     if (!executable) throw new Error("@effect/tsgo did not report its diagnostics executable.");
     if (process.platform !== "win32") await this.execute(["chmod", "+x", executable]);
     await this.execute([
       "bunx",
-      "@effect/tsgo",
+      "effect-tsgo",
       "diagnostics",
       "--project",
       "tsconfig.json",
