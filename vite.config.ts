@@ -24,6 +24,10 @@ export default defineConfig({
         input: ["src/**", "scripts/**", "test/**", "package.json", "tsconfig.json", "bun.lock"],
         output: [],
       },
+      "effect:reference": {
+        command: "git submodule update --init --depth 1 --recommend-shallow repos/effect",
+        cache: false,
+      },
       check: {
         command: "vp check",
         dependsOn: ["typecheck", "effect:diagnostics"],

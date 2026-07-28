@@ -86,9 +86,10 @@ in place behind Effect services when they already solve their responsibility wel
 - Preserve the final failure cause when retries are exhausted and record retry attempts in spans.
 - Keep pure transformations, React components, and Zod authoring APIs free of unnecessary Effect.
 
-The pinned Effect source will live under `repos/effect` as a read-only git subtree. Production code
-imports the installed `effect` packages, never files under `repos/effect`. Agents should read the
-vendored `LLMS.md`, patterns, source, and tests before relying on remembered APIs.
+The pinned Effect source lives under `repos/effect` as a shallow, read-only git submodule. Run
+`vp run effect:reference` when it is missing from a fresh checkout. Production code imports the
+installed `effect` packages, never files under `repos/effect`. Agents should read the referenced
+`LLMS.md`, patterns, source, and tests before relying on remembered APIs.
 
 ## Dependency rules
 
