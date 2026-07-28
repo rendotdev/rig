@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { defineService } from "../../../define.ts";
-import { AtomicFileWriterClass, BoundedFileLockClass } from "../repo/file-lock.ts";
+import { AtomicFileWriterClass } from "../repo/atomic-file-writer.ts";
+import type { BoundedFileLockClass } from "../repo/file-lock.ts";
 import { RigPathsClass } from "../repo/rig-paths.ts";
 
 export const RigHomeDirectoryMigrationPromptId = "v0.0.19-home-directory";
@@ -32,7 +32,12 @@ type RigMigrationPromptStoreDeps = {
 function createRigMigrationPromptStoreDeps(paths: RigPathsClass): RigMigrationPromptStoreDeps {
   return {
     paths,
-    lock: new BoundedFileLockClass(paths.migrationPromptStatePath),
+    lock: {
+      async run<Result>(operation: () => Result | Promise<Result>): Promise<Result> {
+        const { BoundedFileLockClass } = await import("../repo/file-lock.ts");
+        return await new BoundedFileLockClass(paths.migrationPromptStatePath).run(operation);
+      },
+    },
     writer: new AtomicFileWriterClass(),
     readFile,
     nowIso() {
@@ -61,10 +66,21 @@ const RigMigrationPromptStoreProductionDeps = createRigMigrationPromptStoreDeps(
   new RigPathsClass(),
 );
 
-export class RigMigrationPromptStoreService extends defineService({
-  params: {},
-  deps: RigMigrationPromptStoreProductionDeps,
-}) {
+export class RigMigrationPromptStoreService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigMigrationPromptStoreProductionDeps,
+  };
+  protected readonly params: (typeof RigMigrationPromptStoreService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigMigrationPromptStoreService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigMigrationPromptStoreService.defaultConstruction = RigMigrationPromptStoreService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private async read(_params: {}): Promise<RigMigrationPromptState> {
     try {
       const candidate = {
@@ -187,10 +203,21 @@ const RigDirectoryMigrationServiceProductionDeps = createRigDirectoryMigrationSe
   new RigPathsClass(),
 );
 
-export class RigDirectoryMigrationService extends defineService({
-  params: {},
-  deps: RigDirectoryMigrationServiceProductionDeps,
-}) {
+export class RigDirectoryMigrationService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigDirectoryMigrationServiceProductionDeps,
+  };
+  protected readonly params: (typeof RigDirectoryMigrationService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigDirectoryMigrationService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigDirectoryMigrationService.defaultConstruction = RigDirectoryMigrationService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private async directoryExists(params: { path: string }): Promise<boolean> {
     try {
       return (await this.deps.stat(params.path)).isDirectory();

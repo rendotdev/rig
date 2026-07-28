@@ -18,11 +18,13 @@ import {
   AtomicFileWriterClass,
   AtomicFileWriter,
   AtomicFileWriterRepo,
+  type AtomicFileWriterDeps,
+} from "./atomic-file-writer";
+import {
   BoundedFileLockClass,
   BoundedFileLock,
   BoundedFileLockRepo,
   FileSystemErrorsSingleton,
-  type AtomicFileWriterDeps,
   type BoundedFileLockDeps,
 } from "./file-lock";
 
@@ -196,6 +198,39 @@ describe("BoundedFileLockRepo", () => {
     await expect(lock.run({ operation: () => "done" })).rejects.toThrow(/Timed out/);
 
     await rm(lockPath, { recursive: true, force: true });
+  });
+
+  test("preserves parent-directory creation failures", async () => {
+    const directory = await directories.create();
+    const target = join(directory, "nested", "state.json");
+    const service = new BoundedFileLockRepo({
+      params: { timeoutMs: 50, staleMs: 30_000, retryMs: 0 },
+      deps: makeProductionLockDeps({
+        async mkdir(path, options) {
+          if (options?.recursive) throw new Error("parent creation failed");
+          return await mkdir(path, options);
+        },
+      }),
+    });
+
+    await expect(
+      service.create({ targetPath: target }).run({ operation: () => "done" }),
+    ).rejects.toThrow("parent creation failed");
+  });
+
+  test("bounds retries when the injected clock stalls", async () => {
+    const directory = await directories.create();
+    const target = join(directory, "state.json");
+    const lockPath = `${target}.lock`;
+    await mkdir(lockPath);
+    const service = new BoundedFileLockRepo({
+      params: { timeoutMs: 1, staleMs: 30_000, retryMs: 100 },
+      deps: makeProductionLockDeps({ now: () => 0, sleep: noopSleep }),
+    });
+
+    await expect(
+      service.create({ targetPath: target }).run({ operation: () => "done" }),
+    ).rejects.toThrow("Timed out waiting for lock");
   });
 });
 

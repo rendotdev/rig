@@ -1,5 +1,4 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { defineService, defineSingleton } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { ToolDiscoveryServiceClass } from "../../registry/discover";
 import { CurrentRigToolApiVersion } from "../../tools/domain/tool-api";
@@ -127,12 +126,10 @@ function upsertRuntimePrefix(params: { source: string }): string {
   return `${shebang?.[0] ?? ""}${next}\n`;
 }
 
-export const ToolRuntimeInstructionSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolRuntimeInstructionSingleton = {
   renderPrefix: renderRuntimePrefix,
   upsertPrefix: upsertRuntimePrefix,
-});
+};
 
 function bunFileApi(_params: {}): BunFileApi | undefined {
   const candidate = (globalThis as typeof globalThis & { Bun?: Partial<BunFileApi> }).Bun;
@@ -181,10 +178,21 @@ function createToolRuntimeInstructionSyncDeps(
 
 const ToolRuntimeInstructionSyncProductionDeps = createToolRuntimeInstructionSyncDeps({});
 
-export class ToolRuntimeInstructionSyncService extends defineService({
-  params: {},
-  deps: ToolRuntimeInstructionSyncProductionDeps,
-}) {
+export class ToolRuntimeInstructionSyncService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolRuntimeInstructionSyncProductionDeps,
+  };
+  protected readonly params: (typeof ToolRuntimeInstructionSyncService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolRuntimeInstructionSyncService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolRuntimeInstructionSyncService.defaultConstruction = ToolRuntimeInstructionSyncService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private async updateFile(params: { path: string }): Promise<boolean> {
     const existing = await this.deps.readText(params);
     const next = ToolRuntimeInstructionSingleton.upsertPrefix({ source: existing });

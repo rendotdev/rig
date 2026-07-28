@@ -1,7 +1,14 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { defineService } from "../../define";
+import type * as Layer from "effect/Layer";
+import {
+  applyUpdate,
+  makeRigUpdaterLayer,
+  planUpdate,
+  RigUpdaterRuntimeService,
+  syncUpdate,
+} from "./rig-updater-effect-service";
 
 export type RigUpdateStep = {
   command: string;
@@ -32,7 +39,7 @@ export type RigUpdateResult =
   | { status: "current"; version: string }
   | { status: "skipped"; reason: string };
 
-type RunnableRigUpdatePlan = Exclude<RigUpdatePlan, { status: "skipped" }>;
+export type RunnableRigUpdatePlan = Exclude<RigUpdatePlan, { status: "skipped" }>;
 
 type RigUpdateCommandRunnerDeps = {
   spawn: typeof spawn;
@@ -44,10 +51,21 @@ const RigUpdateCommandRunnerProductionDeps: RigUpdateCommandRunnerDeps = {
   env: process.env,
 };
 
-export class RigUpdateCommandRunnerService extends defineService({
-  params: {},
-  deps: RigUpdateCommandRunnerProductionDeps,
-}) {
+export class RigUpdateCommandRunnerService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigUpdateCommandRunnerProductionDeps,
+  };
+  protected readonly params: (typeof RigUpdateCommandRunnerService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigUpdateCommandRunnerService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigUpdateCommandRunnerService.defaultConstruction = RigUpdateCommandRunnerService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private async execute(params: RigUpdateStep): Promise<string> {
     return await new Promise<string>((resolvePromise, reject) => {
       const child = this.deps.spawn(params.command, params.args, {
@@ -222,11 +240,23 @@ function parseLatestVersion(params: { output: string }): string {
   return value.trim();
 }
 
-export class RigUpdaterService extends defineService({
-  params: { packageRoot: "", currentVersion: "" },
-  deps: RigUpdaterProductionDeps,
-}) {
-  private readonly packageRoot = this.deps.resolve(this.params.packageRoot);
+export class RigUpdaterService {
+  public static readonly defaultConstruction = {
+    params: { packageRoot: "", currentVersion: "" },
+    deps: RigUpdaterProductionDeps,
+  };
+  protected readonly params: (typeof RigUpdaterService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigUpdaterService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigUpdaterService.defaultConstruction = RigUpdaterService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+    this.packageRoot = this.deps.resolve(this.params.packageRoot);
+  }
+
+  private readonly packageRoot: string;
 
   public getCurrentVersion(_params: {}): string {
     return this.params.currentVersion;
@@ -330,29 +360,10 @@ export class RigUpdaterService extends defineService({
   }
 }
 
-export type RigUpdaterClass = {
-  getCurrentVersion(): string;
-  plan(): Promise<RigUpdatePlan>;
-  update(params: { plan?: RigUpdatePlan }): Promise<RigUpdateResult>;
-  sync(params: { plan: RunnableRigUpdatePlan }): Promise<{ step: RigUpdateStep; output: string }>;
-};
-
 type RigUpdaterConstructorDeps = Pick<
   RigUpdaterDeps,
   "executableExists" | "readCommand" | "runCommand"
 >;
-
-type RigUpdaterConstructor = {
-  new (
-    params: { packageRoot: string; currentVersion: string },
-    deps: RigUpdaterConstructorDeps,
-  ): RigUpdaterClass;
-  readonly prototype: RigUpdaterClass;
-};
-
-type RigUpdaterAdapter = RigUpdaterClass & {
-  readonly resource: RigUpdaterService;
-};
 
 function buildRigUpdater(params: {
   params: { packageRoot: string; currentVersion: string };
@@ -370,48 +381,34 @@ function buildRigUpdater(params: {
   });
 }
 
-const RigUpdaterClassAdapter = function constructRigUpdater(
-  this: RigUpdaterAdapter,
-  params: { packageRoot: string; currentVersion: string },
-  deps: RigUpdaterConstructorDeps,
-): void {
-  Object.defineProperty(this, "resource", {
-    value: buildRigUpdater({ params, deps }),
-  });
-};
-Object.defineProperty(RigUpdaterClassAdapter, "name", { value: "RigUpdaterClass" });
-Object.defineProperties(RigUpdaterClassAdapter.prototype, {
-  getCurrentVersion: {
-    configurable: true,
-    value: function getCurrentVersion(this: RigUpdaterAdapter) {
-      return this.resource.getCurrentVersion({});
-    },
-    writable: true,
-  },
-  plan: {
-    configurable: true,
-    value: function plan(this: RigUpdaterAdapter) {
-      return this.resource.plan({});
-    },
-    writable: true,
-  },
-  update: {
-    configurable: true,
-    value: function update(this: RigUpdaterAdapter, params: { plan?: RigUpdatePlan }) {
-      return this.resource.update(params);
-    },
-    writable: true,
-  },
-  sync: {
-    configurable: true,
-    value: function sync(this: RigUpdaterAdapter, params: { plan: RunnableRigUpdatePlan }) {
-      return this.resource.sync(params);
-    },
-    writable: true,
-  },
-});
+export class RigUpdaterClass {
+  public readonly resource: RigUpdaterService;
+  public readonly layer: Layer.Layer<RigUpdaterRuntimeService>;
 
-export const RigUpdaterClass = RigUpdaterClassAdapter as unknown as RigUpdaterConstructor;
+  public constructor(
+    params: { packageRoot: string; currentVersion: string },
+    deps: RigUpdaterConstructorDeps,
+  ) {
+    this.resource = buildRigUpdater({ params, deps });
+    this.layer = makeRigUpdaterLayer(this.resource);
+  }
+
+  public getCurrentVersion(): string {
+    return this.resource.getCurrentVersion({});
+  }
+
+  public plan(): Promise<RigUpdatePlan> {
+    return planUpdate(this.layer);
+  }
+
+  public update(params: { plan?: RigUpdatePlan }): Promise<RigUpdateResult> {
+    return applyUpdate(this.layer, params.plan);
+  }
+
+  public sync(params: { plan: RunnableRigUpdatePlan }) {
+    return syncUpdate(this.layer, params.plan);
+  }
+}
 
 type RigUpdaterFactoryDeps = {
   spawn: typeof spawn;
@@ -425,10 +422,21 @@ const RigUpdaterFactoryProductionDeps: RigUpdaterFactoryDeps = {
   executableExists: existsSync,
 };
 
-export class RigUpdaterFactoryService extends defineService({
-  params: {},
-  deps: RigUpdaterFactoryProductionDeps,
-}) {
+export class RigUpdaterFactoryService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigUpdaterFactoryProductionDeps,
+  };
+  protected readonly params: (typeof RigUpdaterFactoryService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigUpdaterFactoryService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigUpdaterFactoryService.defaultConstruction = RigUpdaterFactoryService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public create(params: { packageRoot: string; currentVersion: string }): RigUpdaterService {
     const runner = new RigUpdateCommandRunnerService({
       params: {},
@@ -459,8 +467,11 @@ type RigUpdaterFactoryAdapter = RigUpdaterFactoryClass & {
 };
 
 function adaptRigUpdaterResource(resource: RigUpdaterService): RigUpdaterClass {
-  const adapter = Object.create(RigUpdaterClassAdapter.prototype) as RigUpdaterAdapter;
-  Object.defineProperty(adapter, "resource", { value: resource });
+  const adapter = Object.create(RigUpdaterClass.prototype) as RigUpdaterClass;
+  Object.defineProperties(adapter, {
+    resource: { value: resource },
+    layer: { value: makeRigUpdaterLayer(resource) },
+  });
   return adapter;
 }
 

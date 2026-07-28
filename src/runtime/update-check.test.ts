@@ -151,4 +151,33 @@ describe("npm update checks", () => {
     });
     await expect(aborted.check("1.0.0")).resolves.toBeUndefined();
   });
+
+  test("retries transient registry failures once and preserves permanent failures", async () => {
+    const home = await workspaces.create();
+    let attempts = 0;
+    const transient = new NpmUpdateCheckServiceClass({
+      homeDir: home,
+      fetch: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? { ok: false, status: 503, json: async () => ({}) }
+          : { ok: true, status: 200, json: async () => ({ version: "2.0.0" }) };
+      },
+    });
+
+    await expect(transient.check("1.0.0")).resolves.toMatchObject({ latestVersion: "2.0.0" });
+    expect(attempts).toBe(2);
+
+    const permanentHome = await workspaces.create();
+    let permanentAttempts = 0;
+    const permanent = new NpmUpdateCheckServiceClass({
+      homeDir: permanentHome,
+      fetch: async () => {
+        permanentAttempts += 1;
+        return { ok: false, status: 404, json: async () => ({}) };
+      },
+    });
+    await expect(permanent.check("1.0.0")).resolves.toBeUndefined();
+    expect(permanentAttempts).toBe(1);
+  });
 });

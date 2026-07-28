@@ -3,7 +3,6 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
-import { defineRuntime, defineService, defineSingleton } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { RigErrorClass } from "../../errors/RigError";
 import type { SuccessEnvelope } from "../../runtime/envelope";
@@ -37,10 +36,21 @@ const RigPathRuntimeProductionDeps = {
   resolve,
 };
 
-export class RigPathRuntimeService extends defineRuntime({
-  params: {},
-  deps: RigPathRuntimeProductionDeps,
-}) {
+export class RigPathRuntimeService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigPathRuntimeProductionDeps,
+  };
+  protected readonly params: (typeof RigPathRuntimeService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigPathRuntimeService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigPathRuntimeService.defaultConstruction = RigPathRuntimeService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public home(_params: {}): string {
     return this.deps.homedir();
   }
@@ -109,11 +119,9 @@ function createRigArgBuilder(_params: {}): RigArgBuilder {
   return builder;
 }
 
-export const RigArgsRuntimeSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const RigArgsRuntimeSingleton = {
   create: createRigArgBuilder,
-});
+};
 
 type RigToolKitFactoryOptions = ConfigOptions;
 
@@ -147,10 +155,21 @@ function commandTarget(params: { options: RigRunOptions }): {
     : commandTargets.parse(params.options.command);
 }
 
-export class RigCommandRunnerService extends defineService({
-  params: {} as RigToolKitFactoryOptions,
-  deps: RigCommandRunnerProductionDeps,
-}) {
+export class RigCommandRunnerService {
+  public static readonly defaultConstruction = {
+    params: {} as RigToolKitFactoryOptions,
+    deps: RigCommandRunnerProductionDeps,
+  };
+  protected readonly params: (typeof RigCommandRunnerService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigCommandRunnerService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigCommandRunnerService.defaultConstruction = RigCommandRunnerService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async run<T = unknown>(params: { options: RigRunOptions }): Promise<T> {
     const target = commandTarget(params);
     const runner = this.deps.runner ?? (await this.deps.createDefaultRunner(this.params));
@@ -190,10 +209,21 @@ const RigToolKitFactoryProductionDeps: RigToolKitFactoryDeps = {
   },
 };
 
-export class RigToolKitFactoryService extends defineService({
-  params: {} as RigToolKitFactoryOptions,
-  deps: RigToolKitFactoryProductionDeps,
-}) {
+export class RigToolKitFactoryService {
+  public static readonly defaultConstruction = {
+    params: {} as RigToolKitFactoryOptions,
+    deps: RigToolKitFactoryProductionDeps,
+  };
+  protected readonly params: (typeof RigToolKitFactoryService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigToolKitFactoryService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigToolKitFactoryService.defaultConstruction = RigToolKitFactoryService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public create(_params: {}): RigToolKit {
     const shell = this.deps.createShell();
     const commandRunner = new RigCommandRunnerService({
@@ -252,11 +282,9 @@ function defineRigTool(params: { value: ToolModuleDefault }): ToolModuleDefault 
   return defineTool(params.value as never);
 }
 
-export const RigToolSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const RigToolSingleton = {
   define: defineRigTool,
-});
+};
 
 export type RigToolClass = {
   define(value: ToolDefinitionInput): ToolDefinitionInput;

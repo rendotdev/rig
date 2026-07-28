@@ -1,4 +1,3 @@
-import { defineSingleton } from "../../define";
 import type { ErrorCode } from "../../errors/codes";
 
 export type RigIssue = {
@@ -32,12 +31,10 @@ function buildErrorEnvelope(params: {
   };
 }
 
-export const EnvelopeFactorySingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const EnvelopeFactorySingleton = {
   success: buildSuccessEnvelope,
   error: buildErrorEnvelope,
-});
+};
 
 // --- Class-free adapter (backward compatibility) ---
 

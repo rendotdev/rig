@@ -10,8 +10,7 @@ export const sourceLocationRule = defineRule({
         "Use one of Rig's configured business domains. Update the shared architecture model only when introducing a durable business capability.",
       invalidLayer:
         "Place this file in types, config, repo, service, runtime, or ui according to its responsibility.",
-      invalidLocation:
-        "Place production code under app, domains, providers, utils, or tooling. Keep define.ts at the source root.",
+      invalidLocation: "Place production code under app, domains, providers, utils, or tooling.",
     },
   },
   create(context) {

@@ -1,6 +1,5 @@
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
-import { defineRepo } from "../../../define.ts";
 
 export type PathOptions = {
   homeDir?: string;
@@ -15,17 +14,28 @@ const RigPathsProductionDeps = {
   resolve: resolvePath,
 };
 
-export class RigPathsRepo extends defineRepo({
-  params: {
-    homeDir: undefined,
-    defaultBaseRegistryDirValue: "~/rig/tools",
-    legacyDefaultBaseRegistryDirValue: "~/.rig/tools",
-  } as PathOptions & {
-    defaultBaseRegistryDirValue: string;
-    legacyDefaultBaseRegistryDirValue: string;
-  },
-  deps: RigPathsProductionDeps,
-}) {
+export class RigPathsRepo {
+  public static readonly defaultConstruction = {
+    params: {
+      homeDir: undefined,
+      defaultBaseRegistryDirValue: "~/rig/tools",
+      legacyDefaultBaseRegistryDirValue: "~/.rig/tools",
+    } as PathOptions & {
+      defaultBaseRegistryDirValue: string;
+      legacyDefaultBaseRegistryDirValue: string;
+    },
+    deps: RigPathsProductionDeps,
+  };
+  protected readonly params: (typeof RigPathsRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigPathsRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigPathsRepo.defaultConstruction = RigPathsRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public homeDir(params: Record<string, never>): string {
     void params;
     return this.params.homeDir

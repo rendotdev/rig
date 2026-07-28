@@ -2,7 +2,6 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { defineRepo, defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 import type {
   LoadedTool,
@@ -88,11 +87,9 @@ function cacheKeyIdentity(params: { queryKey: RigCacheKey }): CacheIdentity {
   return { hash: createHash("sha256").update(json).digest("hex"), json };
 }
 
-export const CacheKeyHasherSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const CacheKeyHasherSingleton = {
   identity: cacheKeyIdentity,
-});
+};
 
 function staleTime(params: { value: number | undefined }): number {
   const value = params.value ?? 0;
@@ -227,11 +224,9 @@ function createSqliteToolCache(params: {
   };
 }
 
-export const SqliteToolCacheSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const SqliteToolCacheSingleton = {
   create: createSqliteToolCache,
-});
+};
 
 function createLazyToolCache(params: {
   path: string;
@@ -269,11 +264,9 @@ function createLazyToolCache(params: {
   };
 }
 
-export const LazyToolCacheSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const LazyToolCacheSingleton = {
   create: createLazyToolCache,
-});
+};
 
 function createUnavailableToolCache(params: { path: string }): ManagedRigToolCache {
   function unavailable(): never {
@@ -295,11 +288,9 @@ function createUnavailableToolCache(params: { path: string }): ManagedRigToolCac
   };
 }
 
-export const UnavailableToolCacheSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const UnavailableToolCacheSingleton = {
   create: createUnavailableToolCache,
-});
+};
 
 type RigToolCacheFactoryDeps = {
   sqliteAvailable: () => boolean;
@@ -324,10 +315,21 @@ function createRigToolCacheFactoryDeps(): RigToolCacheFactoryDeps {
 
 const RigToolCacheFactoryProductionDeps = createRigToolCacheFactoryDeps();
 
-export class RigToolCacheFactoryRepo extends defineRepo({
-  params: {},
-  deps: RigToolCacheFactoryProductionDeps,
-}) {
+export class RigToolCacheFactoryRepo {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigToolCacheFactoryProductionDeps,
+  };
+  protected readonly params: (typeof RigToolCacheFactoryRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigToolCacheFactoryRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigToolCacheFactoryRepo.defaultConstruction = RigToolCacheFactoryRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public cachePathForToolPath(params: { toolPath: string }): string {
     return this.deps.join(this.deps.dirname(params.toolPath), "cache.sqlite");
   }
@@ -394,10 +396,21 @@ const ToolCacheServiceProductionDeps: ToolCacheServiceDeps = {
   },
 };
 
-export class ToolCacheRepo extends defineRepo({
-  params: {},
-  deps: ToolCacheServiceProductionDeps,
-}) {
+export class ToolCacheRepo {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolCacheServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolCacheRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolCacheRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolCacheRepo.defaultConstruction = ToolCacheRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async setup(params: {
     tool: LoadedTool;
     log: RigToolLogger;

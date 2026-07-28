@@ -1,4 +1,3 @@
-import { defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 
 export type CompiledCollectionFieldPath = {
@@ -13,9 +12,7 @@ function invalidFieldPath(value: unknown): InstanceType<typeof RigErrorClass> {
   });
 }
 
-export const CollectionFieldPathSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const CollectionFieldPathSingleton = {
   compile(params: { value: string }): CompiledCollectionFieldPath {
     if (typeof params.value !== "string" || params.value.length === 0) {
       throw invalidFieldPath(params.value);
@@ -41,7 +38,7 @@ export const CollectionFieldPathSingleton = defineSingleton({
       },
     };
   },
-});
+};
 
 type CollectionFieldPathCompilerConstructor = {
   new (): CollectionFieldPathCompilerClass;

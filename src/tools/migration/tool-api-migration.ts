@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { defineService } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { ToolDiscoveryServiceClass, type DiscoveredTool } from "../../registry/discover";
 import { CurrentRigToolApiVersion } from "../domain/tool-api";
@@ -95,10 +94,21 @@ function renderToolApiCli(params: { report: ToolApiMigrationReport }): string {
   return renderToolApiAgentInstructions(params).replace(/^### /, "");
 }
 
-export class ToolApiMigrationService extends defineService({
-  params: {} as ConfigOptions,
-  deps: ToolApiMigrationProductionDeps,
-}) {
+export class ToolApiMigrationService {
+  public static readonly defaultConstruction = {
+    params: {} as ConfigOptions,
+    deps: ToolApiMigrationProductionDeps,
+  };
+  protected readonly params: (typeof ToolApiMigrationService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolApiMigrationService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolApiMigrationService.defaultConstruction = ToolApiMigrationService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private get discovery() {
     return this.deps.createDiscovery({ options: this.params });
   }

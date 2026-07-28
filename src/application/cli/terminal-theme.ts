@@ -1,5 +1,4 @@
 import type { TextProps } from "ink";
-import { defineSingleton } from "../../define";
 
 type TerminalColorsValue = {
   readonly loading: NonNullable<TextProps["color"]>;
@@ -27,26 +26,22 @@ function TerminalIconsClassAdapter(this: TerminalIconsValue) {
   Object.assign(this, TerminalIconsSingleton);
 }
 
-export const TerminalColorsSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const TerminalColorsSingleton = {
   loading: "cyan" as NonNullable<TextProps["color"]>,
   success: "green" as NonNullable<TextProps["color"]>,
   error: "red" as NonNullable<TextProps["color"]>,
   muted: "gray" as NonNullable<TextProps["color"]>,
-});
+};
 
-export const TerminalIconsSingleton = defineSingleton({
-  params: {
-    loadingFrames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-  },
-  deps: {},
+const TerminalLoadingFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+export const TerminalIconsSingleton = {
   success: "✔",
   error: "✖",
   loading(params: { frame: number }): string {
-    return this.params.loadingFrames[params.frame % this.params.loadingFrames.length] as string;
+    return TerminalLoadingFrames[params.frame % TerminalLoadingFrames.length] as string;
   },
-});
+};
 
 export const TerminalColorsClass =
   TerminalColorsClassAdapter as unknown as LegacyConstructor<TerminalColorsValue>;

@@ -1,7 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineService } from "../../define";
 
 type RigPackageRootServiceDeps = {
   getRigPackageRootEnvironment: () => string | undefined;
@@ -43,10 +42,21 @@ function isBunBinary(params: { metaUrl: string }): boolean {
   );
 }
 
-export class RigPackageRootService extends defineService({
-  params: {},
-  deps: RigPackageRootServiceDeps,
-}) {
+export class RigPackageRootService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigPackageRootServiceDeps,
+  };
+  protected readonly params: (typeof RigPackageRootService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigPackageRootService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigPackageRootService.defaultConstruction = RigPackageRootService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private safeRealpath(params: { pathValue: string }): string | undefined {
     try {
       return this.deps.realpathSync(params.pathValue);

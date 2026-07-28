@@ -1,11 +1,8 @@
-import { defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 
 const RoutedNamePattern = /^[A-Za-z0-9_-]+$/;
 
-export const ToolNameSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolNameSingleton = {
   create(params: { value: string }) {
     if (typeof params.value !== "string" || !RoutedNamePattern.test(params.value)) {
       throw new RigErrorClass("TOOL_INVALID", `Invalid tool name: ${params.value}`, {
@@ -17,11 +14,9 @@ export const ToolNameSingleton = defineSingleton({
   parse(params: { value: string }) {
     return ToolNameSingleton.create(params);
   },
-});
+};
 
-export const CommandNameSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const CommandNameSingleton = {
   create(params: { value: string }) {
     if (typeof params.value !== "string" || !RoutedNamePattern.test(params.value)) {
       throw new RigErrorClass("TOOL_INVALID", `Invalid command name: ${params.value}`, {
@@ -33,11 +28,9 @@ export const CommandNameSingleton = defineSingleton({
   parse(params: { value: string }) {
     return CommandNameSingleton.create(params);
   },
-});
+};
 
-export const CollectionNameSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const CollectionNameSingleton = {
   create(params: { value: string }) {
     if (typeof params.value !== "string" || !RoutedNamePattern.test(params.value)) {
       throw new RigErrorClass("TOOL_INVALID", `Invalid collection name: ${params.value}`, {
@@ -49,28 +42,28 @@ export const CollectionNameSingleton = defineSingleton({
   parse(params: { value: string }) {
     return CollectionNameSingleton.create(params);
   },
-});
+};
 
-export const CommandTargetSingleton = defineSingleton({
-  params: { idSeparator: ".", expectedIdFormat: "<tool>.<command>" },
-  deps: { ToolNameSingleton, CommandNameSingleton },
+const CommandTargetConfig = { idSeparator: ".", expectedIdFormat: "<tool>.<command>" } as const;
+
+export const CommandTargetSingleton = {
   create(params: { tool: string; command: string }) {
     return {
       tool: params.tool,
       command: params.command,
-      id: `${params.tool}${this.params.idSeparator}${params.command}`,
+      id: `${params.tool}${CommandTargetConfig.idSeparator}${params.command}`,
     };
   },
   from(params: { tool: string; command: string }) {
     return CommandTargetSingleton.create({
-      tool: this.deps.ToolNameSingleton.create({ value: params.tool }).value,
-      command: this.deps.CommandNameSingleton.create({ value: params.command }).value,
+      tool: ToolNameSingleton.create({ value: params.tool }).value,
+      command: CommandNameSingleton.create({ value: params.command }).value,
     });
   },
   invalid(params: { id: unknown }) {
     return new RigErrorClass(
       "INPUT_ERROR",
-      `Command id must use ${this.params.expectedIdFormat}: ${String(params.id)}`,
+      `Command id must use ${CommandTargetConfig.expectedIdFormat}: ${String(params.id)}`,
     );
   },
   parse(params: { id: string }) {
@@ -79,7 +72,7 @@ export const CommandTargetSingleton = defineSingleton({
     if (!match) throw CommandTargetSingleton.invalid({ id: params.id });
     return CommandTargetSingleton.create({ tool: match[1]!, command: match[2]! });
   },
-});
+};
 
 export type ToolNameClass = {
   readonly value: string;

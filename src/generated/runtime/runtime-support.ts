@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { defineService } from "../../define";
 import { RigPathsClass, type PathOptions } from "../../config/paths";
 
 type BunFileApi = {
@@ -46,11 +45,15 @@ const RuntimeSupportProductionDeps = {
   },
 };
 
-export class RuntimeSupportService extends defineService({
-  params: {} as PathOptions,
-  deps: RuntimeSupportProductionDeps,
-}) {
-  private readonly paths = this.deps.createPaths(this.params);
+export class RuntimeSupportService {
+  public constructor(
+    params: PathOptions = {},
+    protected readonly deps: typeof RuntimeSupportProductionDeps = RuntimeSupportProductionDeps,
+  ) {
+    this.paths = this.deps.createPaths(params);
+  }
+
+  private readonly paths: RigPathsClass;
 
   private async readTextIfExists(params: { path: string }): Promise<string | undefined> {
     const bun = this.deps.bunFileApi({});
@@ -126,7 +129,7 @@ const RuntimeSupportClassAdapter = function constructRuntimeSupport(
   options: PathOptions = {},
 ): void {
   Object.defineProperty(this, "resource", {
-    value: new RuntimeSupportService({ params: options, deps: RuntimeSupportProductionDeps }),
+    value: new RuntimeSupportService(options, RuntimeSupportProductionDeps),
   });
 };
 Object.defineProperty(RuntimeSupportClassAdapter, "name", { value: "RuntimeSupportClass" });

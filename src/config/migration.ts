@@ -1,1 +1,1 @@
-export * from "../domains/settings/index.ts";
+export * from "../domains/settings/service/directory-migration.ts";

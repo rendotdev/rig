@@ -1,4 +1,3 @@
-import { defineService } from "../../define";
 import { CliApplicationClass } from "./cli-application";
 import { BunRuntimeBootstrapClass } from "./runtime-bootstrap";
 
@@ -29,10 +28,21 @@ const CliCompositionRootProductionDeps: CliCompositionRootServiceDeps = {
   exit: process.exit.bind(process),
 };
 
-export class CliCompositionRootService extends defineService({
-  params: { metaUrl: "", argv: [] } as CliCompositionRootParams,
-  deps: CliCompositionRootProductionDeps,
-}) {
+export class CliCompositionRootService {
+  public static readonly defaultConstruction = {
+    params: { metaUrl: "", argv: [] } as CliCompositionRootParams,
+    deps: CliCompositionRootProductionDeps,
+  };
+  protected readonly params: (typeof CliCompositionRootService.defaultConstruction)["params"];
+  protected readonly deps: (typeof CliCompositionRootService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof CliCompositionRootService.defaultConstruction = CliCompositionRootService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async run(_params: {}): Promise<void> {
     const bootstrapped = this.deps.runRuntimeBootstrap({
       metaUrl: this.params.metaUrl,

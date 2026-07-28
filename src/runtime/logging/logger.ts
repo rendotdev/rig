@@ -11,7 +11,6 @@ import {
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import pino, { type Logger } from "pino";
-import { defineRuntime, defineService, defineSingleton } from "../../define";
 import { RigPathsClass, type PathOptions } from "../../config/paths";
 
 export type RigLoggerOptions = PathOptions & {
@@ -66,11 +65,9 @@ function resolveLoggerOptions(params: { options: RigLoggerOptions }): ResolvedRi
   };
 }
 
-export const RigLoggerOptionResolverSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const RigLoggerOptionResolverSingleton = {
   resolve: resolveLoggerOptions,
-});
+};
 
 export type LogRotationLockParams = {
   logDir: string;
@@ -113,11 +110,23 @@ function errorCode(params: { error: unknown }): string | undefined {
   return typeof params.error.code === "string" ? params.error.code : undefined;
 }
 
-export class LogRotationLockRuntime extends defineRuntime({
-  params: { logDir: "" } as LogRotationLockParams,
-  deps: logRotationLockDeps,
-}) {
-  private readonly lockPath = join(this.params.logDir, ".rig.log.rotation.lock");
+export class LogRotationLockRuntime {
+  public static readonly defaultConstruction = {
+    params: { logDir: "" } as LogRotationLockParams,
+    deps: logRotationLockDeps,
+  };
+  protected readonly params: (typeof LogRotationLockRuntime.defaultConstruction)["params"];
+  protected readonly deps: (typeof LogRotationLockRuntime.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof LogRotationLockRuntime.defaultConstruction = LogRotationLockRuntime.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+    this.lockPath = join(this.params.logDir, ".rig.log.rotation.lock");
+  }
+
+  private readonly lockPath: string;
   private readonly waitBuffer = new Int32Array(new SharedArrayBuffer(4));
 
   private tryAcquire(_params: {}): boolean {
@@ -312,9 +321,7 @@ function createRollingLogDestination(options: ResolvedRigLoggerOptions): Writabl
 
 const destinations = new Map<string, Writable>();
 
-export const RigLoggerDestinationRegistrySingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const RigLoggerDestinationRegistrySingleton = {
   get(params: { options: ResolvedRigLoggerOptions }): Writable {
     const key = [
       params.options.logDir,
@@ -327,7 +334,7 @@ export const RigLoggerDestinationRegistrySingleton = defineSingleton({
     destinations.set(key, destination);
     return destination;
   },
-});
+};
 
 type RigLoggerFactoryDeps = {
   pino: typeof pino;
@@ -341,11 +348,21 @@ const RigLoggerFactoryProductionDeps: RigLoggerFactoryDeps = {
   },
 };
 
-export class RigLoggerFactoryService extends defineService({
-  params: {} as RigLoggerOptions,
-  deps: RigLoggerFactoryProductionDeps,
-}) {
-  private readonly options = RigLoggerOptionResolverSingleton.resolve({ options: this.params });
+export class RigLoggerFactoryService {
+  public static readonly defaultConstruction = {
+    params: {} as RigLoggerOptions,
+    deps: RigLoggerFactoryProductionDeps,
+  };
+  protected readonly deps: (typeof RigLoggerFactoryService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigLoggerFactoryService.defaultConstruction = RigLoggerFactoryService.defaultConstruction,
+  ) {
+    this.deps = props.deps;
+    this.options = RigLoggerOptionResolverSingleton.resolve({ options: props.params });
+  }
+
+  private readonly options: ReturnType<typeof RigLoggerOptionResolverSingleton.resolve>;
   private logger: Logger | undefined;
 
   private base(_params: {}): Logger {

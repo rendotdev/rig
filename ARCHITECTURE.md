@@ -20,7 +20,6 @@ src/
   providers/
   tooling/
   utils/
-  define.ts
 ```
 
 Each domain may contain these layers:
@@ -63,10 +62,33 @@ Top-level responsibilities:
 | `providers` | Domain-independent process, filesystem, clock, environment, and terminal access |
 | `utils`     | Pure domain-independent code with at least two real consumers                   |
 | `tooling`   | Architecture enforcement and development tooling                                |
-| `define.ts` | Construction vocabulary for behavior-bearing layers and app roots               |
 
 External data is parsed at `repo`, `runtime`, or `app` boundaries before it enters domain
 behavior. Keep Rig's public SDK Promise-based and Zod-based while internal architecture moves.
+
+## Effect v4 reliability harness
+
+Rig keeps its existing libraries and uses Effect v4 as the internal orchestration harness. Effect
+owns dependency composition, typed operational failures, resource lifetimes, cancellation,
+retries, schedules, and tracing. Commander, Ink, Zod, Bun SQLite, and other focused libraries stay
+in place behind Effect services when they already solve their responsibility well.
+
+- Model capabilities with `Context.Service`; use stable `@rendotdev/rig/...` service identities.
+- Expose the production implementation as `layer`; name alternatives `testLayer`, `bunLayer`,
+  `sqliteLayer`, or another camel-case name ending in `Layer`.
+- Model recoverable operational failures with `Schema.TaggedErrorClass` and an `Error` suffix.
+- Use `Schema.Class` and branded schemas for domain entities and value objects when migrating them.
+- Use `Effect.acquireRelease`, `Layer.scoped`, or `Scope` for every owned closeable resource.
+- Capture service dependencies while constructing the layer; service methods do not leak them.
+- Run Effects at application or compatibility boundaries; do not call `Effect.run*` inside Effects.
+- Adapt existing Promise and Zod APIs at the boundary instead of forcing downstream tools to move.
+- Retry only transient, idempotent operations; cap attempts and use an explicit `Schedule` policy.
+- Preserve the final failure cause when retries are exhausted and record retry attempts in spans.
+- Keep pure transformations, React components, and Zod authoring APIs free of unnecessary Effect.
+
+The pinned Effect source will live under `repos/effect` as a read-only git subtree. Production code
+imports the installed `effect` packages, never files under `repos/effect`. Agents should read the
+vendored `LLMS.md`, patterns, source, and tests before relying on remembered APIs.
 
 ## Dependency rules
 
@@ -84,8 +106,8 @@ Within a domain, a layer may import itself and the layers listed below:
 Additional rules:
 
 - Cross-domain imports use `domains/<domain>/index.ts` or a deliberate layer `index.ts`.
-- `app` imports domain public APIs, providers, utilities, and `define.ts`.
-- Providers import only providers, utilities, `define.ts`, and external packages.
+- `app` imports domain public APIs, providers, and utilities.
+- Providers import only providers, utilities, and external packages.
 - Utilities import only utilities and external packages.
 - Tooling imports only tooling, utilities, and external packages.
 - Domains and providers never import `app`.
@@ -96,24 +118,6 @@ Additional rules:
 `src/tooling/architecture/architecture.ts` is the executable source of truth. Custom Oxlint
 rules and structural tests consume the same model.
 
-## Definition vocabulary
-
-Use helpers that match the owning architectural layer:
-
-- `defineRepo` in `repo`.
-- `defineService` in `service`.
-- `defineRuntime` in `runtime`.
-- `defineProvider` in `providers`.
-- `defineUIComponent` and `defineUIHook` in `ui`.
-- `defineApp` at executable app roots.
-- `defineSingleton` for intentional shared behavior with stable `params` and `deps`.
-- `defineType`, `defineConfig`, and `defineUtil` for named data-only definitions.
-- Plain TypeScript for type-only declarations.
-
-Repository, service, runtime, and provider definitions are classes that extend their matching
-helper. Replace `params` and `deps` through the constructor in deterministic tests. Singleton,
-component, hook, and app definitions keep their implementation inline in the definition object.
-
 ## Migration sequence
 
 Rig currently has legacy roots listed in the shared architecture model. They are temporary,
@@ -122,7 +126,7 @@ explicit migration allowances rather than permanent exceptions.
 1. Move one business capability into `domains/<domain>/<layer>`.
 2. Add the domain or layer public `index.ts`.
 3. Update outside consumers to use the public API.
-4. Replace legacy construction with the owning layer helper and direct class implementation.
+4. Use `Context.Service`, `Layer`, or plain TypeScript according to the capability.
 5. Remove the migrated legacy root or narrow its allowance.
 6. Run `vp run ci` before moving the next high-risk runtime seam.
 

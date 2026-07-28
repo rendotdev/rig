@@ -2,7 +2,6 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { defineProvider, defineRepo, defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 import type { LoadedTool, RigToolDatabase } from "../../tools/types";
 
@@ -14,9 +13,7 @@ function migrationChecksum(params: { version: number; name: string; sql: string 
     .digest("hex");
 }
 
-export const RigDatabaseMigratorSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const RigDatabaseMigratorSingleton = {
   create(params: { db: Database; nowIso: () => string }) {
     let lastVersion = 0;
 
@@ -99,7 +96,7 @@ export const RigDatabaseMigratorSingleton = defineSingleton({
 
     return { ensureMetadata, migrate };
   },
-});
+};
 
 export type DatabaseConstructor = new (
   filename: string,
@@ -128,10 +125,21 @@ const BunSqliteModuleLoaderProductionDeps: BunSqliteModuleLoaderDeps = {
   /* v8 ignore stop */
 };
 
-export class BunSqliteModuleLoaderProvider extends defineProvider({
-  params: {},
-  deps: BunSqliteModuleLoaderProductionDeps,
-}) {
+export class BunSqliteModuleLoaderProvider {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: BunSqliteModuleLoaderProductionDeps,
+  };
+  protected readonly params: (typeof BunSqliteModuleLoaderProvider.defaultConstruction)["params"];
+  protected readonly deps: (typeof BunSqliteModuleLoaderProvider.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof BunSqliteModuleLoaderProvider.defaultConstruction = BunSqliteModuleLoaderProvider.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public available(_params: {}): boolean {
     return Boolean(this.deps.testDatabase() || this.deps.hasBun());
   }
@@ -211,10 +219,21 @@ function createRigToolDatabaseFactoryDeps(): RigToolDatabaseFactoryDeps {
 
 const RigToolDatabaseFactoryProductionDeps = createRigToolDatabaseFactoryDeps();
 
-export class RigToolDatabaseFactoryRepo extends defineRepo({
-  params: {},
-  deps: RigToolDatabaseFactoryProductionDeps,
-}) {
+export class RigToolDatabaseFactoryRepo {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigToolDatabaseFactoryProductionDeps,
+  };
+  protected readonly params: (typeof RigToolDatabaseFactoryRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigToolDatabaseFactoryRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigToolDatabaseFactoryRepo.defaultConstruction = RigToolDatabaseFactoryRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public dbPathForToolPath(params: { toolPath: string }): string {
     return this.deps.join(this.deps.dirname(params.toolPath), "index.sqlite");
   }
@@ -260,11 +279,9 @@ function unavailableDatabase(params: { toolName: string }): RigToolDatabase {
   });
 }
 
-export const UnavailableToolDatabaseFactorySingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const UnavailableToolDatabaseFactorySingleton = {
   create: unavailableDatabase,
-});
+};
 
 export type UnavailableToolDatabaseFactoryClass = {
   create(toolName: string): RigToolDatabase;
@@ -305,10 +322,21 @@ const ToolDatabaseServiceProductionDeps: ToolDatabaseServiceDeps = {
   },
 };
 
-export class ToolDatabaseRepo extends defineRepo({
-  params: {},
-  deps: ToolDatabaseServiceProductionDeps,
-}) {
+export class ToolDatabaseRepo {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolDatabaseServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolDatabaseRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolDatabaseRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolDatabaseRepo.defaultConstruction = ToolDatabaseRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async setup(params: { tool: LoadedTool }): Promise<RigToolDatabase | undefined> {
     if (!params.tool.definition.setupDb) return undefined;
     const db = await this.deps.createDatabase({ toolPath: params.tool.path });

@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { defineRepo, defineSingleton } from "../../../define.ts";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import { RigErrorClass } from "../../../providers/errors/index.ts";
 
 export type FileLockOptions = {
@@ -18,7 +22,19 @@ type LockOwner = {
   acquiredAt: string;
 };
 
-// ─── Module-level dep implementations ────────────────────────────────────────
+export const FileLockOperation = Schema.Literals(["acquire", "release", "operation"]);
+export type FileLockOperation = typeof FileLockOperation.Type;
+
+export class FileLockError extends Schema.TaggedErrorClass<FileLockError>()("FileLockError", {
+  operation: FileLockOperation,
+  lockPath: Schema.String,
+  cause: Schema.Defect(),
+}) {}
+
+class FileLockContentionError extends Schema.TaggedErrorClass<FileLockContentionError>()(
+  "FileLockContentionError",
+  { lockPath: Schema.String },
+) {}
 
 function hasCode(error: unknown, code: string): boolean {
   return (
@@ -63,13 +79,11 @@ function sleep(milliseconds: number): Promise<void> {
 
 // ─── FileSystemErrorsSingleton ────────────────────────────────────────────────
 
-export const FileSystemErrorsSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const FileSystemErrorsSingleton = {
   isMissing,
   isExisting,
   isProcessMissing,
-});
+};
 
 // ─── BoundedFileLockRepo ──────────────────────────────────────────────────────
 
@@ -92,210 +106,263 @@ export type BoundedFileLockDeps = {
   fsErrors: typeof FileSystemErrorsSingleton;
 };
 
-export class BoundedFileLockRepo extends defineRepo({
-  params: {
-    timeoutMs: 5_000,
-    staleMs: 30_000,
-    retryMs: 20,
-  },
-  deps: {
-    mkdir: mkdir as unknown as BoundedFileLockDeps["mkdir"],
-    readFile: readFile as unknown as BoundedFileLockDeps["readFile"],
-    rename: rename as unknown as BoundedFileLockDeps["rename"],
-    rm: rm as unknown as BoundedFileLockDeps["rm"],
-    stat: stat as unknown as BoundedFileLockDeps["stat"],
-    writeFile: writeFile as unknown as BoundedFileLockDeps["writeFile"],
-    dirname,
-    join,
-    randomUUID: randomUUID as unknown as BoundedFileLockDeps["randomUUID"],
-    hostname,
-    getProcessPid,
-    killProcess,
-    now,
-    timestamp,
-    sleep,
-    fsErrors: FileSystemErrorsSingleton,
-  } as BoundedFileLockDeps,
-}) {
+class BoundedFileLockLeaseRepo {
+  public constructor(
+    protected readonly deps: BoundedFileLockDeps,
+    protected readonly lockPath: string,
+    protected readonly timeoutMs: number,
+    protected readonly staleMs: number,
+    protected readonly retryMs: number,
+  ) {}
+
+  public async release(owner: LockOwner): Promise<void> {
+    try {
+      const current = JSON.parse(
+        await this.deps.readFile(this.deps.join(this.lockPath, "owner.json"), "utf8"),
+      ) as { token?: unknown };
+      if (current.token !== owner.token) return;
+      await this.deps.rm(this.lockPath, { recursive: true, force: true });
+    } catch (error) {
+      if (this.deps.fsErrors.isMissing({ error })) return;
+      throw error;
+    }
+  }
+
+  private async tryAcquire(): Promise<LockOwner | undefined> {
+    const owner: LockOwner = {
+      token: this.deps.randomUUID(),
+      pid: this.deps.getProcessPid(),
+      hostname: this.deps.hostname(),
+      acquiredAt: this.deps.timestamp(),
+    };
+    try {
+      await this.deps.mkdir(this.lockPath);
+    } catch (error) {
+      /* v8 ignore else -- lock contention is the only recoverable mkdir failure */
+      if (this.deps.fsErrors.isExisting({ error })) return undefined;
+      /* v8 ignore next */
+      throw error;
+    }
+
+    try {
+      await this.deps.writeFile(
+        this.deps.join(this.lockPath, "owner.json"),
+        `${JSON.stringify(owner)}\n`,
+        "utf8",
+      );
+      return owner;
+    } catch (error) {
+      /* v8 ignore start -- owner writes can only fail through platform I/O faults */
+      await this.deps.rm(this.lockPath, { recursive: true, force: true });
+      throw error;
+      /* v8 ignore stop */
+    }
+  }
+
+  private async readOwner(): Promise<LockOwner | undefined> {
+    try {
+      const parsed = JSON.parse(
+        await this.deps.readFile(this.deps.join(this.lockPath, "owner.json"), "utf8"),
+      ) as Partial<LockOwner>;
+      if (
+        typeof parsed.token !== "string" ||
+        typeof parsed.pid !== "number" ||
+        typeof parsed.hostname !== "string" ||
+        typeof parsed.acquiredAt !== "string"
+      ) {
+        return undefined;
+      }
+      return parsed as LockOwner;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private isOwnerAlive(owner: LockOwner): boolean {
+    if (owner.hostname !== this.deps.hostname()) return false;
+    try {
+      this.deps.killProcess(owner.pid, 0);
+      return true;
+    } catch (error) {
+      return !this.deps.fsErrors.isProcessMissing({ error });
+    }
+  }
+
+  private async recoverStaleLock(): Promise<boolean> {
+    let lockStat;
+    try {
+      lockStat = await this.deps.stat(this.lockPath);
+    } catch (error) {
+      /* v8 ignore next -- requires the lock to vanish between mkdir and stat */
+      if (this.deps.fsErrors.isMissing({ error })) return false;
+      /* v8 ignore next */
+      throw error;
+    }
+    if (this.deps.now() - lockStat.mtimeMs <= this.staleMs) return false;
+
+    const owner = await this.readOwner();
+    if (owner && this.isOwnerAlive(owner)) return false;
+
+    const stalePath = `${this.lockPath}.stale-${this.deps.randomUUID()}`;
+    try {
+      await this.deps.rename(this.lockPath, stalePath);
+    } catch (error) {
+      /* v8 ignore next -- requires another process to rename the stale lock first */
+      if (this.deps.fsErrors.isMissing({ error })) return false;
+      /* v8 ignore next */
+      throw error;
+    }
+    await this.deps.rm(stalePath, { recursive: true, force: true });
+    return true;
+  }
+
+  private timeoutError(): RigErrorClass {
+    return new RigErrorClass("CONFIG_INVALID", `Timed out waiting for lock: ${this.lockPath}`, {
+      lockPath: this.lockPath,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  public acquire(): Effect.Effect<LockOwner, FileLockError> {
+    return Effect.gen({ self: this }, function* () {
+      yield* Effect.tryPromise({
+        try: () => this.deps.mkdir(this.deps.dirname(this.lockPath), { recursive: true }),
+        catch: (cause) =>
+          new FileLockError({ operation: "acquire", lockPath: this.lockPath, cause }),
+      });
+      const startedAt = this.deps.now();
+      const attempt = Effect.tryPromise({
+        try: async () => {
+          const owner = await this.tryAcquire();
+          if (owner) return owner;
+          if (await this.recoverStaleLock()) {
+            const recoveredOwner = await this.tryAcquire();
+            /* v8 ignore else -- another process can win only during cross-process contention */
+            if (recoveredOwner) return recoveredOwner;
+          }
+          if (this.deps.now() - startedAt >= this.timeoutMs) throw this.timeoutError();
+          await this.deps.sleep(this.retryMs);
+          throw new FileLockContentionError({ lockPath: this.lockPath });
+        },
+        catch: (cause) =>
+          cause instanceof FileLockContentionError
+            ? cause
+            : new FileLockError({ operation: "acquire", lockPath: this.lockPath, cause }),
+      });
+      const retries = Math.max(1, Math.ceil(this.timeoutMs / Math.max(1, this.retryMs)) + 1);
+      return yield* Effect.retry(attempt, {
+        schedule: Schedule.recurs(retries),
+        while: (error) => error instanceof FileLockContentionError,
+      }).pipe(
+        Effect.catch((error) =>
+          error instanceof FileLockContentionError
+            ? Effect.fail(
+                new FileLockError({
+                  operation: "acquire",
+                  lockPath: this.lockPath,
+                  cause: this.timeoutError(),
+                }),
+              )
+            : Effect.fail(error),
+        ),
+      );
+    });
+  }
+}
+
+export class BoundedFileLockRepo {
+  public static readonly defaultConstruction = {
+    params: {
+      timeoutMs: 5_000,
+      staleMs: 30_000,
+      retryMs: 20,
+    },
+    deps: {
+      mkdir: mkdir as unknown as BoundedFileLockDeps["mkdir"],
+      readFile: readFile as unknown as BoundedFileLockDeps["readFile"],
+      rename: rename as unknown as BoundedFileLockDeps["rename"],
+      rm: rm as unknown as BoundedFileLockDeps["rm"],
+      stat: stat as unknown as BoundedFileLockDeps["stat"],
+      writeFile: writeFile as unknown as BoundedFileLockDeps["writeFile"],
+      dirname,
+      join,
+      randomUUID: randomUUID as unknown as BoundedFileLockDeps["randomUUID"],
+      hostname,
+      getProcessPid,
+      killProcess,
+      now,
+      timestamp,
+      sleep,
+      fsErrors: FileSystemErrorsSingleton,
+    } as BoundedFileLockDeps,
+  };
+  protected readonly params: (typeof BoundedFileLockRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof BoundedFileLockRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof BoundedFileLockRepo.defaultConstruction = BoundedFileLockRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public create(params: { targetPath: string; options?: FileLockOptions }) {
     const deps = this.deps;
     const lockPath = `${params.targetPath}.lock`;
     const timeoutMs = params.options?.timeoutMs ?? this.params.timeoutMs;
     const staleMs = params.options?.staleMs ?? this.params.staleMs;
     const retryMs = params.options?.retryMs ?? this.params.retryMs;
+    const lease = new BoundedFileLockLeaseRepo(deps, lockPath, timeoutMs, staleMs, retryMs);
+    const acquire = lease.acquire();
 
-    async function releaseLease(owner: LockOwner): Promise<void> {
-      try {
-        const current = JSON.parse(
-          await deps.readFile(deps.join(lockPath, "owner.json"), "utf8"),
-        ) as { token?: unknown };
-        if (current.token !== owner.token) return;
-        await deps.rm(lockPath, { recursive: true, force: true });
-      } catch (error) {
-        if (deps.fsErrors.isMissing({ error })) return;
-        throw error;
-      }
+    function effect<T>(runParams: {
+      operation: () => T | Promise<T>;
+    }): Effect.Effect<T, FileLockError> {
+      return Effect.acquireUseRelease(
+        acquire,
+        () =>
+          Effect.tryPromise({
+            try: async () => await runParams.operation(),
+            catch: (cause) => new FileLockError({ operation: "operation", lockPath, cause }),
+          }),
+        (owner) =>
+          Effect.tryPromise({
+            try: () => lease.release(owner),
+            catch: (cause) => new FileLockError({ operation: "release", lockPath, cause }),
+          }),
+      ).pipe(Effect.withSpan("FileLockService.withLock", { attributes: { lockPath } }));
     }
 
-    async function tryAcquire(): Promise<LockOwner | undefined> {
-      const owner: LockOwner = {
-        token: deps.randomUUID(),
-        pid: deps.getProcessPid(),
-        hostname: deps.hostname(),
-        acquiredAt: deps.timestamp(),
-      };
-      try {
-        await deps.mkdir(lockPath);
-      } catch (error) {
-        /* v8 ignore else -- lock contention is the only recoverable mkdir failure */
-        if (deps.fsErrors.isExisting({ error })) return undefined;
-        /* v8 ignore next */
-        throw error;
-      }
-
-      try {
-        await deps.writeFile(
-          deps.join(lockPath, "owner.json"),
-          `${JSON.stringify(owner)}\n`,
-          "utf8",
-        );
-        return owner;
-      } catch (error) {
-        /* v8 ignore start -- owner writes can only fail through platform I/O faults */
-        await deps.rm(lockPath, { recursive: true, force: true });
-        throw error;
-        /* v8 ignore stop */
-      }
+    function run<T>(runParams: { operation: () => T | Promise<T> }): Promise<T> {
+      return Effect.runPromise(effect(runParams).pipe(Effect.mapError((error) => error.cause)));
     }
 
-    async function readOwner(): Promise<LockOwner | undefined> {
-      try {
-        const parsed = JSON.parse(
-          await deps.readFile(deps.join(lockPath, "owner.json"), "utf8"),
-        ) as Partial<LockOwner>;
-        if (
-          typeof parsed.token !== "string" ||
-          typeof parsed.pid !== "number" ||
-          typeof parsed.hostname !== "string" ||
-          typeof parsed.acquiredAt !== "string"
-        ) {
-          return undefined;
-        }
-        return parsed as LockOwner;
-      } catch {
-        return undefined;
-      }
-    }
-
-    function isOwnerAlive(owner: LockOwner): boolean {
-      if (owner.hostname !== deps.hostname()) return false;
-      try {
-        deps.killProcess(owner.pid, 0);
-        return true;
-      } catch (error) {
-        return !deps.fsErrors.isProcessMissing({ error });
-      }
-    }
-
-    async function recoverStaleLock(): Promise<void> {
-      let lockStat;
-      try {
-        lockStat = await deps.stat(lockPath);
-      } catch (error) {
-        /* v8 ignore next -- requires the lock to vanish between mkdir and stat */
-        if (deps.fsErrors.isMissing({ error })) return;
-        /* v8 ignore next */
-        throw error;
-      }
-      if (deps.now() - lockStat.mtimeMs <= staleMs) return;
-
-      const owner = await readOwner();
-      if (owner && isOwnerAlive(owner)) return;
-
-      const stalePath = `${lockPath}.stale-${deps.randomUUID()}`;
-      try {
-        await deps.rename(lockPath, stalePath);
-      } catch (error) {
-        /* v8 ignore next -- requires another process to rename the stale lock first */
-        if (deps.fsErrors.isMissing({ error })) return;
-        /* v8 ignore next */
-        throw error;
-      }
-      await deps.rm(stalePath, { recursive: true, force: true });
-    }
-
-    async function acquireAttempt(startedAt: number): Promise<LockOwner> {
-      const owner = await tryAcquire();
-      if (owner) return owner;
-      await recoverStaleLock();
-      if (deps.now() - startedAt >= timeoutMs) {
-        throw new RigErrorClass("CONFIG_INVALID", `Timed out waiting for lock: ${lockPath}`, {
-          lockPath,
-          timeoutMs,
-        });
-      }
-      await deps.sleep(retryMs);
-      return acquireAttempt(startedAt);
-    }
-
-    async function acquire(): Promise<LockOwner> {
-      await deps.mkdir(deps.dirname(lockPath), { recursive: true });
-      return acquireAttempt(deps.now());
-    }
-
-    async function run<T>(runParams: { operation: () => T | Promise<T> }): Promise<T> {
-      const owner = await acquire();
-      try {
-        return await runParams.operation();
-      } finally {
-        await releaseLease(owner);
-      }
-    }
-
-    return { run };
+    return { effect, run };
   }
+}
+
+type FileLockServiceShape = Readonly<{
+  withLock: <Result>(params: {
+    targetPath: string;
+    options?: FileLockOptions;
+    operation: () => Result | Promise<Result>;
+  }) => Effect.Effect<Result, FileLockError>;
+}>;
+
+export class FileLockService extends Context.Service<FileLockService, FileLockServiceShape>()(
+  "@rendotdev/rig/settings/FileLockService",
+) {
+  public static readonly makeLayer = (
+    implementation: BoundedFileLockRepo,
+  ): Layer.Layer<FileLockService> =>
+    Layer.succeed(FileLockService, {
+      withLock: (params) => implementation.create(params).effect({ operation: params.operation }),
+    });
+
+  public static readonly layer = FileLockService.makeLayer(new BoundedFileLockRepo());
 }
 
 export const BoundedFileLock = new BoundedFileLockRepo();
-
-// ─── AtomicFileWriterRepo ─────────────────────────────────────────────────────
-
-export type AtomicFileWriterDeps = {
-  mkdir: (path: string, options?: { recursive?: boolean }) => Promise<string | undefined | void>;
-  rename: (oldPath: string, newPath: string) => Promise<void>;
-  rm: (path: string, options?: { force?: boolean }) => Promise<void>;
-  writeFile: (path: string, content: string, encoding: "utf8") => Promise<void>;
-  dirname: (path: string) => string;
-  randomUUID: () => string;
-  getProcessPid: () => number;
-};
-
-export class AtomicFileWriterRepo extends defineRepo({
-  params: {},
-  deps: {
-    mkdir: mkdir as unknown as AtomicFileWriterDeps["mkdir"],
-    rename: rename as unknown as AtomicFileWriterDeps["rename"],
-    rm: rm as unknown as AtomicFileWriterDeps["rm"],
-    writeFile: writeFile as unknown as AtomicFileWriterDeps["writeFile"],
-    dirname,
-    randomUUID: randomUUID as unknown as AtomicFileWriterDeps["randomUUID"],
-    getProcessPid,
-  } as AtomicFileWriterDeps,
-}) {
-  public async write(params: { path: string; content: string }): Promise<void> {
-    await this.deps.mkdir(this.deps.dirname(params.path), { recursive: true });
-    const temporaryPath = `${params.path}.tmp-${this.deps.getProcessPid()}-${this.deps.randomUUID()}`;
-    try {
-      await this.deps.writeFile(temporaryPath, params.content, "utf8");
-      await this.deps.rename(temporaryPath, params.path);
-    } catch (error) {
-      await this.deps.rm(temporaryPath, { force: true });
-      throw error;
-    }
-  }
-}
-
-export const AtomicFileWriter = new AtomicFileWriterRepo();
 
 // ─── BoundedFileLockClass (class-free constructible adapter) ──────────────────
 
@@ -331,24 +398,3 @@ export const BoundedFileLockClass: new (
 
   return BoundedFileLockAdapter;
 })() as unknown as new (targetPath: string, options?: FileLockOptions) => BoundedFileLockClass;
-
-// ─── AtomicFileWriterClass (class-free constructible adapter) ─────────────────
-
-export interface AtomicFileWriterClass {
-  write(path: string, content: string): Promise<void>;
-}
-
-export const AtomicFileWriterClass: new () => AtomicFileWriterClass = (function () {
-  function AtomicFileWriterAdapter(): void {}
-
-  Object.defineProperty(AtomicFileWriterAdapter.prototype, "write", {
-    enumerable: false,
-    configurable: true,
-    writable: true,
-    value: function write(path: string, content: string): Promise<void> {
-      return AtomicFileWriter.write({ path, content });
-    },
-  });
-
-  return AtomicFileWriterAdapter;
-})() as unknown as new () => AtomicFileWriterClass;

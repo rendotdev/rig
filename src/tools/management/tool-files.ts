@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { defineService, defineSingleton } from "../../define";
 import { RigConfigStoreClass, type ConfigOptions } from "../../config/config";
 import { RigErrorClass } from "../../errors/RigError";
 import { RigToolEntryFiles, ToolDiscoveryServiceClass } from "../../registry/discover";
@@ -46,11 +45,9 @@ export default (rig: RigToolKit) => rig.defineTool({
 `;
 }
 
-export const ToolTemplateSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolTemplateSingleton = {
   render: generatedToolSource,
-});
+};
 
 type ToolCreatorDeps = {
   ensureConfig: RigConfigStoreClass["ensure"];
@@ -80,10 +77,21 @@ function createToolCreatorDeps(options: ConfigOptions): ToolCreatorDeps {
 
 const ToolCreatorProductionDeps = createToolCreatorDeps({});
 
-export class ToolCreatorService extends defineService({
-  params: {},
-  deps: ToolCreatorProductionDeps,
-}) {
+export class ToolCreatorService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolCreatorProductionDeps,
+  };
+  protected readonly params: (typeof ToolCreatorService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolCreatorService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolCreatorService.defaultConstruction = ToolCreatorService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async create(params: { name: string }) {
     this.deps.validateToolName(params.name);
     const config = await this.deps.ensureConfig();
@@ -159,10 +167,21 @@ function createToolFileServiceDeps(options: ConfigOptions): ToolFileServiceDeps 
 
 const ToolFileServiceProductionDeps = createToolFileServiceDeps({});
 
-export class ToolFileService extends defineService({
-  params: {},
-  deps: ToolFileServiceProductionDeps,
-}) {
+export class ToolFileService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolFileServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolFileService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolFileService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolFileService.defaultConstruction = ToolFileService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async path(params: { name: string }): Promise<ToolFileResult> {
     this.deps.validateToolName(params.name);
     const tool = await this.deps.findTool(params.name);
@@ -217,10 +236,21 @@ function createToolRemoverDeps(options: ConfigOptions): ToolRemoverDeps {
 
 const ToolRemoverProductionDeps = createToolRemoverDeps({});
 
-export class ToolRemoverService extends defineService({
-  params: {},
-  deps: ToolRemoverProductionDeps,
-}) {
+export class ToolRemoverService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolRemoverProductionDeps,
+  };
+  protected readonly params: (typeof ToolRemoverService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolRemoverService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolRemoverService.defaultConstruction = ToolRemoverService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async remove(params: { name: string }): Promise<ToolFileResult> {
     const tool = await this.deps.findPath(params.name);
     await this.deps.rm(tool.toolDir, { recursive: true, force: false });

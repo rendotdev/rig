@@ -7,6 +7,36 @@
     "types": ["bun-types"],
     "strict": true,
     "skipLibCheck": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": true,
+        "refactors": true,
+        "quickinfo": true,
+        "completions": true,
+        "ignoreEffectSuggestionsInTscExitCode": true,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false,
+        "overrides": [
+          {
+            "include": ["src/tools/execution/**/*.ts"],
+            "options": {
+              "diagnosticSeverity": {
+                "floatingEffect": "error",
+                "missingEffectContext": "error",
+                "missingEffectError": "error",
+                "missingLayerContext": "error",
+                "missingReturnYieldStar": "error",
+                "outdatedApi": "error",
+                "runEffectInsideEffect": "warning",
+                "strictEffectProvide": "warning",
+                "tryCatchInEffectGen": "warning"
+              }
+            }
+          }
+        ]
+      }
+    ],
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "forceConsistentCasingInFileNames": true

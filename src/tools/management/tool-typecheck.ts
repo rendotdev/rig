@@ -2,7 +2,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import ts from "typescript";
-import { defineService } from "../../define";
 import { RigConfigStoreClass, type ConfigOptions } from "../../config/config";
 import { RigPathsClass } from "../../config/paths";
 import { RigErrorClass } from "../../errors/RigError";
@@ -66,10 +65,21 @@ const ToolTypecheckServiceProductionDeps: ToolTypecheckServiceDeps = {
   cwd: process.cwd.bind(process),
 };
 
-export class ToolTypecheckService extends defineService({
-  params: {} as ConfigOptions,
-  deps: ToolTypecheckServiceProductionDeps,
-}) {
+export class ToolTypecheckService {
+  public static readonly defaultConstruction = {
+    params: {} as ConfigOptions,
+    deps: ToolTypecheckServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolTypecheckService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolTypecheckService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolTypecheckService.defaultConstruction = ToolTypecheckService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private get configStore() {
     return this.deps.createConfigStore(this.params);
   }

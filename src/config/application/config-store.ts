@@ -1,19 +1,12 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
-import { defineService } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 import { RuntimeSupportClass } from "../../runtime/support";
-import {
-  rigConfigDefaults,
-  RigConfigSchema,
-  type RigConfig,
-} from "../../domains/settings/index.ts";
-import { AtomicFileWriterClass, BoundedFileLockClass, type FileLockOptions } from "../file-lock";
-import {
-  RigDirectoryMigrationServiceClass,
-  RigMigrationPromptStoreClass,
-  type RigDirectoryMigrationResult,
-} from "../migration";
+import { rigConfigDefaults } from "../../domains/settings/config/config-defaults.ts";
+import { RigConfigSchema, type RigConfig } from "../../domains/settings/types/config-schema.ts";
+import type { AtomicFileWriterClass } from "../atomic-file-writer";
+import type { BoundedFileLockClass, FileLockOptions } from "../file-lock";
+import type { RigDirectoryMigrationResult } from "../migration";
 import { RigPathsClass, type PathOptions } from "../paths";
 
 export type ConfigOptions = PathOptions & {
@@ -29,7 +22,7 @@ export type RegistryEntry = {
 
 type RigConfigPaths = Pick<
   RigPathsClass,
-  "configPath" | "defaultBaseRegistryDir" | "resolve" | "rigDir"
+  "configPath" | "defaultBaseRegistryDir" | "legacyRigDir" | "resolve" | "rigDir"
 >;
 type RigConfigRuntimeSupport = Pick<RuntimeSupportClass, "ensure">;
 type RigConfigLock = Pick<BoundedFileLockClass, "run">;
@@ -55,15 +48,28 @@ const RigConfigStoreServiceProductionDeps: RigConfigStoreServiceDeps = {
     return new RuntimeSupportClass(options);
   },
   createLock(params) {
-    return new BoundedFileLockClass(params.path, params.options);
+    return {
+      async run<Result>(operation: () => Result | Promise<Result>): Promise<Result> {
+        const { BoundedFileLockClass } = await import("../file-lock");
+        return await new BoundedFileLockClass(params.path, params.options).run(operation);
+      },
+    };
   },
   createWriter() {
-    return new AtomicFileWriterClass();
+    return {
+      async write(path, content) {
+        const { AtomicFileWriterClass } = await import("../atomic-file-writer");
+        await new AtomicFileWriterClass().write(path, content);
+      },
+    };
   },
   async migrateDirectory(paths) {
+    if (!existsSync(paths.legacyRigDir)) return undefined;
+    const { RigDirectoryMigrationServiceClass } = await import("../migration");
     return await new RigDirectoryMigrationServiceClass(paths).migrateIfNeeded();
   },
   async markMigrationPrompted(params) {
+    const { RigMigrationPromptStoreClass } = await import("../migration");
     await new RigMigrationPromptStoreClass(params.paths).markPrompted(params.promptId);
   },
   mkdir,
@@ -71,17 +77,32 @@ const RigConfigStoreServiceProductionDeps: RigConfigStoreServiceDeps = {
   readFile,
 };
 
-export class RigConfigStoreService extends defineService({
-  params: {} as ConfigOptions,
-  deps: RigConfigStoreServiceProductionDeps,
-}) {
-  private readonly paths = this.deps.createPaths(this.params);
-  private readonly runtimeSupport = this.deps.createRuntimeSupport(this.params);
-  private readonly lock = this.deps.createLock({
-    path: this.paths.configPath,
-    options: this.params.configLock,
-  });
-  private readonly writer = this.deps.createWriter();
+export class RigConfigStoreService {
+  public static readonly defaultConstruction = {
+    params: {} as ConfigOptions,
+    deps: RigConfigStoreServiceProductionDeps,
+  };
+  protected readonly params: (typeof RigConfigStoreService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigConfigStoreService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigConfigStoreService.defaultConstruction = RigConfigStoreService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+    this.paths = this.deps.createPaths(this.params);
+    this.runtimeSupport = this.deps.createRuntimeSupport(this.params);
+    this.lock = this.deps.createLock({
+      path: this.paths.configPath,
+      options: this.params.configLock,
+    });
+    this.writer = this.deps.createWriter();
+  }
+
+  private readonly paths: RigConfigPaths;
+  private readonly runtimeSupport: RigConfigRuntimeSupport;
+  private readonly lock: RigConfigLock;
+  private readonly writer: RigConfigWriter;
   private migration: RigDirectoryMigrationResult | undefined;
 
   public migrationResult(_params: {}): RigDirectoryMigrationResult | undefined {
@@ -190,104 +211,49 @@ export class RigConfigStoreService extends defineService({
   }
 }
 
-export type RigConfigStoreClass = {
-  migrationResult(): RigDirectoryMigrationResult | undefined;
-  acknowledgeMigrationPrompt(): Promise<void>;
-  ensure(): Promise<RigConfig>;
-  read(): Promise<RigConfig>;
-  write(config: RigConfig): Promise<void>;
-  update(mutator: RigConfigMutator): Promise<RigConfig>;
-  resolvedBaseRegistry(config: RigConfig): string;
-  resolvedCustomRegistries(config: RigConfig): string[];
-  registryEntries(config: RigConfig): RegistryEntry[];
-};
+export class RigConfigStoreClass {
+  public readonly resource: RigConfigStoreService;
 
-type RigConfigStoreConstructor = {
-  new (options?: ConfigOptions): RigConfigStoreClass;
-  readonly prototype: RigConfigStoreClass;
-};
-
-type RigConfigStoreAdapter = RigConfigStoreClass & {
-  readonly resource: RigConfigStoreService;
-};
-
-const RigConfigStoreClassAdapter = function constructRigConfigStore(
-  this: RigConfigStoreAdapter,
-  options: ConfigOptions = {},
-): void {
-  Object.defineProperty(this, "resource", {
-    value: new RigConfigStoreService({
+  public constructor(options: ConfigOptions = {}) {
+    this.resource = new RigConfigStoreService({
       params: options,
       deps: RigConfigStoreServiceProductionDeps,
-    }),
-  });
-};
-Object.defineProperty(RigConfigStoreClassAdapter, "name", { value: "RigConfigStoreClass" });
-Object.defineProperties(RigConfigStoreClassAdapter.prototype, {
-  migrationResult: {
-    configurable: true,
-    value: function migrationResult(this: RigConfigStoreAdapter) {
-      return this.resource.migrationResult({});
-    },
-    writable: true,
-  },
-  acknowledgeMigrationPrompt: {
-    configurable: true,
-    value: function acknowledgeMigrationPrompt(this: RigConfigStoreAdapter) {
-      return this.resource.acknowledgeMigrationPrompt({});
-    },
-    writable: true,
-  },
-  ensure: {
-    configurable: true,
-    value: function ensure(this: RigConfigStoreAdapter) {
-      return this.resource.ensure({});
-    },
-    writable: true,
-  },
-  read: {
-    configurable: true,
-    value: function read(this: RigConfigStoreAdapter) {
-      return this.resource.read({});
-    },
-    writable: true,
-  },
-  write: {
-    configurable: true,
-    value: function write(this: RigConfigStoreAdapter, config: RigConfig) {
-      return this.resource.write({ config });
-    },
-    writable: true,
-  },
-  update: {
-    configurable: true,
-    value: function update(this: RigConfigStoreAdapter, mutator: RigConfigMutator) {
-      return this.resource.update({ mutator });
-    },
-    writable: true,
-  },
-  resolvedBaseRegistry: {
-    configurable: true,
-    value: function resolvedBaseRegistry(this: RigConfigStoreAdapter, config: RigConfig) {
-      return this.resource.resolvedBaseRegistry({ config });
-    },
-    writable: true,
-  },
-  resolvedCustomRegistries: {
-    configurable: true,
-    value: function resolvedCustomRegistries(this: RigConfigStoreAdapter, config: RigConfig) {
-      return this.resource.resolvedCustomRegistries({ config });
-    },
-    writable: true,
-  },
-  registryEntries: {
-    configurable: true,
-    value: function registryEntries(this: RigConfigStoreAdapter, config: RigConfig) {
-      return this.resource.registryEntries({ config });
-    },
-    writable: true,
-  },
-});
+    });
+  }
 
-export const RigConfigStoreClass =
-  RigConfigStoreClassAdapter as unknown as RigConfigStoreConstructor;
+  public migrationResult(): RigDirectoryMigrationResult | undefined {
+    return this.resource.migrationResult({});
+  }
+
+  public acknowledgeMigrationPrompt(): Promise<void> {
+    return this.resource.acknowledgeMigrationPrompt({});
+  }
+
+  public ensure(): Promise<RigConfig> {
+    return this.resource.ensure({});
+  }
+
+  public read(): Promise<RigConfig> {
+    return this.resource.read({});
+  }
+
+  public write(config: RigConfig): Promise<void> {
+    return this.resource.write({ config });
+  }
+
+  public update(mutator: RigConfigMutator): Promise<RigConfig> {
+    return this.resource.update({ mutator });
+  }
+
+  public resolvedBaseRegistry(config: RigConfig): string {
+    return this.resource.resolvedBaseRegistry({ config });
+  }
+
+  public resolvedCustomRegistries(config: RigConfig): string[] {
+    return this.resource.resolvedCustomRegistries({ config });
+  }
+
+  public registryEntries(config: RigConfig): RegistryEntry[] {
+    return this.resource.registryEntries({ config });
+  }
+}

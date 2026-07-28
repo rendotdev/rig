@@ -1,4 +1,3 @@
-import { defineService } from "../../define";
 import { z } from "zod";
 
 const schemaRendererDeps: {
@@ -7,7 +6,18 @@ const schemaRendererDeps: {
   toJsonSchema: (z as unknown as { toJSONSchema?: (schema: unknown) => unknown }).toJSONSchema,
 };
 
-export class SchemaRendererService extends defineService({ params: {}, deps: schemaRendererDeps }) {
+export class SchemaRendererService {
+  public static readonly defaultConstruction = { params: {}, deps: schemaRendererDeps };
+  protected readonly params: (typeof SchemaRendererService.defaultConstruction)["params"];
+  protected readonly deps: (typeof SchemaRendererService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof SchemaRendererService.defaultConstruction = SchemaRendererService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public toJsonSchema(params: { schema: unknown }): unknown {
     if (typeof this.deps.toJsonSchema !== "function") {
       return { type: "unknown", note: "JSON Schema conversion is unavailable." };

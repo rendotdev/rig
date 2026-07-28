@@ -1,4 +1,3 @@
-import { defineSingleton } from "../../define.ts";
 import type { ErrorCode } from "./codes";
 
 export type RigErrorClass = Error & {
@@ -31,9 +30,7 @@ function createRigError(params: {
   return error;
 }
 
-export const RigErrorSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const RigErrorSingleton = {
   create: createRigError,
   from(params: { readonly error: unknown }): RigErrorClass {
     if (
@@ -48,7 +45,7 @@ export const RigErrorSingleton = defineSingleton({
     }
     return createRigError({ code: "INTERNAL_ERROR", message: String(params.error) });
   },
-});
+};
 
 const RigErrorClassAdapter = function constructRigError(
   code: ErrorCode,

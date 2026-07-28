@@ -1,5 +1,3 @@
-import { defineSingleton } from "../../define";
-
 export type ToolSearchField = {
   name: string;
   value: string;
@@ -182,16 +180,16 @@ function createToolSearchSimilarityMemo(): ToolSearchSimilarityMemoOps {
   return { score };
 }
 
-export const ToolSearchSingleton = defineSingleton({
-  params: {},
-  deps: { text: createToolSearchText() },
+const ToolSearchText = createToolSearchText();
+
+export const ToolSearchSingleton = {
   compile(document: ToolSearchDocument): CompiledToolSearchDocument {
     const fields = document.fields.map((field) => {
-      const normalizedValue = this.deps.text.normalize({ value: field.value });
+      const normalizedValue = ToolSearchText.normalize({ value: field.value });
       return {
         ...field,
         normalizedValue,
-        tokens: this.deps.text.tokensFromNormalized({ value: normalizedValue }),
+        tokens: ToolSearchText.tokensFromNormalized({ value: normalizedValue }),
       };
     });
     return {
@@ -273,8 +271,8 @@ export const ToolSearchSingleton = defineSingleton({
     documents: ToolSearchDocument[];
     limit: number;
   }): ToolSearchRankedDocument[] {
-    const normalizedQuery = this.deps.text.normalize({ value: params.query });
-    const queryTokens = this.deps.text.tokensFromNormalized({
+    const normalizedQuery = ToolSearchText.normalize({ value: params.query });
+    const queryTokens = ToolSearchText.tokensFromNormalized({
       value: normalizedQuery,
       removeStopWords: true,
     });
@@ -294,7 +292,7 @@ export const ToolSearchSingleton = defineSingleton({
       .toSorted((left, right) => right.score - left.score || left.id.localeCompare(right.id))
       .slice(0, params.limit);
   },
-});
+};
 
 type ToolSearchEngineConstructor = {
   new (): ToolSearchEngineClass;

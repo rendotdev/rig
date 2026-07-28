@@ -44,8 +44,13 @@ describe("architecture", () => {
   const sources = new ArchitectureSourceSetClass();
 
   it("uses architectural suffixes for implementation class declarations", async () => {
-    const violations = await sources.violations(/\bclass\s+([A-Za-z_$][\w$]*)/g, (match) =>
-      /(?:Class|Repo|Repository|Service|Runtime|Provider|Route)$/.test(match[1]!),
+    const violations = await sources.violations(
+      /\bclass\s+([A-Za-z_$][\w$]*)([\s\S]*?)(?=\{)/g,
+      (match) =>
+        /(?:Class|Config|Error|Repo|Repository|Service|Runtime|Provider|Route)$/.test(match[1]!) ||
+        /extends\s+(?:Context\.Service|Schema\.(?:Class|ErrorClass|TaggedClass|TaggedErrorClass))/.test(
+          match[0],
+        ),
     );
     expect(violations).toEqual([]);
   });
@@ -97,6 +102,56 @@ describe("architecture", () => {
         expect(source).not.toContain(`${name}Builder`);
       }
     }
+  });
+
+  it("uses Effect services and layers at reliability boundaries", async () => {
+    const paths = [
+      "src/config/application/config-effect-service.ts",
+      "src/cron/application/rig-cron-effect-service.ts",
+      "src/domains/settings/repo/file-lock.ts",
+      "src/runtime/process/rig-shell-service.ts",
+      "src/runtime/updates/rig-updater-effect-service.ts",
+      "src/tools/execution/tool-execution-resources.ts",
+    ];
+    const sourcesByPath = await Promise.all(
+      paths.map(async (path) => ({ path, source: await readFile(path, "utf8") })),
+    );
+    for (const { source } of sourcesByPath) {
+      expect(source).toContain("extends Context.Service");
+      expect(source).toContain("makeLayer");
+      expect(source).toContain("Schema.TaggedErrorClass");
+    }
+
+    const updateCheck = await readFile("src/runtime/updates/npm-update-check.ts", "utf8");
+    expect(updateCheck).toContain("Schema.TaggedErrorClass");
+    expect(updateCheck).toContain("Effect.retry");
+    expect(updateCheck).toContain("Schedule.exponential");
+  });
+
+  it("has no legacy define construction vocabulary", async () => {
+    const importingFiles = (
+      await Promise.all(
+        (
+          await sources.implementationFiles()
+        ).map(async (path) => ({
+          path,
+          source: await readFile(path, "utf8"),
+        })),
+      )
+    )
+      .filter(({ source }) => /from\s+["'][^"']*define["']/.test(source))
+      .map(({ path }) => path);
+
+    expect(importingFiles).toEqual([]);
+    expect(await readdir("src")).not.toContain("define.ts");
+  });
+
+  it("keeps vendored source as a read-only reference", async () => {
+    const violations = await sources.violations(
+      /(?:from\s+|import\s*)["']([^"']*repos\/effect[^"']*)["']/g,
+      () => false,
+    );
+    expect(violations).toEqual([]);
   });
 
   it("keeps persistence independent from CLI application modules", async () => {

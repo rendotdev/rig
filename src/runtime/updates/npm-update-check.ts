@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { defineService, defineSingleton } from "../../define";
+import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import { RigPathsClass, type PathOptions } from "../../config/paths";
 
 export type UpdateCheckNotice = {
@@ -20,8 +22,23 @@ type FetchLike = (
   init?: { signal?: AbortSignal },
 ) => Promise<{
   ok: boolean;
+  status?: number;
   json(): Promise<unknown>;
 }>;
+
+const RegistryRetryDelay = "25 millis";
+const RegistryRetryCount = 1;
+
+export class NpmRegistryError extends Schema.TaggedErrorClass<NpmRegistryError>()(
+  "NpmRegistryError",
+  { cause: Schema.Defect() },
+) {}
+
+class NpmRegistryResponseError extends Error {
+  public constructor(readonly status: number) {
+    super(`npm registry request failed with status ${status}.`);
+  }
+}
 
 export type UpdateCheckOptions = PathOptions & {
   cacheTtlMs?: number;
@@ -43,9 +60,7 @@ function versionParts(params: { version: string }): number[] {
     });
 }
 
-export const VersionComparatorSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const VersionComparatorSingleton = {
   isNewer(params: { candidate: string; current: string }): boolean {
     function compare(compareParams: { left: string; right: string }): number {
       const leftParts = versionParts({ version: compareParams.left });
@@ -64,7 +79,7 @@ export const VersionComparatorSingleton = defineSingleton({
 
     return compare({ left: params.candidate, right: params.current }) > 0;
   },
-});
+};
 
 type NpmUpdateCheckConfig = {
   updateCheckCachePath: string;
@@ -125,10 +140,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export class NpmUpdateCheckService extends defineService({
-  params: NpmUpdateCheckProductionConfig,
-  deps: NpmUpdateCheckProductionDeps,
-}) {
+export class NpmUpdateCheckService {
+  public static readonly defaultConstruction = {
+    params: NpmUpdateCheckProductionConfig,
+    deps: NpmUpdateCheckProductionDeps,
+  };
+  protected readonly params: (typeof NpmUpdateCheckService.defaultConstruction)["params"];
+  protected readonly deps: (typeof NpmUpdateCheckService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof NpmUpdateCheckService.defaultConstruction = NpmUpdateCheckService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private notice(params: {
     currentVersion: string;
     latestVersion: string | undefined;
@@ -158,25 +184,45 @@ export class NpmUpdateCheckService extends defineService({
     return `https://registry.npmjs.org/${encodeURIComponent(this.params.packageName)}/latest`;
   }
 
-  private async fetchLatestVersion(_params: {}): Promise<string | undefined> {
-    const controller = this.deps.createAbortController();
-    const timer = this.deps.setTimer(function abortRequest() {
-      controller.abort();
-    }, this.params.timeoutMs);
+  private fetchLatestVersionEffect(_params: {}): Effect.Effect<string | undefined> {
+    const attempt = Effect.tryPromise({
+      try: async (signal) => {
+        const controller = this.deps.createAbortController();
+        const abort = () => controller.abort();
+        signal.addEventListener("abort", abort, { once: true });
+        const timer = this.deps.setTimer(abort, this.params.timeoutMs);
+        try {
+          const response = await this.deps.fetch(this.registryUrl({}), {
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            const status = response.status ?? 0;
+            const transient = status === 408 || status === 425 || status === 429 || status >= 500;
+            if (transient) throw new NpmRegistryResponseError(status);
+            return undefined;
+          }
+          const data = await response.json();
+          return isRecord(data) && typeof data.version === "string" ? data.version : undefined;
+        } finally {
+          signal.removeEventListener("abort", abort);
+          this.deps.clearTimer(timer);
+        }
+      },
+      catch: (cause) => new NpmRegistryError({ cause }),
+    });
 
-    try {
-      const response = await this.deps.fetch(this.registryUrl({}), {
-        signal: controller.signal,
-      });
-      if (!response.ok) return undefined;
-      const data = await response.json();
-      if (!isRecord(data) || typeof data.version !== "string") return undefined;
-      return data.version;
-    } catch {
-      return undefined;
-    } finally {
-      this.deps.clearTimer(timer);
-    }
+    return Effect.retry(attempt, {
+      schedule: Schedule.exponential(RegistryRetryDelay).pipe(
+        Schedule.upTo({ times: RegistryRetryCount }),
+      ),
+    }).pipe(
+      Effect.orElseSucceed(() => undefined),
+      Effect.withSpan("NpmUpdateCheckService.fetchLatestVersion"),
+    );
+  }
+
+  private fetchLatestVersion(_params: {}): Promise<string | undefined> {
+    return Effect.runPromise(this.fetchLatestVersionEffect({}));
   }
 
   private async readCache(_params: {}): Promise<UpdateCheckCache | undefined> {

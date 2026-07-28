@@ -1,19 +1,18 @@
-import { defineSingleton } from "../../../define.ts";
 import type { RigConfig } from "../types/config-schema.ts";
 
-export const RigConfigDefaultsSingleton = defineSingleton({
-  params: { baseRegistryDir: "~/rig/tools" },
-  deps: {},
+const RigDefaultConfig = { baseRegistryDir: "~/rig/tools" } as const;
+
+export const RigConfigDefaultsSingleton = {
   create(params: Record<string, never>): RigConfig {
     void params;
     return {
       version: 1,
-      baseRegistryDir: this.params.baseRegistryDir,
+      baseRegistryDir: RigDefaultConfig.baseRegistryDir,
       customRegistries: [],
       cronJobs: [],
     };
   },
-});
+};
 
 export type RigConfigDefaultsClass = {
   create(): RigConfig;

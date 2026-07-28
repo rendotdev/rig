@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { defineService, defineSingleton } from "../../define";
+import type * as Layer from "effect/Layer";
 import type { ConfigOptions } from "../../config/config";
 import { RigConfigStoreClass } from "../../config/config";
 import { RigPathsClass } from "../../config/paths";
@@ -10,6 +10,14 @@ import { RigErrorClass } from "../../errors/RigError";
 import type { SuccessEnvelope } from "../../runtime/envelope";
 import { commandTargets } from "../../tools/identifiers";
 import { ToolRunnerClass } from "../../tools/run";
+import {
+  addCron,
+  listCron,
+  makeRigCronLayer,
+  removeCron,
+  RigCronRuntimeService,
+  runCron,
+} from "./rig-cron-effect-service";
 
 export type CronAddOptions = {
   name: string;
@@ -65,10 +73,21 @@ function getBunCron(_params: {}): BunCronApi {
   return cron as BunCronApi;
 }
 
-export class BunCronRegistrarService extends defineService({
-  params: {},
-  deps: { getCron: getBunCron },
-}) {
+export class BunCronRegistrarService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: { getCron: getBunCron },
+  };
+  protected readonly params: (typeof BunCronRegistrarService.defaultConstruction)["params"];
+  protected readonly deps: (typeof BunCronRegistrarService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof BunCronRegistrarService.defaultConstruction = BunCronRegistrarService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public register(params: { path: string; schedule: string; title: string }): Promise<void> {
     return this.deps.getCron({})(params.path, params.schedule, params.title);
   }
@@ -98,11 +117,9 @@ function parseCronJobName(params: { value: string }): { value: string } {
   return { value: params.value };
 }
 
-export const CronJobNameSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const CronJobNameSingleton = {
   parse: parseCronJobName,
-});
+};
 
 async function readJsonFile(params: { path: string }): Promise<unknown> {
   /* v8 ignore next 3 */
@@ -111,10 +128,21 @@ async function readJsonFile(params: { path: string }): Promise<unknown> {
     : JSON.parse(await readFile(params.path, "utf8"));
 }
 
-export class CronInputReaderService extends defineService({
-  params: {},
-  deps: { readJsonFile },
-}) {
+export class CronInputReaderService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: { readJsonFile },
+  };
+  protected readonly params: (typeof CronInputReaderService.defaultConstruction)["params"];
+  protected readonly deps: (typeof CronInputReaderService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof CronInputReaderService.defaultConstruction = CronInputReaderService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async read(params: { input?: string; inputFile?: string }): Promise<unknown | undefined> {
     if (params.input && params.inputFile) {
       throw new RigErrorClass("INPUT_ERROR", "Use --input or --input-file, not both.");
@@ -135,16 +163,25 @@ function parseCronCommandTarget(params: { id: string }): {
   return { id: params.id, tool: target.tool, command: target.command };
 }
 
-export const CronCommandTargetSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const CronCommandTargetSingleton = {
   parse: parseCronCommandTarget,
-});
+};
 
-export class CronWorkerScriptService extends defineService({
-  params: {},
-  deps: { fileUrlToPath: fileURLToPath },
-}) {
+export class CronWorkerScriptService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: { fileUrlToPath: fileURLToPath },
+  };
+  protected readonly params: (typeof CronWorkerScriptService.defaultConstruction)["params"];
+  protected readonly deps: (typeof CronWorkerScriptService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof CronWorkerScriptService.defaultConstruction = CronWorkerScriptService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public render(params: { name: string; homeDir?: string; moduleUrl: string }): string {
     const entrypoint = this.deps.fileUrlToPath(params.moduleUrl);
     /* v8 ignore next */
@@ -234,10 +271,21 @@ async function captureRollbackError(params: {
   }
 }
 
-export class CronStateTransactionService extends defineService({
-  params: {},
-  deps: CronStateTransactionProductionDeps,
-}) {
+export class CronStateTransactionService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: CronStateTransactionProductionDeps,
+  };
+  protected readonly params: (typeof CronStateTransactionService.defaultConstruction)["params"];
+  protected readonly deps: (typeof CronStateTransactionService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof CronStateTransactionService.defaultConstruction = CronStateTransactionService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private async writeWorker(params: { workerPath: string; source: string }): Promise<void> {
     await this.deps.mkdir(this.deps.dirname(params.workerPath), { recursive: true });
     await this.deps.writeFile(params.workerPath, params.source, "utf8");
@@ -481,16 +529,30 @@ const RigCronServiceProductionDeps: RigCronServiceDefinitionDeps = {
   },
 };
 
-export class RigCronService extends defineService({
-  params: {} as RigCronServiceParams,
-  deps: RigCronServiceProductionDeps,
-}) {
-  private readonly paths = this.deps.createPaths(this.params);
-  private readonly configStore = this.deps.createConfigStore(this.params);
-  private readonly transaction = this.deps.createTransaction({
-    configStore: this.configStore,
-    registrar: this.deps.registrar,
-  });
+export class RigCronService {
+  public static readonly defaultConstruction = {
+    params: {} as RigCronServiceParams,
+    deps: RigCronServiceProductionDeps,
+  };
+  protected readonly params: (typeof RigCronService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigCronService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigCronService.defaultConstruction = RigCronService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+    this.paths = this.deps.createPaths(this.params);
+    this.configStore = this.deps.createConfigStore(this.params);
+    this.transaction = this.deps.createTransaction({
+      configStore: this.configStore,
+      registrar: this.deps.registrar,
+    });
+  }
+
+  private readonly paths: CronPaths;
+  private readonly configStore: CronServiceStore;
+  private readonly transaction: CronTransaction;
 
   public async list(_params: {}): Promise<{ cronJobs: RigCronJob[] }> {
     const rigConfig = await this.configStore.ensure();
@@ -582,93 +644,48 @@ export class RigCronService extends defineService({
   }
 }
 
-export type RigCronServiceClass = {
-  list(): Promise<{ cronJobs: RigCronJob[] }>;
-  add(params: CronAddOptions): Promise<{ job: RigCronJob; workerPath: string }>;
-  remove(params: { name: string }): Promise<{ name: string; removed: boolean; workerPath: string }>;
-  run(params: { name: string }): Promise<CronRunResult>;
-};
+export class RigCronServiceClass {
+  public readonly resource: RigCronService;
+  public readonly transaction: LegacyCronTransaction;
+  public readonly layer: Layer.Layer<RigCronRuntimeService>;
 
-type RigCronServiceConstructor = {
-  new (params: RigCronServiceParams, deps: RigCronServiceDeps): RigCronServiceClass;
-  readonly prototype: RigCronServiceClass;
-};
+  public constructor(serviceParams: RigCronServiceParams, deps: RigCronServiceDeps) {
+    const registrar = deps.registrar ?? RigCronServiceProductionDeps.registrar;
+    this.resource = new RigCronService({
+      params: serviceParams,
+      deps: { ...RigCronServiceProductionDeps, registrar },
+    });
+    const transaction = RigCronServiceProductionDeps.createTransaction({
+      configStore: RigCronServiceProductionDeps.createConfigStore(serviceParams),
+      registrar,
+    });
+    this.transaction = {
+      snapshot: transaction.snapshot.bind(transaction),
+      replace: transaction.replace.bind(transaction),
+      remove: transaction.remove.bind(transaction),
+      restoreReplacedJob: (job, previousJob) =>
+        transaction.restoreReplacedJob({ job, previousJob }),
+      restoreRemovedJob: (previousJob) => transaction.restoreRemovedJob({ previousJob }),
+    };
+    this.layer = makeRigCronLayer(this.resource);
+  }
 
-type RigCronServiceAdapter = RigCronServiceClass & {
-  readonly resource: RigCronService;
-  readonly transaction: LegacyCronTransaction;
-};
+  public list(): Promise<{ cronJobs: RigCronJob[] }> {
+    return listCron(this.layer);
+  }
 
-const RigCronServiceClassAdapter = function constructRigCronService(
-  this: RigCronServiceAdapter,
-  serviceParams: RigCronServiceParams,
-  deps: RigCronServiceDeps,
-): void {
-  const registrar = deps.registrar ?? RigCronServiceProductionDeps.registrar;
-  const resource = new RigCronService({
-    params: serviceParams,
-    deps: { ...RigCronServiceProductionDeps, registrar },
-  });
-  const transactionResource = RigCronServiceProductionDeps.createTransaction({
-    configStore: RigCronServiceProductionDeps.createConfigStore(serviceParams),
-    registrar,
-  });
-  const transaction: LegacyCronTransaction = {
-    snapshot(params) {
-      return transactionResource.snapshot(params);
-    },
-    replace(params) {
-      return transactionResource.replace(params);
-    },
-    remove(params) {
-      return transactionResource.remove(params);
-    },
-    restoreReplacedJob(job, previousJob) {
-      return transactionResource.restoreReplacedJob({ job, previousJob });
-    },
-    restoreRemovedJob(previousJob) {
-      return transactionResource.restoreRemovedJob({ previousJob });
-    },
-  };
-  Object.defineProperties(this, {
-    resource: { value: resource },
-    transaction: { value: transaction },
-  });
-};
-Object.defineProperty(RigCronServiceClassAdapter, "name", { value: "RigCronServiceClass" });
-Object.defineProperties(RigCronServiceClassAdapter.prototype, {
-  list: {
-    configurable: true,
-    value: function list(this: RigCronServiceAdapter) {
-      return this.resource.list({});
-    },
-    writable: true,
-  },
-  add: {
-    configurable: true,
-    value: function add(this: RigCronServiceAdapter, params: CronAddOptions) {
-      return this.resource.add(params);
-    },
-    writable: true,
-  },
-  remove: {
-    configurable: true,
-    value: function remove(this: RigCronServiceAdapter, params: { name: string }) {
-      return this.resource.remove(params);
-    },
-    writable: true,
-  },
-  run: {
-    configurable: true,
-    value: function run(this: RigCronServiceAdapter, params: { name: string }) {
-      return this.resource.run(params);
-    },
-    writable: true,
-  },
-});
+  public add(params: CronAddOptions): Promise<{ job: RigCronJob; workerPath: string }> {
+    return addCron(this.layer, params);
+  }
 
-export const RigCronServiceClass =
-  RigCronServiceClassAdapter as unknown as RigCronServiceConstructor;
+  public remove(params: { name: string }) {
+    return removeCron(this.layer, params.name);
+  }
+
+  public run(params: { name: string }): Promise<CronRunResult> {
+    return runCron(this.layer, params.name);
+  }
+}
 
 type RigCronWorkerServiceDeps = {
   runCron: (params: { config: RigCronWorkerParams; name: string }) => Promise<CronRunResult>;
@@ -688,10 +705,21 @@ const RigCronWorkerProductionDeps: RigCronWorkerServiceDeps = {
   },
 };
 
-export class RigCronWorkerService extends defineService({
-  params: {} as RigCronWorkerParams,
-  deps: RigCronWorkerProductionDeps,
-}) {
+export class RigCronWorkerService {
+  public static readonly defaultConstruction = {
+    params: {} as RigCronWorkerParams,
+    deps: RigCronWorkerProductionDeps,
+  };
+  protected readonly params: (typeof RigCronWorkerService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigCronWorkerService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigCronWorkerService.defaultConstruction = RigCronWorkerService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async scheduled(params: { name: string; controller?: CronControllerLike }): Promise<void> {
     const result = await this.deps.runCron({ config: this.params, name: params.name });
     const envelope = result.envelope as Partial<SuccessEnvelope>;

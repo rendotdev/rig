@@ -1,4 +1,3 @@
-import { defineService, defineSingleton } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { RigErrorClass } from "../../errors/RigError";
 import { ToolDiscoveryServiceClass } from "../../registry/discover";
@@ -141,11 +140,9 @@ function metadataCommand(params: {
   };
 }
 
-export const ToolFindMetadataSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolFindMetadataSingleton = {
   command: metadataCommand,
-});
+};
 
 function oneLine(params: { value: string }): string {
   return params.value
@@ -171,11 +168,9 @@ function renderPlainFind(params: { data: ToolFindData }): string {
     .join("\n\n");
 }
 
-export const ToolFindPlainRendererSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolFindPlainRendererSingleton = {
   render: renderPlainFind,
-});
+};
 
 function findLimit(params: { value: number | string | undefined }): number {
   const parsed = params.value === undefined ? 5 : Number(params.value);
@@ -203,10 +198,21 @@ function createToolFindServiceDeps(options: ConfigOptions): ToolFindServiceDeps 
 
 const ToolFindServiceProductionDeps = createToolFindServiceDeps({});
 
-export class ToolFindService extends defineService({
-  params: {},
-  deps: ToolFindServiceProductionDeps,
-}) {
+export class ToolFindService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolFindServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolFindService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolFindService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolFindService.defaultConstruction = ToolFindService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async find(params: { query: string; options?: ToolFindOptions }): Promise<ToolFindData> {
     const query = params.query.trim();
     if (!query) throw new RigErrorClass("INPUT_ERROR", "Find query cannot be empty.");

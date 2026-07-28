@@ -19,9 +19,14 @@ export default defineConfig({
         ],
         output: [],
       },
+      "effect:diagnostics": {
+        command: "bun run src/tooling/effect/effect-diagnostics.ts",
+        input: ["src/**", "scripts/**", "test/**", "package.json", "tsconfig.json", "bun.lock"],
+        output: [],
+      },
       check: {
         command: "vp check",
-        dependsOn: ["typecheck"],
+        dependsOn: ["typecheck", "effect:diagnostics"],
         input: [
           "src/**",
           "scripts/**",
@@ -133,6 +138,7 @@ export default defineConfig({
   },
   pack: {
     deps: {
+      alwaysBundle: [/^effect\//],
       neverBundle: ["ink", "react", "typescript", /^bun:/],
       onlyBundle: false,
     },
@@ -177,7 +183,7 @@ export default defineConfig({
     trailingComma: "all",
     insertFinalNewline: true,
     sortPackageJson: true,
-    ignorePatterns: ["AGENTS.md", "dist/**", "coverage/**", "node_modules/**"],
+    ignorePatterns: ["AGENTS.md", "dist/**", "coverage/**", "node_modules/**", "repos/**"],
   },
   lint: {
     env: {
@@ -211,7 +217,7 @@ export default defineConfig({
       "vitest/require-mock-type-parameters": "off",
       "vite-plus/prefer-vite-plus-imports": "error",
     },
-    ignorePatterns: ["dist/**", "coverage/**", "node_modules/**"],
+    ignorePatterns: ["dist/**", "coverage/**", "node_modules/**", "repos/**"],
     options: {
       typeAware: true,
       typeCheck: true,

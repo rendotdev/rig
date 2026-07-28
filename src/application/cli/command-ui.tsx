@@ -1,7 +1,6 @@
 import { basename } from "node:path";
 import { Text, render, useAnimation, type Instance } from "ink";
 import type { ReactElement } from "react";
-import { defineService, defineUIComponent } from "../../define";
 import type { RigUpdateStep } from "../../runtime/updates/rig-updater";
 import { TerminalColors, TerminalIcons } from "./terminal-theme";
 
@@ -19,51 +18,47 @@ type CommandUiProps = {
   completed?: CommandUiCompletedItem[];
 };
 
-export const CommandUiComponent = defineUIComponent({
-  params: {},
-  deps: {},
-  component(props: CommandUiProps) {
-    const { frame } = useAnimation({ interval: 80, isActive: props.state === "loading" });
-    const symbol =
-      props.state === "loading"
-        ? TerminalIcons.loading({ frame })
-        : props.state === "success"
-          ? TerminalIcons.success
-          : TerminalIcons.error;
-    const color =
-      props.state === "success"
-        ? TerminalColors.success
-        : props.state === "error"
-          ? TerminalColors.error
-          : TerminalColors.loading;
-    const hasCompleted = Boolean(props.completed?.length);
-    const current = props.label
-      ? `${symbol} ${props.label}${props.detail ? `\n${props.detail}` : ""}`
-      : "";
+export function CommandUiComponent(props: CommandUiProps) {
+  const { frame } = useAnimation({ interval: 80, isActive: props.state === "loading" });
+  const symbol =
+    props.state === "loading"
+      ? TerminalIcons.loading({ frame })
+      : props.state === "success"
+        ? TerminalIcons.success
+        : TerminalIcons.error;
+  const color =
+    props.state === "success"
+      ? TerminalColors.success
+      : props.state === "error"
+        ? TerminalColors.error
+        : TerminalColors.loading;
+  const hasCompleted = Boolean(props.completed?.length);
+  const current = props.label
+    ? `${symbol} ${props.label}${props.detail ? `\n${props.detail}` : ""}`
+    : "";
 
-    return (
-      <Text>
-        {props.completed?.map(function renderCompleted(item, index) {
-          return (
-            <Text key={`${index}-${item.label}`}>
-              {index > 0 ? "\n" : ""}
-              <Text color={TerminalColors.success}>
-                {TerminalIcons.success} {item.label}
-              </Text>
-              {item.detail ? (
-                <Text color={item.mutedDetail ? TerminalColors.muted : TerminalColors.success}>
-                  {`\n${item.detail}`}
-                </Text>
-              ) : null}
+  return (
+    <Text>
+      {props.completed?.map(function renderCompleted(item, index) {
+        return (
+          <Text key={`${index}-${item.label}`}>
+            {index > 0 ? "\n" : ""}
+            <Text color={TerminalColors.success}>
+              {TerminalIcons.success} {item.label}
             </Text>
-          );
-        })}
-        {hasCompleted && current ? "\n" : ""}
-        {current ? <Text color={color}>{current}</Text> : null}
-      </Text>
-    );
-  },
-});
+            {item.detail ? (
+              <Text color={item.mutedDetail ? TerminalColors.muted : TerminalColors.success}>
+                {`\n${item.detail}`}
+              </Text>
+            ) : null}
+          </Text>
+        );
+      })}
+      {hasCompleted && current ? "\n" : ""}
+      {current ? <Text color={color}>{current}</Text> : null}
+    </Text>
+  );
+}
 
 export const CommandUi = CommandUiComponent;
 
@@ -122,10 +117,21 @@ const CommandUiRendererProductionDeps: CommandUiRendererDeps = {
   render,
 };
 
-export class CommandUiRendererService extends defineService({
-  params: {},
-  deps: CommandUiRendererProductionDeps,
-}) {
+export class CommandUiRendererService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: CommandUiRendererProductionDeps,
+  };
+  protected readonly params: (typeof CommandUiRendererService.defaultConstruction)["params"];
+  protected readonly deps: (typeof CommandUiRendererService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof CommandUiRendererService.defaultConstruction = CommandUiRendererService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async run<Result>(params: {
     label: string;
     successLabel?: string;

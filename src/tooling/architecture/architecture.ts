@@ -102,7 +102,7 @@ export const allowedLayerDependencies: Readonly<Record<DomainLayer, readonly Dom
 
 type SourceClassification =
   | Readonly<{
-      kind: "app" | "providers" | "utils" | "tooling" | "definition" | "legacy" | "outside-source";
+      kind: "app" | "providers" | "utils" | "tooling" | "legacy" | "outside-source";
     }>
   | Readonly<{ kind: "domain-public"; domain: DomainName }>
   | Readonly<{ kind: "domain-layer"; domain: DomainName; layer: DomainLayer }>
@@ -119,10 +119,6 @@ export function classifySourcePath(filePath: string): SourceClassification {
   const sourcePath = getSourceRelativePath(filePath);
   if (!sourcePath) {
     return { kind: "outside-source" };
-  }
-  const isDefinition = sourcePath === "define.ts" || sourcePath === "define.test.ts";
-  if (isDefinition) {
-    return { kind: "definition" };
   }
   const [topLevel, second, third, fourth] = sourcePath.split("/");
   const isLegacyRootFile = !sourcePath.includes("/");
@@ -183,17 +179,6 @@ export function validateDependency(sourceFile: string, targetFile: string): Depe
   }
   if (target.kind === "legacy") {
     return { allowed: false, reason: "top-level", source, target };
-  }
-  if (target.kind === "definition") {
-    return {
-      allowed: source.kind !== "utils" && source.kind !== "tooling",
-      reason: "top-level",
-      source,
-      target,
-    };
-  }
-  if (source.kind === "definition") {
-    return { allowed: target.kind === "providers", reason: "top-level", source, target };
   }
   if (source.kind === "app") {
     const allowed =
@@ -259,7 +244,7 @@ export function validateArchitectureModel() {
 
 function validateDomainLayerDependency(
   source: Extract<SourceClassification, { kind: "domain-layer" }>,
-  target: Exclude<SourceClassification, { kind: "invalid" | "definition" }>,
+  target: Exclude<SourceClassification, { kind: "invalid" }>,
 ): DependencyDecision {
   if (target.kind === "domain-public") {
     const allowed = target.domain !== source.domain;

@@ -1,5 +1,4 @@
 import type { ConfigOptions } from "../../config/config";
-import { defineService, defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 import type { CollectionDefinition } from "../collection";
 import { commandTargets, ToolNameClass } from "../identifiers";
@@ -176,14 +175,12 @@ function renderToolHelp(params: { definition: ToolDefinition; selectedCommand?: 
   return lines.join("\n").trimEnd();
 }
 
-export const ToolHelpRendererSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolHelpRendererSingleton = {
   render: renderToolHelp,
   renderCommand: renderHelpCommand,
   renderExampleArgs: renderHelpExampleArgs,
   typeName: helpTypeName,
-});
+};
 
 export type ToolHelpRendererClass = {
   render(definition: ToolDefinition, selectedCommand?: string): string;
@@ -275,10 +272,21 @@ function createToolHelpServiceDeps(options: ConfigOptions): ToolHelpServiceDeps 
 
 const ToolHelpServiceProductionDeps = createToolHelpServiceDeps({});
 
-export class ToolHelpService extends defineService({
-  params: {},
-  deps: ToolHelpServiceProductionDeps,
-}) {
+export class ToolHelpService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolHelpServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolHelpService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolHelpService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolHelpService.defaultConstruction = ToolHelpService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async render(params: { toolName: string; commandName?: string }): Promise<string> {
     const target = helpTarget(params);
     const tool = await this.deps.loadDefinition(target.toolName);

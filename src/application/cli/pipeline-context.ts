@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { defineService } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 
 function isPipelineRecord(value: unknown): value is Record<string, unknown> {
@@ -30,10 +29,21 @@ const RunPipelineContextServiceDeps: {
   },
 };
 
-export class RunPipelineContextService extends defineService({
-  params: {},
-  deps: RunPipelineContextServiceDeps,
-}) {
+export class RunPipelineContextService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RunPipelineContextServiceDeps,
+  };
+  protected readonly params: (typeof RunPipelineContextService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RunPipelineContextService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RunPipelineContextService.defaultConstruction = RunPipelineContextService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public query(params: { value: unknown; path: string }): unknown {
     let current = params.value;
     for (const part of params.path.split(".").filter(Boolean)) {

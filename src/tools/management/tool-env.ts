@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { defineService, defineSingleton } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { RigErrorClass } from "../../errors/RigError";
 import { ToolLoaderClass } from "../loader";
@@ -143,16 +142,14 @@ function schemaEntries(params: {
     });
 }
 
-export const ToolEnvSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolEnvSingleton = {
   parseTarget,
   parseKeys,
   parseAssignments,
   parseDocument,
   serializeDocument,
   schemaEntries,
-});
+};
 
 type ToolEnvSchema = {
   safeParse(value: unknown): { success: boolean; error?: { flatten(): unknown } };
@@ -197,10 +194,21 @@ function createToolEnvServiceDeps(options: ConfigOptions): ToolEnvServiceDeps {
 
 const ToolEnvServiceProductionDeps = createToolEnvServiceDeps({});
 
-export class ToolEnvService extends defineService({
-  params: {},
-  deps: ToolEnvServiceProductionDeps,
-}) {
+export class ToolEnvService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolEnvServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolEnvService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolEnvService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolEnvService.defaultConstruction = ToolEnvService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private async readEnv(params: { path: string }): Promise<Record<string, string>> {
     if (!this.deps.exists(params.path)) return {};
     return ToolEnvSingleton.parseDocument({

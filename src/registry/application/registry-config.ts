@@ -1,5 +1,4 @@
 import { mkdir } from "node:fs/promises";
-import { defineService } from "../../define";
 import { RigConfigStoreClass, type ConfigOptions } from "../../config/config";
 import { RigPathsClass } from "../../config/paths";
 import { RigErrorClass } from "../../errors/RigError";
@@ -23,12 +22,25 @@ const RegistryConfigServiceProductionDeps: RegistryConfigServiceDeps = {
   mkdir,
 };
 
-export class RegistryConfigService extends defineService({
-  params: {} as ConfigOptions,
-  deps: RegistryConfigServiceProductionDeps,
-}) {
-  private readonly configStore = this.deps.createConfigStore(this.params);
-  private readonly paths = this.deps.createPaths(this.params);
+export class RegistryConfigService {
+  public static readonly defaultConstruction = {
+    params: {} as ConfigOptions,
+    deps: RegistryConfigServiceProductionDeps,
+  };
+  protected readonly params: (typeof RegistryConfigService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RegistryConfigService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RegistryConfigService.defaultConstruction = RegistryConfigService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+    this.configStore = this.deps.createConfigStore(this.params);
+    this.paths = this.deps.createPaths(this.params);
+  }
+
+  private readonly configStore: RegistryConfigStore;
+  private readonly paths: RegistryPaths;
 
   public async list(_params: {}) {
     const rigConfig = await this.configStore.ensure();

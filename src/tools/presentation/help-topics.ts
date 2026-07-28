@@ -1,5 +1,3 @@
-import { defineSingleton } from "../../define";
-
 type HelpTopic = {
   title: string;
   content: string;
@@ -175,9 +173,7 @@ API:
   },
 };
 
-export const HelpTopicSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const HelpTopicSingleton = {
   isKnownTopic(params: { name: string }): boolean {
     return params.name in TOPICS;
   },
@@ -196,7 +192,7 @@ export const HelpTopicSingleton = defineSingleton({
     }
     return lines.join("\n");
   },
-});
+};
 
 export type HelpTopicServiceClass = {
   isKnownTopic(name: string): boolean;

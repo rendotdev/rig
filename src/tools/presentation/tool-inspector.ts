@@ -1,4 +1,3 @@
-import { defineService } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { RigErrorClass } from "../../errors/RigError";
 import { ToolLoaderClass } from "../loader";
@@ -24,10 +23,21 @@ const ToolInspectorServiceDeps: {
   schemaRenderer: SchemaRenderer,
 };
 
-export class ToolInspectorService extends defineService({
-  params: {} as ConfigOptions,
-  deps: ToolInspectorServiceDeps,
-}) {
+export class ToolInspectorService {
+  public static readonly defaultConstruction = {
+    params: {} as ConfigOptions,
+    deps: ToolInspectorServiceDeps,
+  };
+  protected readonly params: (typeof ToolInspectorService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolInspectorService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolInspectorService.defaultConstruction = ToolInspectorService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private get loader() {
     return this.deps.createLoader({ options: this.params });
   }

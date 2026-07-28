@@ -1,6 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { defineService, defineSingleton } from "../../define";
-import { AtomicFileWriterClass } from "../../config/file-lock";
+import { AtomicFileWriterClass } from "../../config/atomic-file-writer";
 import type { ConfigOptions } from "../../config/config";
 import { RigPathsClass } from "../../config/paths";
 import { ToolDiscoveryServiceClass, type DiscoveredTool } from "../../registry/discover";
@@ -111,11 +110,9 @@ function renderCommandRunExample(params: {
   return `rig run ${id}${args ? ` ${args}` : ""}`;
 }
 
-export const CommandRunExampleRendererSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const CommandRunExampleRendererSingleton = {
   render: renderCommandRunExample,
-});
+};
 
 export type CommandRunExampleRendererClass = {
   render(toolName: string, commandName: string, command: CommandDefinition): string;
@@ -254,10 +251,21 @@ function createToolMetadataCacheDeps(options: ConfigOptions): ToolMetadataCacheD
 
 const ToolMetadataCacheProductionDeps = createToolMetadataCacheDeps({});
 
-export class ToolMetadataCacheService extends defineService({
-  params: {},
-  deps: ToolMetadataCacheProductionDeps,
-}) {
+export class ToolMetadataCacheService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolMetadataCacheProductionDeps,
+  };
+  protected readonly params: (typeof ToolMetadataCacheService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolMetadataCacheService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolMetadataCacheService.defaultConstruction = ToolMetadataCacheService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private async read(_params: {}): Promise<ToolMetadataCache> {
     try {
       const value = await this.deps.readJson(this.deps.cachePath);
@@ -415,11 +423,9 @@ function renderPlainList(params: { data: ToolListData }): string {
     .join("\n\n");
 }
 
-export const ToolListPlainRendererSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolListPlainRendererSingleton = {
   render: renderPlainList,
-});
+};
 
 type ToolListServiceDeps = {
   discover: ToolDiscoveryServiceClass["discover"];
@@ -437,10 +443,21 @@ function createToolListServiceDeps(options: ConfigOptions): ToolListServiceDeps 
 
 const ToolListServiceProductionDeps = createToolListServiceDeps({});
 
-export class ToolListService extends defineService({
-  params: {},
-  deps: ToolListServiceProductionDeps,
-}) {
+export class ToolListService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolListServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolListService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolListService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolListService.defaultConstruction = ToolListService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async list(options: ToolListOptions = {}): Promise<ToolListData> {
     const discovered = await this.deps.discover({ visibleFromPath: options.visibleFromPath });
     const metadata = await this.deps.loadMetadata(discovered);

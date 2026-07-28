@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { defineRuntime, defineService, defineSingleton } from "../../define";
 import type { ConfigOptions } from "../../config/config";
 import { RigErrorClass } from "../../errors/RigError";
 import { ToolDiscoveryServiceClass, type DiscoveredTool } from "../../registry/discover";
@@ -149,13 +148,11 @@ function validateToolDefinition(params: { value: unknown; expectedName?: string 
   return (params.value.name === name ? params.value : { ...params.value, name }) as ToolDefinition;
 }
 
-export const ToolDefinitionValidatorSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolDefinitionValidatorSingleton = {
   validateToolName,
   validateCommandName,
   validateToolDefinition,
-});
+};
 
 export type ToolDefinitionValidatorClass = {
   validateToolName(name: string): void;
@@ -240,11 +237,9 @@ function parseEnvFile(params: { source: string; path: string }): Record<string, 
   return env;
 }
 
-export const ToolEnvFileParserSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const ToolEnvFileParserSingleton = {
   parse: parseEnvFile,
-});
+};
 
 type ToolEnvLoaderDeps = {
   exists: (path: string) => Promise<boolean>;
@@ -278,10 +273,18 @@ const ToolEnvLoaderProductionDeps: ToolEnvLoaderDeps = {
   join,
 };
 
-export class ToolEnvLoaderService extends defineService({
-  params: {},
-  deps: ToolEnvLoaderProductionDeps,
-}) {
+export class ToolEnvLoaderService {
+  public static readonly defaultConstruction = {
+    deps: ToolEnvLoaderProductionDeps,
+  };
+  protected readonly deps: (typeof ToolEnvLoaderService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolEnvLoaderService.defaultConstruction = ToolEnvLoaderService.defaultConstruction,
+  ) {
+    this.deps = props.deps;
+  }
+
   public async load(params: {
     tool: DiscoveredTool;
     definition: ToolDefinition;
@@ -328,7 +331,7 @@ type ToolLoaderDeps = {
 
 function createToolLoaderDeps(options: ConfigOptions): ToolLoaderDeps {
   const discovery = new ToolDiscoveryServiceClass(options);
-  const envLoader = new ToolEnvLoaderService({ params: {}, deps: ToolEnvLoaderProductionDeps });
+  const envLoader = new ToolEnvLoaderService({ deps: ToolEnvLoaderProductionDeps });
   return {
     findTool: discovery.find.bind(discovery),
     stat,
@@ -345,10 +348,18 @@ function createToolLoaderDeps(options: ConfigOptions): ToolLoaderDeps {
 
 const ToolLoaderProductionDeps = createToolLoaderDeps({});
 
-export class ToolLoaderService extends defineRuntime({
-  params: {},
-  deps: ToolLoaderProductionDeps,
-}) {
+export class ToolLoaderService {
+  public static readonly defaultConstruction = {
+    deps: ToolLoaderProductionDeps,
+  };
+  protected readonly deps: (typeof ToolLoaderService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolLoaderService.defaultConstruction = ToolLoaderService.defaultConstruction,
+  ) {
+    this.deps = props.deps;
+  }
+
   private readonly discoveredTools = new Map<string, DiscoveredTool>();
   private readonly definitions = new Map<
     string,
@@ -491,7 +502,7 @@ const ToolLoaderClassAdapter = function constructToolLoader(
   options: ConfigOptions = {},
 ): void {
   Object.defineProperty(this, "resource", {
-    value: new ToolLoaderService({ params: {}, deps: createToolLoaderDeps(options) }),
+    value: new ToolLoaderService({ deps: createToolLoaderDeps(options) }),
   });
 };
 Object.defineProperty(ToolLoaderClassAdapter, "name", { value: "ToolLoaderClass" });

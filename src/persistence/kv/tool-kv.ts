@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { defineRepo, defineSingleton } from "../../define";
 import { RigErrorClass } from "../../errors/RigError";
 import type { LoadedTool, RigToolKvStore } from "../../tools/types";
 import { BunSqliteModuleLoaderClass, type DatabaseConstructor } from "../sqlite/tool-database";
@@ -16,9 +15,7 @@ function validateKvKey(params: { key: string }): void {
   }
 }
 
-export const SqliteToolKvStoreSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const SqliteToolKvStoreSingleton = {
   create(params: { db: Database; path: string; nowIso: () => string }): RigToolKvStore {
     return {
       path: params.path,
@@ -50,7 +47,7 @@ export const SqliteToolKvStoreSingleton = defineSingleton({
       },
     };
   },
-});
+};
 
 export type ManagedRigToolKvStore = RigToolKvStore & { close(): void };
 
@@ -82,11 +79,9 @@ function createLazyToolKvStore(params: {
   };
 }
 
-export const LazyToolKvStoreSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const LazyToolKvStoreSingleton = {
   create: createLazyToolKvStore,
-});
+};
 
 function createUnavailableToolKvStore(params: { path: string }): RigToolKvStore {
   function unavailable(): never {
@@ -99,11 +94,9 @@ function createUnavailableToolKvStore(params: { path: string }): RigToolKvStore 
   return { path: params.path, get: unavailable, set: unavailable };
 }
 
-export const UnavailableToolKvStoreSingleton = defineSingleton({
-  params: {},
-  deps: {},
+export const UnavailableToolKvStoreSingleton = {
   create: createUnavailableToolKvStore,
-});
+};
 
 type RigToolKvStoreFactoryDeps = {
   sqliteAvailable: () => boolean;
@@ -130,10 +123,21 @@ function createRigToolKvStoreFactoryDeps(): RigToolKvStoreFactoryDeps {
 
 const RigToolKvStoreFactoryProductionDeps = createRigToolKvStoreFactoryDeps();
 
-export class RigToolKvStoreFactoryRepo extends defineRepo({
-  params: {},
-  deps: RigToolKvStoreFactoryProductionDeps,
-}) {
+export class RigToolKvStoreFactoryRepo {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: RigToolKvStoreFactoryProductionDeps,
+  };
+  protected readonly params: (typeof RigToolKvStoreFactoryRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigToolKvStoreFactoryRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigToolKvStoreFactoryRepo.defaultConstruction = RigToolKvStoreFactoryRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public kvPathForToolPath(params: { toolPath: string }): string {
     return this.deps.join(this.deps.dirname(params.toolPath), "kv.sqlite");
   }
@@ -200,10 +204,21 @@ const ToolKvStoreServiceProductionDeps: ToolKvStoreServiceDeps = {
   },
 };
 
-export class ToolKvStoreRepo extends defineRepo({
-  params: {},
-  deps: ToolKvStoreServiceProductionDeps,
-}) {
+export class ToolKvStoreRepo {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: ToolKvStoreServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolKvStoreRepo.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolKvStoreRepo.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolKvStoreRepo.defaultConstruction = ToolKvStoreRepo.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public async setup(params: { tool: LoadedTool }): Promise<ManagedRigToolKvStore> {
     return await this.deps.createStore({ toolPath: params.tool.path });
   }

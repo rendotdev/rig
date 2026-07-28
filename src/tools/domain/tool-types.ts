@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite";
 import type { z } from "zod";
-import { defineSingleton } from "../../define";
 import type { CollectionDefinition, CollectionHandle } from "../collection";
 import { CommandTargetSingleton } from "../identifiers";
 
@@ -215,13 +214,11 @@ export type LoadedTool = {
   definition: ToolDefinition;
 };
 
-export const CommandIdsSingleton = defineSingleton({
-  params: {},
-  deps: { CommandTargetSingleton },
+export const CommandIdsSingleton = {
   from(params: { tool: string; command: string }) {
-    return this.deps.CommandTargetSingleton.from(params).id;
+    return CommandTargetSingleton.from(params).id;
   },
-});
+};
 
 export type CommandIdsClass = {
   from(tool: string, command: string): string;

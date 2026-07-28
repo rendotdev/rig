@@ -1,7 +1,6 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defineService } from "../../define";
 
 export const DEFAULT_TRUNCATION_MAX_BYTES = 50 * 1024;
 export const DEFAULT_TRUNCATION_MAX_LINES = 2000;
@@ -104,17 +103,29 @@ function serializeOutputData(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? "null";
 }
 
-export class RigOutputTruncatorService extends defineService({
-  params: {
-    maxBytes: DEFAULT_TRUNCATION_MAX_BYTES,
-    maxLines: DEFAULT_TRUNCATION_MAX_LINES,
-  },
-  deps: RigOutputTruncatorServiceDeps,
-}) {
-  private readonly truncator = createTextTruncator({
-    encoder: this.deps.encoder,
-    decoder: this.deps.decoder,
-  });
+export class RigOutputTruncatorService {
+  public static readonly defaultConstruction = {
+    params: {
+      maxBytes: DEFAULT_TRUNCATION_MAX_BYTES,
+      maxLines: DEFAULT_TRUNCATION_MAX_LINES,
+    },
+    deps: RigOutputTruncatorServiceDeps,
+  };
+  protected readonly params: (typeof RigOutputTruncatorService.defaultConstruction)["params"];
+  protected readonly deps: (typeof RigOutputTruncatorService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof RigOutputTruncatorService.defaultConstruction = RigOutputTruncatorService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+    this.truncator = createTextTruncator({
+      encoder: this.deps.encoder,
+      decoder: this.deps.decoder,
+    });
+  }
+
+  private readonly truncator: ReturnType<typeof createTextTruncator>;
 
   private async writeOutputFile(params: { serialized: string }): Promise<string> {
     const dir = await this.deps.mkdtemp(this.deps.join(this.deps.tmpdir(), "rig-output-"));

@@ -3,7 +3,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { z } from "zod";
-import { BoundedFileLockClass } from "../../config/file-lock";
+import type { BoundedFileLockClass } from "../../config/file-lock";
 import { RigErrorClass } from "../../errors/RigError";
 import { BunSqliteModuleLoaderClass } from "../../persistence/sqlite/tool-database";
 import { CollectionNameClass } from "../../tools/identifiers";
@@ -352,9 +352,18 @@ class CollectionFileFingerprintClass {
 
 const collectionFileFingerprint = new CollectionFileFingerprintClass();
 
+/* v8 ignore start */
+function createCollectionInitializationLock(path: string): Pick<BoundedFileLockClass, "run"> {
+  return {
+    async run<Result>(operation: () => Result | Promise<Result>): Promise<Result> {
+      const { BoundedFileLockClass } = await import("../../config/file-lock");
+      return await new BoundedFileLockClass(path).run(operation);
+    },
+  };
+}
+
 // ─── SQLite index (production) ──────────────────────────────────────────────
 
-/* v8 ignore start */
 type CollectionDatabaseConstructor = new (
   filename: string,
   options?: { create?: boolean; strict?: boolean },
@@ -367,12 +376,12 @@ class SqliteCollectionIndexClass implements CollectionIndexInterface {
   private readonly dbPath: string;
   private readonly collectionPath: string;
   private readonly sqliteLoader = new BunSqliteModuleLoaderClass();
-  private readonly initializationLock: BoundedFileLockClass;
+  private readonly initializationLock: Pick<BoundedFileLockClass, "run">;
 
   constructor(collectionPath: string) {
     this.collectionPath = collectionPath;
     this.dbPath = join(collectionPath, ".index.sqlite");
-    this.initializationLock = new BoundedFileLockClass(this.dbPath);
+    this.initializationLock = createCollectionInitializationLock(this.dbPath);
   }
 
   async withExclusiveInitialization<T>(params: { operation: () => Promise<T> }): Promise<T> {

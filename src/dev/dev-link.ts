@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { defineService } from "../define";
 import { RigPathsRepo, type PathOptions } from "../config/paths";
 import { RigErrorClass } from "../errors/RigError";
 
@@ -117,15 +116,26 @@ const DevLinkServiceDeps: {
   resolve,
 };
 
-export class DevLinkService extends defineService({
-  params: {
-    marker: "Rig dev shim",
-    unixShimName: "rig",
-    windowsShimName: "rig.cmd",
-    defaultBinDirectory: [".local", "bin"] as const,
-  },
-  deps: DevLinkServiceDeps,
-}) {
+export class DevLinkService {
+  public static readonly defaultConstruction = {
+    params: {
+      marker: "Rig dev shim",
+      unixShimName: "rig",
+      windowsShimName: "rig.cmd",
+      defaultBinDirectory: [".local", "bin"] as const,
+    },
+    deps: DevLinkServiceDeps,
+  };
+  protected readonly params: (typeof DevLinkService.defaultConstruction)["params"];
+  protected readonly deps: (typeof DevLinkService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof DevLinkService.defaultConstruction = DevLinkService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public create(params: { options?: DevLinkOptions }) {
     const config = this.params;
     const deps = this.deps;

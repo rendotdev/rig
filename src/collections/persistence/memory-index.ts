@@ -1,4 +1,3 @@
-import { defineService } from "../../define";
 import type {
   CollectionEntry,
   CollectionFileRecord,
@@ -16,10 +15,21 @@ async function openMemoryIndex(_params: {}): Promise<void> {}
 
 function closeMemoryIndex(_params: {}): void {}
 
-export class MemoryCollectionIndexService extends defineService({
-  params: {},
-  deps: {},
-}) {
+export class MemoryCollectionIndexService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: {},
+  };
+  protected readonly params: (typeof MemoryCollectionIndexService.defaultConstruction)["params"];
+  protected readonly deps: (typeof MemoryCollectionIndexService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof MemoryCollectionIndexService.defaultConstruction = MemoryCollectionIndexService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   private readonly docs = new Map<string, DocRow>();
   private readonly files = new Map<string, CollectionFileRecord>();
 

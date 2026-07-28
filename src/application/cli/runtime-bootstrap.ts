@@ -1,7 +1,6 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { defineService } from "../../define";
 
 type BunRuntimeSpawn = (
   command: string,
@@ -40,10 +39,21 @@ const BunRuntimeBootstrapProductionDeps: BunRuntimeBootstrapServiceDeps = {
   },
 };
 
-export class BunRuntimeBootstrapService extends defineService({
-  params: {} as BunRuntimeBootstrapParams,
-  deps: BunRuntimeBootstrapProductionDeps,
-}) {
+export class BunRuntimeBootstrapService {
+  public static readonly defaultConstruction = {
+    params: {} as BunRuntimeBootstrapParams,
+    deps: BunRuntimeBootstrapProductionDeps,
+  };
+  protected readonly params: (typeof BunRuntimeBootstrapService.defaultConstruction)["params"];
+  protected readonly deps: (typeof BunRuntimeBootstrapService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof BunRuntimeBootstrapService.defaultConstruction = BunRuntimeBootstrapService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public shouldBootstrap(_params: {}): boolean {
     return (
       this.deps.bunGlobal() === undefined &&
@@ -163,10 +173,21 @@ const CliEntrypointProductionDeps: CliEntrypointDeps = {
   },
 };
 
-export class CliEntrypointService extends defineService({
-  params: {},
-  deps: CliEntrypointProductionDeps,
-}) {
+export class CliEntrypointService {
+  public static readonly defaultConstruction = {
+    params: {},
+    deps: CliEntrypointProductionDeps,
+  };
+  protected readonly params: (typeof CliEntrypointService.defaultConstruction)["params"];
+  protected readonly deps: (typeof CliEntrypointService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof CliEntrypointService.defaultConstruction = CliEntrypointService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+  }
+
   public matches(params: { metaUrl: string; argvPath?: string }): boolean {
     if (!params.argvPath) return false;
     try {

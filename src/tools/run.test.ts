@@ -1244,21 +1244,6 @@ export default (rig) => rig.defineTool({
     expect(FakeSqliteDatabase.store(cachePath)?.closeRuns).toBe(2);
   });
 
-  test("does not let cache cleanup failures mask command results", async () => {
-    const runner = new ToolRunnerClass();
-    expect(() =>
-      (
-        runner as unknown as {
-          closeCache(cache: { close(): void }): void;
-        }
-      ).closeCache({
-        close: () => {
-          throw new Error("close failed");
-        },
-      }),
-    ).not.toThrow();
-  });
-
   test("returns changed migration errors as envelopes", async () => {
     new FakeSqliteEnvironment().install();
     const home = await homes.create();

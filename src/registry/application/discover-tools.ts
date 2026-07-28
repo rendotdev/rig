@@ -1,7 +1,6 @@
 import { existsSync, lstatSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { defineService } from "../../define";
 import { RigConfigStoreClass, type ConfigOptions, type RegistryEntry } from "../../config/config";
 import { RigPathsClass } from "../../config/paths";
 import { RigErrorClass } from "../../errors/RigError";
@@ -59,12 +58,25 @@ const ToolDiscoveryServiceProductionDeps: ToolDiscoveryServiceDeps = {
   join,
 };
 
-export class ToolDiscoveryService extends defineService({
-  params: {} as ConfigOptions,
-  deps: ToolDiscoveryServiceProductionDeps,
-}) {
-  private readonly configStore = this.deps.createConfigStore(this.params);
-  private readonly paths = this.deps.createPaths(this.params);
+export class ToolDiscoveryService {
+  public static readonly defaultConstruction = {
+    params: {} as ConfigOptions,
+    deps: ToolDiscoveryServiceProductionDeps,
+  };
+  protected readonly params: (typeof ToolDiscoveryService.defaultConstruction)["params"];
+  protected readonly deps: (typeof ToolDiscoveryService.defaultConstruction)["deps"];
+
+  public constructor(
+    props: typeof ToolDiscoveryService.defaultConstruction = ToolDiscoveryService.defaultConstruction,
+  ) {
+    this.params = props.params;
+    this.deps = props.deps;
+    this.configStore = this.deps.createConfigStore(this.params);
+    this.paths = this.deps.createPaths(this.params);
+  }
+
+  private readonly configStore: ToolDiscoveryConfigStore;
+  private readonly paths: ToolDiscoveryPaths;
 
   /* v8 ignore start */
   private visibilityStartDirectory(params: { pathValue: string }): string {

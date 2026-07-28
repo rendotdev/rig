@@ -1,1 +1,1 @@
-export * from "../domains/settings/index.ts";
+export * from "../domains/settings/repo/rig-paths.ts";
