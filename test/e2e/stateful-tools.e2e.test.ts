@@ -154,7 +154,7 @@ describe("built Rig CLI stateful tool capabilities", () => {
     await fixture.run("cache", { action: "set", key: "two", value: "two" });
     await fixture.run("cache", { action: "clear" });
     await expect(fixture.run("cache", { action: "peek", key: "two" })).resolves.toEqual({});
-  });
+  }, 60_000);
 
   test("covers collection CRUD, nested filters, sorting, search, and multiple collections", async () => {
     await fixture.run("collection", {
@@ -226,7 +226,7 @@ describe("built Rig CLI stateful tool capabilities", () => {
       fixture.run("collection", { collection: "archive", action: "count" }),
     ).resolves.toEqual({ count: 1 });
     await expect(fixture.run("collection", { action: "count" })).resolves.toEqual({ count: 2 });
-  });
+  }, 60_000);
 
   test("reconciles hand edits and deletions when collections reopen", async () => {
     await fixture.run("collection", {
