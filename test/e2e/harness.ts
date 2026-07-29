@@ -34,7 +34,7 @@ type BunFileRuntime = {
   write(path: string, content: string): Promise<number>;
 };
 
-class RigE2ECommandResultClass implements RigE2ECommandResult {
+class RigE2ECommandResultValue implements RigE2ECommandResult {
   public readonly command: string[];
   public readonly cwd: string;
   public readonly exitCode: number;
@@ -77,7 +77,7 @@ class RigE2ECommandResultClass implements RigE2ECommandResult {
   }
 }
 
-export class RigE2EHarnessClass {
+export class RigE2EHarness {
   public readonly rootDir: string;
   public readonly homeDir: string;
   public readonly rigHomeDir: string;
@@ -153,7 +153,7 @@ export class RigE2EHarnessClass {
           }, timeoutMs);
         }),
       ]);
-      return new RigE2ECommandResultClass({
+      return new RigE2ECommandResultValue({
         command,
         cwd,
         exitCode,
@@ -218,13 +218,13 @@ export class RigE2EHarnessClass {
   }
 }
 
-export class RigE2EHarnessFactoryClass {
+export class RigE2EHarnessFactory {
   constructor(
     private readonly params: { cliPath?: string; runtime?: RigE2ERuntime } = {},
     private readonly deps: RigE2EHarnessDeps = { now: Date.now },
   ) {}
 
-  public async create(): Promise<RigE2EHarnessClass> {
+  public async create(): Promise<RigE2EHarness> {
     const harnessDir = dirname(fileURLToPath(import.meta.url));
     const cliPath = resolve(this.params.cliPath ?? join(harnessDir, "..", "..", "dist", "bin.mjs"));
     if (!existsSync(cliPath)) {
@@ -247,8 +247,10 @@ export class RigE2EHarnessFactoryClass {
       mkdir(paths.rigHomeDir, { recursive: true }),
       mkdir(paths.projectDir, { recursive: true }),
     ]);
-    return new RigE2EHarnessClass(paths, this.deps);
+    return new RigE2EHarness(paths, this.deps);
   }
 }
 
-export const rigE2EHarnessFactory = new RigE2EHarnessFactoryClass();
+export function createRigE2EHarness(): Promise<RigE2EHarness> {
+  return new RigE2EHarnessFactory().create();
+}

@@ -1,39 +1,22 @@
-import type { RigConfig } from "../types/config-schema.ts";
+import { Context, Effect, Layer } from "effect";
+import type { RigConfig } from "../types/config-schema";
 
-const RigDefaultConfig = { baseRegistryDir: "~/rig/tools" } as const;
-
-export const RigConfigDefaultsSingleton = {
-  create(params: Record<string, never>): RigConfig {
-    void params;
-    return {
-      version: 1,
-      baseRegistryDir: RigDefaultConfig.baseRegistryDir,
+export class RigConfigDefaultsService extends Context.Service<
+  RigConfigDefaultsService,
+  {
+    readonly get: Effect.Effect<RigConfig>;
+  }
+>()("@rendotdev/rig/settings/RigConfigDefaultsService", {
+  make: Effect.gen(function* () {
+    const get = Effect.succeed({
+      version: 1 as const,
+      baseRegistryDir: "~/rig/tools",
       customRegistries: [],
       cronJobs: [],
-    };
-  },
-};
+    } satisfies RigConfig).pipe(Effect.withSpan("RigConfigDefaultsService.get"));
 
-export type RigConfigDefaultsClass = {
-  create(): RigConfig;
-};
-
-type RigConfigDefaultsConstructor = {
-  new (): RigConfigDefaultsClass;
-  readonly prototype: RigConfigDefaultsClass;
-};
-
-function RigConfigDefaultsConstructorAdapter(this: RigConfigDefaultsClass) {
-  Object.defineProperty(this, "create", {
-    configurable: true,
-    value: function create() {
-      return RigConfigDefaultsSingleton.create({});
-    },
-    writable: true,
-  });
+    return { get } as const;
+  }),
+}) {
+  static readonly layer = Layer.effect(RigConfigDefaultsService, RigConfigDefaultsService.make);
 }
-
-export const RigConfigDefaultsClass =
-  RigConfigDefaultsConstructorAdapter as unknown as RigConfigDefaultsConstructor;
-
-export const rigConfigDefaults = new RigConfigDefaultsClass();

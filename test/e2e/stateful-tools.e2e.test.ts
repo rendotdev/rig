@@ -3,7 +3,7 @@ import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test";
-import { RigE2EHarnessClass, rigE2EHarnessFactory } from "./harness";
+import { createRigE2EHarness, RigE2EHarness } from "./harness";
 
 type SuccessEnvelope<T> = {
   data: T;
@@ -15,13 +15,13 @@ type ErrorEnvelope = {
   errors: Array<{ code: string; message: string; details?: unknown }>;
 };
 
-class StatefulE2EFixtureClass {
+class StatefulE2EFixture {
   public readonly toolDir: string;
   private readonly fixtureDir = fileURLToPath(new URL("./fixtures/stateful", import.meta.url));
 
   constructor(
     params: { toolName: string },
-    private readonly deps: { rig: RigE2EHarnessClass },
+    private readonly deps: { rig: RigE2EHarness },
   ) {
     this.toolDir = join(deps.rig.rigHomeDir, "rig", "tools", params.toolName);
   }
@@ -68,12 +68,12 @@ class StatefulE2EFixtureClass {
 }
 
 describe("built Rig CLI stateful tool capabilities", () => {
-  let rig: RigE2EHarnessClass;
-  let fixture: StatefulE2EFixtureClass;
+  let rig: RigE2EHarness;
+  let fixture: StatefulE2EFixture;
 
   beforeEach(async () => {
-    rig = await rigE2EHarnessFactory.create();
-    fixture = new StatefulE2EFixtureClass({ toolName: "stateful" }, { rig });
+    rig = await createRigE2EHarness();
+    fixture = new StatefulE2EFixture({ toolName: "stateful" }, { rig });
     await fixture.install();
   });
 

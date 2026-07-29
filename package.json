@@ -39,10 +39,12 @@
   "devDependencies": {
     "@effect/tsgo": "0.24.3",
     "@effect/vitest": "4.0.0-beta.102",
+    "@oxlint/plugins": "1.68.0",
     "@types/react": "^19.0.0",
     "@typescript/native": "npm:typescript@7.0.2",
     "@vitest/coverage-v8": "4.1.10",
     "ink-testing-library": "^4.0.0",
+    "knip": "6.29.0",
     "pino": "^10.3.1",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.4",
     "vite-plus": "0.2.4"

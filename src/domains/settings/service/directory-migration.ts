@@ -1,405 +1,146 @@
-import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { AtomicFileWriterClass } from "../repo/atomic-file-writer.ts";
-import type { BoundedFileLockClass } from "../repo/file-lock.ts";
-import { RigPathsClass } from "../repo/rig-paths.ts";
+import { Context, Effect, Layer } from "effect";
+import {
+  RigPathsConfigService,
+  RigPathsOptionsConfigService,
+  RigPathsPlatformService,
+  RigPathsService,
+  rigPathsConfigLayer,
+  rigPathsLayer,
+} from "../../../providers/paths/rig-paths";
+import { RigHomeDirectoryMigrationPromptId } from "../config/directory-migration";
+import {
+  DirectoryMigrationInspectionService,
+  DirectoryMigrationRepositoryService,
+  directoryMigrationRepositoryLayer,
+} from "../repo/directory-migration";
+import {
+  MigrationPromptStoreService,
+  migrationPromptStoreLayer,
+} from "../repo/migration-prompt-store";
+import {
+  DirectoryMigrationError,
+  type RigDirectoryMigrationResult,
+} from "../types/directory-migration";
 
-export const RigHomeDirectoryMigrationPromptId = "v0.0.19-home-directory";
-
-export type RigDirectoryMigrationResult = {
-  promptId: string;
-  status: "migrated" | "manual";
-  legacyDir: string;
-  currentDir: string;
-  configUpdated: boolean;
-  reason?: string;
-};
-
-type RigMigrationPromptState = {
-  version: 1;
-  prompts: Record<string, { shownAt: string }>;
-};
-
-type RigMigrationPromptStoreDeps = {
-  paths: RigPathsClass;
-  lock: Pick<BoundedFileLockClass, "run">;
-  writer: Pick<AtomicFileWriterClass, "write">;
-  readFile: typeof readFile;
-  nowIso: () => string;
-};
-
-function createRigMigrationPromptStoreDeps(paths: RigPathsClass): RigMigrationPromptStoreDeps {
-  return {
-    paths,
-    lock: {
-      async run<Result>(operation: () => Result | Promise<Result>): Promise<Result> {
-        const { BoundedFileLockClass } = await import("../repo/file-lock.ts");
-        return await new BoundedFileLockClass(paths.migrationPromptStatePath).run(operation);
+class DirectoryMigrationCurrentStateService extends Context.Service<
+  DirectoryMigrationCurrentStateService,
+  {
+    readonly canReplaceCurrentDirectory: Effect.Effect<boolean, DirectoryMigrationError>;
+  }
+>()("@rendotdev/rig/settings/DirectoryMigrationCurrentStateService", {
+  make: Effect.gen(function* () {
+    const paths = yield* RigPathsConfigService;
+    const pathOperations = yield* RigPathsService;
+    const inspection = yield* DirectoryMigrationInspectionService;
+    const hasEmptyRegistry = Effect.fn("DirectoryMigrationCurrentStateService.hasEmptyRegistry")(
+      function* () {
+        const path = yield* pathOperations.resolve(paths.defaultBaseRegistryDir);
+        return (
+          !(yield* inspection.directoryExists(path)) ||
+          (yield* inspection.visibleEntries(path)).every((entry) => entry === "tsconfig.json")
+        );
       },
-    },
-    writer: new AtomicFileWriterClass(),
-    readFile,
-    nowIso() {
-      return new Date().toISOString();
-    },
-  };
-}
-
-function emptyPromptState(_params: {}): RigMigrationPromptState {
-  return { version: 1, prompts: {} };
-}
-
-function isPromptState(params: { value: unknown }): params is { value: RigMigrationPromptState } {
-  return (
-    typeof params.value === "object" &&
-    params.value !== null &&
-    !Array.isArray(params.value) &&
-    (params.value as { version?: unknown }).version === 1 &&
-    typeof (params.value as { prompts?: unknown }).prompts === "object" &&
-    (params.value as { prompts?: unknown }).prompts !== null &&
-    !Array.isArray((params.value as { prompts?: unknown }).prompts)
-  );
-}
-
-const RigMigrationPromptStoreProductionDeps = createRigMigrationPromptStoreDeps(
-  new RigPathsClass(),
-);
-
-export class RigMigrationPromptStoreService {
-  public static readonly defaultConstruction = {
-    params: {},
-    deps: RigMigrationPromptStoreProductionDeps,
-  };
-  protected readonly params: (typeof RigMigrationPromptStoreService.defaultConstruction)["params"];
-  protected readonly deps: (typeof RigMigrationPromptStoreService.defaultConstruction)["deps"];
-
-  public constructor(
-    props: typeof RigMigrationPromptStoreService.defaultConstruction = RigMigrationPromptStoreService.defaultConstruction,
-  ) {
-    this.params = props.params;
-    this.deps = props.deps;
-  }
-
-  private async read(_params: {}): Promise<RigMigrationPromptState> {
-    try {
-      const candidate = {
-        value: JSON.parse(
-          await this.deps.readFile(this.deps.paths.migrationPromptStatePath, "utf8"),
-        ) as unknown,
-      };
-      if (!isPromptState(candidate)) return emptyPromptState({});
-      return candidate.value;
-    } catch {
-      return emptyPromptState({});
-    }
-  }
-
-  private async write(params: { state: RigMigrationPromptState }): Promise<void> {
-    await this.deps.writer.write(
-      this.deps.paths.migrationPromptStatePath,
-      `${JSON.stringify(params.state, null, 2)}\n`,
     );
-  }
-
-  public async hasPrompted(params: { promptId: string }): Promise<boolean> {
-    const state = await this.read({});
-    return state.prompts[params.promptId] !== undefined;
-  }
-
-  public async markPrompted(params: { promptId: string }): Promise<void> {
-    await this.deps.lock.run(async () => {
-      const state = await this.read({});
-      state.prompts[params.promptId] ??= { shownAt: this.deps.nowIso() };
-      await this.write({ state });
-    });
-  }
-}
-
-export const RigMigrationPromptStore = new RigMigrationPromptStoreService();
-
-export type RigMigrationPromptStoreClass = {
-  hasPrompted(promptId: string): Promise<boolean>;
-  markPrompted(promptId: string): Promise<void>;
-};
-
-type RigMigrationPromptStoreConstructor = {
-  new (paths: RigPathsClass): RigMigrationPromptStoreClass;
-  readonly prototype: RigMigrationPromptStoreClass;
-};
-
-type RigMigrationPromptStoreAdapter = RigMigrationPromptStoreClass & {
-  readonly resource: RigMigrationPromptStoreService;
-};
-
-const RigMigrationPromptStoreClassAdapter = function constructRigMigrationPromptStore(
-  this: RigMigrationPromptStoreAdapter,
-  paths: RigPathsClass,
-): void {
-  Object.defineProperty(this, "resource", {
-    value: new RigMigrationPromptStoreService({
-      params: {},
-      deps: createRigMigrationPromptStoreDeps(paths),
-    }),
-  });
-};
-Object.defineProperty(RigMigrationPromptStoreClassAdapter, "name", {
-  value: "RigMigrationPromptStoreClass",
-});
-Object.defineProperties(RigMigrationPromptStoreClassAdapter.prototype, {
-  hasPrompted: {
-    configurable: true,
-    value: function hasPrompted(this: RigMigrationPromptStoreAdapter, promptId: string) {
-      return this.resource.hasPrompted({ promptId });
-    },
-    writable: true,
-  },
-  markPrompted: {
-    configurable: true,
-    value: function markPrompted(this: RigMigrationPromptStoreAdapter, promptId: string) {
-      return this.resource.markPrompted({ promptId });
-    },
-    writable: true,
-  },
-});
-
-export const RigMigrationPromptStoreClass =
-  RigMigrationPromptStoreClassAdapter as unknown as RigMigrationPromptStoreConstructor;
-
-type RigDirectoryMigrationServiceDeps = {
-  paths: RigPathsClass;
-  promptStore: RigMigrationPromptStoreClass;
-  exists: typeof existsSync;
-  mkdir: typeof mkdir;
-  readdir: typeof readdir;
-  readFile: typeof readFile;
-  rename: typeof rename;
-  rm: typeof rm;
-  stat: typeof stat;
-  writeFile: typeof writeFile;
-  join: typeof join;
-};
-
-function createRigDirectoryMigrationServiceDeps(
-  paths: RigPathsClass,
-  promptStore: RigMigrationPromptStoreClass = new RigMigrationPromptStoreClass(paths),
-): RigDirectoryMigrationServiceDeps {
-  return {
-    paths,
-    promptStore,
-    exists: existsSync,
-    mkdir,
-    readdir,
-    readFile,
-    rename,
-    rm,
-    stat,
-    writeFile,
-    join,
-  };
-}
-
-const RigDirectoryMigrationServiceProductionDeps = createRigDirectoryMigrationServiceDeps(
-  new RigPathsClass(),
-);
-
-export class RigDirectoryMigrationService {
-  public static readonly defaultConstruction = {
-    params: {},
-    deps: RigDirectoryMigrationServiceProductionDeps,
-  };
-  protected readonly params: (typeof RigDirectoryMigrationService.defaultConstruction)["params"];
-  protected readonly deps: (typeof RigDirectoryMigrationService.defaultConstruction)["deps"];
-
-  public constructor(
-    props: typeof RigDirectoryMigrationService.defaultConstruction = RigDirectoryMigrationService.defaultConstruction,
-  ) {
-    this.params = props.params;
-    this.deps = props.deps;
-  }
-
-  private async directoryExists(params: { path: string }): Promise<boolean> {
-    try {
-      return (await this.deps.stat(params.path)).isDirectory();
-    } catch {
-      return false;
-    }
-  }
-
-  private async visibleEntries(params: { path: string }): Promise<string[]> {
-    return (await this.deps.readdir(params.path)).filter(function keepVisible(entry) {
-      return entry !== ".DS_Store";
-    });
-  }
-
-  private isLegacyBaseRegistry(params: { value: unknown }): boolean {
-    return (
-      typeof params.value === "string" &&
-      (params.value === this.deps.paths.legacyDefaultBaseRegistryDir ||
-        this.deps.paths.resolve(params.value) ===
-          this.deps.join(this.deps.paths.legacyRigDir, "tools"))
+    const hasEmptyCron = Effect.fn("DirectoryMigrationCurrentStateService.hasEmptyCron")(
+      function* () {
+        return (
+          !(yield* inspection.directoryExists(paths.cronDir)) ||
+          (yield* inspection.visibleEntries(paths.cronDir)).length === 0
+        );
+      },
     );
-  }
-
-  private async rewriteMigratedConfig(_params: {}): Promise<boolean> {
-    const configPath = this.deps.paths.configPath;
-    if (!this.deps.exists(configPath)) return false;
-
-    const parsed = JSON.parse(await this.deps.readFile(configPath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    if (!this.isLegacyBaseRegistry({ value: parsed.baseRegistryDir })) return false;
-
-    parsed.baseRegistryDir = this.deps.paths.defaultBaseRegistryDir;
-    await this.deps.writeFile(configPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-    return true;
-  }
-
-  private async hasDefaultCurrentConfig(params: { currentDir: string }): Promise<boolean> {
-    try {
-      const parsed = JSON.parse(
-        await this.deps.readFile(this.deps.join(params.currentDir, "rig.json"), "utf8"),
-      ) as {
-        version?: unknown;
-        baseRegistryDir?: unknown;
-        customRegistries?: unknown;
-        cronJobs?: unknown;
-      };
-      return (
-        parsed.version === 1 &&
-        parsed.baseRegistryDir === this.deps.paths.defaultBaseRegistryDir &&
-        Array.isArray(parsed.customRegistries) &&
-        parsed.customRegistries.length === 0 &&
-        (parsed.cronJobs === undefined ||
-          (Array.isArray(parsed.cronJobs) && parsed.cronJobs.length === 0))
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private async hasEmptyGeneratedRegistry(params: { currentDir: string }): Promise<boolean> {
-    const toolsDir = this.deps.join(params.currentDir, "tools");
-    if (!(await this.directoryExists({ path: toolsDir }))) return true;
-    const entries = await this.visibleEntries({ path: toolsDir });
-    return entries.every(function isGeneratedEntry(entry) {
-      return entry === "tsconfig.json";
-    });
-  }
-
-  private async hasEmptyCronDirectory(params: { currentDir: string }): Promise<boolean> {
-    const cronDir = this.deps.join(params.currentDir, "cron");
-    if (!(await this.directoryExists({ path: cronDir }))) return true;
-    return (await this.visibleEntries({ path: cronDir })).length === 0;
-  }
-
-  private async hasOnlyGeneratedCurrentEntries(params: { currentDir: string }): Promise<boolean> {
-    const entries = await this.visibleEntries({ path: params.currentDir });
-    return entries.every(function isGeneratedEntry(entry) {
-      return [
+    const hasOnlyGeneratedEntries = Effect.fn(
+      "DirectoryMigrationCurrentStateService.hasOnlyGeneratedEntries",
+    )(function* () {
+      const generated = new Set([
         "rig.json",
         "runtime",
         "tools",
         "update-check.json",
         "cron",
         "migration-prompts.json",
-      ].includes(entry);
+      ]);
+      return (yield* inspection.visibleEntries(paths.rigDir)).every((entry) =>
+        generated.has(entry),
+      );
     });
+    const canReplaceCurrentDirectory = Effect.gen(function* () {
+      return (
+        (yield* inspection.hasDefaultConfig) &&
+        (yield* hasEmptyRegistry()) &&
+        (yield* hasEmptyCron()) &&
+        (yield* hasOnlyGeneratedEntries())
+      );
+    }).pipe(Effect.withSpan("DirectoryMigrationCurrentStateService.canReplaceCurrentDirectory"));
+    return { canReplaceCurrentDirectory } as const;
+  }),
+}) {
+  static readonly layer = Layer.effect(
+    DirectoryMigrationCurrentStateService,
+    DirectoryMigrationCurrentStateService.make,
+  );
+}
+
+export class DirectoryMigrationService extends Context.Service<
+  DirectoryMigrationService,
+  {
+    readonly migrateIfNeeded: Effect.Effect<
+      RigDirectoryMigrationResult | undefined,
+      DirectoryMigrationError
+    >;
   }
-
-  private async canReplaceCurrentDirectory(params: { currentDir: string }): Promise<boolean> {
-    return (
-      (await this.hasDefaultCurrentConfig(params)) &&
-      (await this.hasEmptyGeneratedRegistry(params)) &&
-      (await this.hasEmptyCronDirectory(params)) &&
-      (await this.hasOnlyGeneratedCurrentEntries(params))
-    );
-  }
-
-  private async hasLegacyState(params: { legacyDir: string }): Promise<boolean> {
-    return (
-      (await this.directoryExists({ path: params.legacyDir })) &&
-      (this.deps.exists(this.deps.join(params.legacyDir, "rig.json")) ||
-        this.deps.exists(this.deps.join(params.legacyDir, "tools")))
-    );
-  }
-
-  public async migrateIfNeeded(_params: {}): Promise<RigDirectoryMigrationResult | undefined> {
-    const legacyDir = this.deps.paths.legacyRigDir;
-    const currentDir = this.deps.paths.rigDir;
-
-    if (!(await this.hasLegacyState({ legacyDir }))) return undefined;
-
-    const currentExists = this.deps.exists(currentDir);
-    if (currentExists && !(await this.canReplaceCurrentDirectory({ currentDir }))) {
-      if (await this.deps.promptStore.hasPrompted(RigHomeDirectoryMigrationPromptId)) {
-        return undefined;
+>()("@rendotdev/rig/settings/DirectoryMigrationService", {
+  make: Effect.gen(function* () {
+    const paths = yield* RigPathsConfigService;
+    const promptStore = yield* MigrationPromptStoreService;
+    const state = yield* DirectoryMigrationCurrentStateService;
+    const repository = yield* DirectoryMigrationRepositoryService;
+    const migrateIfNeeded = Effect.gen(function* () {
+      if (!(yield* repository.hasLegacyState)) return undefined;
+      const requiresManualMigration =
+        (yield* repository.currentExists) && !(yield* state.canReplaceCurrentDirectory);
+      if (requiresManualMigration) {
+        if (yield* promptStore.hasPrompted(RigHomeDirectoryMigrationPromptId)) return undefined;
+        return {
+          promptId: RigHomeDirectoryMigrationPromptId,
+          status: "manual" as const,
+          legacyDir: paths.legacyRigDir,
+          currentDir: paths.rigDir,
+          configUpdated: false,
+          reason: "Rig found data in both the old and new folders.",
+        };
       }
       return {
         promptId: RigHomeDirectoryMigrationPromptId,
-        status: "manual",
-        legacyDir,
-        currentDir,
-        configUpdated: false,
-        reason: "Rig found data in both the old and new folders.",
+        status: "migrated" as const,
+        legacyDir: paths.legacyRigDir,
+        currentDir: paths.rigDir,
+        configUpdated: yield* repository.migrate,
       };
-    }
-
-    if (currentExists) await this.deps.rm(currentDir, { recursive: true, force: true });
-    await this.deps.mkdir(this.deps.paths.homeDir, { recursive: true });
-    await this.deps.rename(legacyDir, currentDir);
-
-    return {
-      promptId: RigHomeDirectoryMigrationPromptId,
-      status: "migrated",
-      legacyDir,
-      currentDir,
-      configUpdated: await this.rewriteMigratedConfig({}),
-    };
-  }
+    }).pipe(Effect.withSpan("DirectoryMigrationService.migrateIfNeeded"));
+    return { migrateIfNeeded } as const;
+  }),
+}) {
+  static readonly layer = Layer.effect(DirectoryMigrationService, DirectoryMigrationService.make);
 }
 
-export const RigDirectoryMigration = new RigDirectoryMigrationService();
-
-export type RigDirectoryMigrationServiceClass = {
-  migrateIfNeeded(): Promise<RigDirectoryMigrationResult | undefined>;
-};
-
-type RigDirectoryMigrationServiceConstructor = {
-  new (
-    paths: RigPathsClass,
-    promptStore?: RigMigrationPromptStoreClass,
-  ): RigDirectoryMigrationServiceClass;
-  readonly prototype: RigDirectoryMigrationServiceClass;
-};
-
-type RigDirectoryMigrationServiceAdapter = RigDirectoryMigrationServiceClass & {
-  readonly resource: RigDirectoryMigrationService;
-};
-
-const RigDirectoryMigrationServiceClassAdapter = function constructRigDirectoryMigrationService(
-  this: RigDirectoryMigrationServiceAdapter,
-  paths: RigPathsClass,
-  promptStore?: RigMigrationPromptStoreClass,
-): void {
-  Object.defineProperty(this, "resource", {
-    value: new RigDirectoryMigrationService({
-      params: {},
-      deps: createRigDirectoryMigrationServiceDeps(paths, promptStore),
-    }),
-  });
-};
-Object.defineProperty(RigDirectoryMigrationServiceClassAdapter, "name", {
-  value: "RigDirectoryMigrationServiceClass",
-});
-Object.defineProperty(RigDirectoryMigrationServiceClassAdapter.prototype, "migrateIfNeeded", {
-  configurable: true,
-  value: function migrateIfNeeded(this: RigDirectoryMigrationServiceAdapter) {
-    return this.resource.migrateIfNeeded({});
-  },
-  writable: true,
-});
-
-export const RigDirectoryMigrationServiceClass =
-  RigDirectoryMigrationServiceClassAdapter as unknown as RigDirectoryMigrationServiceConstructor;
+const directoryMigrationCurrentStateLayer = DirectoryMigrationCurrentStateService.layer.pipe(
+  Layer.provide(DirectoryMigrationInspectionService.layer),
+);
+const currentStateForMigrationLayer = directoryMigrationCurrentStateLayer.pipe(
+  Layer.provide(rigPathsLayer),
+);
+export const directoryMigrationLayer: Layer.Layer<
+  DirectoryMigrationService,
+  never,
+  RigPathsOptionsConfigService | RigPathsPlatformService
+> = DirectoryMigrationService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      rigPathsConfigLayer,
+      migrationPromptStoreLayer,
+      currentStateForMigrationLayer,
+      directoryMigrationRepositoryLayer,
+    ),
+  ),
+);

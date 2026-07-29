@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test";
-import { RigE2EHarnessClass, rigE2EHarnessFactory } from "./harness";
+import { createRigE2EHarness, RigE2EHarness } from "./harness";
 
 type SuccessEnvelope<T> = {
   data: T;
@@ -92,10 +92,10 @@ export default tool;
 `;
 
 describe("built Rig CLI lifecycle", () => {
-  let rig: RigE2EHarnessClass;
+  let rig: RigE2EHarness;
 
   beforeEach(async () => {
-    rig = await rigE2EHarnessFactory.create();
+    rig = await createRigE2EHarness();
   });
 
   afterEach(async () => {

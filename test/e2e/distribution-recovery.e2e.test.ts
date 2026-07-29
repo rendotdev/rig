@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
-import { RigE2EHarnessClass, RigE2EHarnessFactoryClass } from "./harness";
+import { RigE2EHarness, RigE2EHarnessFactory } from "./harness";
 
 type SpawnResult = {
   exitCode: number;
@@ -20,7 +20,7 @@ type CronJob = {
   input?: unknown;
 };
 
-class NpmPackResultClass {
+class NpmPackResult {
   constructor(private readonly params: { stdout: string }) {}
 
   public filename(): string {
@@ -30,19 +30,19 @@ class NpmPackResultClass {
       : typeof parsed === "object" && parsed !== null
         ? Object.values(parsed)[0]
         : undefined;
-    if (
+    const hasInvalidFilename =
       typeof candidate !== "object" ||
       candidate === null ||
       !("filename" in candidate) ||
-      typeof candidate.filename !== "string"
-    ) {
+      typeof candidate.filename !== "string";
+    if (hasInvalidFilename) {
       throw new Error(`npm pack returned no package filename: ${this.params.stdout}`);
     }
     return candidate.filename;
   }
 }
 
-class ProcessRunnerClass {
+class ProcessRunner {
   public async run(params: {
     command: string[];
     cwd: string;
@@ -81,13 +81,13 @@ class ProcessRunnerClass {
   }
 }
 
-class InstalledDistributionClass {
+class InstalledDistribution {
   public rootDir = "";
   public consumerDir = "";
   public entrypoint = "";
   public binaryPath = "";
   public tarballPath = "";
-  private readonly processes = new ProcessRunnerClass();
+  private readonly processes = new ProcessRunner();
 
   public async setup(): Promise<void> {
     this.rootDir = await mkdtemp(join(tmpdir(), "rig-distribution-e2e-"));
@@ -104,10 +104,7 @@ class InstalledDistributionClass {
       cwd: repositoryRoot,
     });
     if (packed.exitCode !== 0) throw new Error(packed.stderr || packed.stdout);
-    this.tarballPath = join(
-      this.rootDir,
-      new NpmPackResultClass({ stdout: packed.stdout }).filename(),
-    );
+    this.tarballPath = join(this.rootDir, new NpmPackResult({ stdout: packed.stdout }).filename());
 
     const installed = await this.processes.run({
       command: ["npm", "install", "--no-audit", "--no-fund", this.tarballPath],
@@ -133,8 +130,8 @@ class InstalledDistributionClass {
     }
   }
 
-  public harnessFactory(): RigE2EHarnessFactoryClass {
-    return new RigE2EHarnessFactoryClass({ cliPath: this.binaryPath, runtime: "direct" });
+  public harnessFactory(): RigE2EHarnessFactory {
+    return new RigE2EHarnessFactory({ cliPath: this.binaryPath, runtime: "direct" });
   }
 
   public async cleanup(): Promise<void> {
@@ -142,7 +139,7 @@ class InstalledDistributionClass {
   }
 }
 
-class DistributionFixtureClass {
+class DistributionFixture {
   public readonly cronEntrypoint = resolve(
     testDirectory,
     "fixtures",
@@ -166,14 +163,14 @@ const repositoryRoot = resolve(testDirectory, "..", "..");
 const expectedVersion = (
   JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as { version: string }
 ).version;
-const distribution = new InstalledDistributionClass();
-const fixture = new DistributionFixtureClass();
-const processes = new ProcessRunnerClass();
-const homes: RigE2EHarnessClass[] = [];
+const distribution = new InstalledDistribution();
+const fixture = new DistributionFixture();
+const processes = new ProcessRunner();
+const homes: RigE2EHarness[] = [];
 
-async function createHarness(params: { cron?: boolean } = {}): Promise<RigE2EHarnessClass> {
+async function createHarness(params: { cron?: boolean } = {}): Promise<RigE2EHarness> {
   const factory = params.cron
-    ? new RigE2EHarnessFactoryClass({ cliPath: fixture.cronEntrypoint, runtime: "bun" })
+    ? new RigE2EHarnessFactory({ cliPath: fixture.cronEntrypoint, runtime: "bun" })
     : distribution.harnessFactory();
   const harness = await factory.create();
   homes.push(harness);
@@ -201,17 +198,15 @@ describe("installed Rig distribution and recovery", () => {
   });
 
   test("accepts npm 11 and npm 12 packed-artifact metadata", () => {
-    expect(new NpmPackResultClass({ stdout: '[{"filename":"npm-11.tgz"}]' }).filename()).toBe(
+    expect(new NpmPackResult({ stdout: '[{"filename":"npm-11.tgz"}]' }).filename()).toBe(
       "npm-11.tgz",
     );
     expect(
-      new NpmPackResultClass({
+      new NpmPackResult({
         stdout: '{"@rendotdev/rig":{"filename":"npm-12.tgz"}}',
       }).filename(),
     ).toBe("npm-12.tgz");
-    expect(() => new NpmPackResultClass({ stdout: "{}" }).filename()).toThrow(
-      "no package filename",
-    );
+    expect(() => new NpmPackResult({ stdout: "{}" }).filename()).toThrow("no package filename");
   });
 
   test("packs and installs a consumer-ready CLI with generated runtime support", async () => {
@@ -288,20 +283,12 @@ describe("installed Rig distribution and recovery", () => {
     }
   });
 
-  test("exports the supported built compatibility surface", async () => {
+  test("keeps the built CLI free of legacy compatibility exports", async () => {
     const installed = (await import(
       `${pathToFileURL(distribution.entrypoint).href}?e2e=exports`
     )) as Record<string, unknown>;
-    for (const name of [
-      "CliApplicationClass",
-      "CliApplication",
-      "BunRuntimeBootstrapClass",
-      "BunRuntimeBootstrap",
-      "RigCronWorkerClass",
-      "RigCronWorker",
-      "isCliEntrypoint",
-    ]) {
-      expect(installed[name], `missing built export ${name}`).toBeDefined();
+    for (const name of ["CliApplicationClass", "RigCronWorkerClass", "BunRuntimeBootstrapClass"]) {
+      expect(installed[name], `unexpected built export ${name}`).toBeUndefined();
     }
   });
 
@@ -416,7 +403,7 @@ describe("installed Rig distribution and recovery", () => {
       env: { ...baseEnv, RIG_FAKE_CRON_FAIL_REGISTER_SCHEDULE: "@weekly" },
     });
     expect(replacement.exitCode).toBe(1);
-    expect(replacement.stderr).toContain("INTERNAL_ERROR: fake register failure: @weekly");
+    expect(replacement.stderr).toContain("CRON_ERROR: fake register failure: @weekly");
     expect(await rig.read(workerPath)).toBe(originalWorker);
     let config = JSON.parse(await rig.read(join(rig.rigHomeDir, "rig", "rig.json"))) as {
       cronJobs: CronJob[];

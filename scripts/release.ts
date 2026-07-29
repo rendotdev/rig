@@ -1,3 +1,9 @@
-import { ReleaseEntrypointClass } from "./lib/release";
+import { BunRuntime } from "@effect/platform-bun";
+import { Effect } from "effect";
+import { ReleaseService } from "./lib/release";
 
-new ReleaseEntrypointClass().run();
+BunRuntime.runMain(
+  ReleaseService.use((service) => service.run(Bun.argv.slice(2))).pipe(
+    Effect.provide(ReleaseService.layer),
+  ),
+);

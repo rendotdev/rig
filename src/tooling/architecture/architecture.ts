@@ -8,88 +8,30 @@ export const domainNames = [
   "tools",
   "updates",
 ] as const;
-export const migratedDomainNames = ["settings"] as const;
 export const domainLayers = ["types", "config", "repo", "service", "runtime", "ui"] as const;
-export const productionFileLineLimit = 400;
-export const testFileLineLimit = 600;
-export const functionLineLimit = 80;
-
-const migrationFileLineLimits: Readonly<Record<string, number>> = {
-  "src/application/cli/cli-application.ts": 664,
-  "src/collections/application/tool-collection.ts": 962,
-  "src/cron/application/rig-cron.ts": 732,
-  "src/generated/agent/agent-instruction-sync.ts": 468,
-  "src/generated/runtime/runtime-support.ts": 539,
-  "src/persistence/cache/tool-cache.ts": 413,
-  "src/runtime/support.test.ts": 1_192,
-  "src/runtime/updates/rig-updater.ts": 449,
-  "src/tools/collection.test.ts": 911,
-  "src/tools/cron.test.ts": 662,
-  "src/tools/loading/tool-loader.ts": 509,
-  "src/tools/presentation/tool-list.ts": 465,
-  "src/tools/run.test.ts": 1_424,
-};
-
-const migrationFunctionLineLimits: Readonly<Record<string, number>> = {
-  "src/application/cli/cli-application.ts": 420,
-  "src/collections/persistence/memory-index.ts": 123,
-  "src/collections/application/tool-collection.ts": 320,
-  "src/config/application/config-store.ts": 121,
-  "src/domains/settings/repo/file-lock.ts": 119,
-  "src/domains/settings/repo/rig-paths.ts": 109,
-  "src/domains/settings/service/directory-migration.ts": 130,
-  "src/cron/application/rig-cron.ts": 360,
-  "src/dev/dev-link.ts": 133,
-  "src/generated/agent/agent-instruction-sync.ts": 240,
-  "src/generated/runtime/runtime-support.ts": 280,
-  "src/persistence/cache/tool-cache.ts": 220,
-  "src/registry/application/discover-tools.ts": 170,
-  "src/registry/registry.test.ts": 133,
-  "src/runtime/logging/logger.ts": 91,
-  "src/runtime/process/shell.ts": 81,
-  "src/runtime/support.test.ts": 320,
-  "src/runtime/updates/npm-update-check.ts": 81,
-  "src/runtime/updates/rig-updater.ts": 260,
-  "src/tools/collection.test.ts": 300,
-  "src/tools/cron.test.ts": 260,
-  "src/tools/domain/tool-search.ts": 109,
-  "src/tools/env.test.ts": 102,
-  "src/tools/execution/tool-runner.ts": 90,
-  "src/tools/loading/tool-loader.ts": 240,
-  "src/tools/management/tool-env.ts": 102,
-  "src/tools/management/tool-typecheck.ts": 124,
-  "src/tools/presentation/tool-list.ts": 240,
-  "src/tools/run.test.ts": 320,
-};
-
-export const legacySourceRoots = [
-  "agents",
-  "application",
-  "collections",
-  "config",
-  "cron",
-  "dev",
-  "errors",
-  "generated",
-  "persistence",
-  "registry",
-  "runtime",
-  "tools",
-] as const;
+const productionFileLineLimit = 400;
+const testFileLineLimit = 600;
+const functionLineLimit = 80;
 
 export function fileLineLimitForPath(filePath: string, isTest: boolean) {
-  return (
-    migrationFileLineLimits[sourcePathKey(filePath)] ??
-    (isTest ? testFileLineLimit : productionFileLineLimit)
-  );
+  return isTest ? testFileLineLimit : productionFileLineLimit;
 }
 
-export function functionLineLimitForPath(filePath: string) {
-  return migrationFunctionLineLimits[sourcePathKey(filePath)] ?? functionLineLimit;
+export function functionLineLimitForPath(_filePath: string) {
+  return functionLineLimit;
 }
 
 export type DomainName = (typeof domainNames)[number];
 export type DomainLayer = (typeof domainLayers)[number];
+
+export const allowedDomainDependencies: Readonly<Record<DomainName, readonly DomainName[]>> = {
+  collections: [],
+  registry: ["settings"],
+  scheduling: ["settings", "tools"],
+  settings: [],
+  tools: ["collections", "registry", "settings"],
+  updates: ["settings"],
+};
 
 export const allowedLayerDependencies: Readonly<Record<DomainLayer, readonly DomainLayer[]>> = {
   types: ["types"],
@@ -102,15 +44,14 @@ export const allowedLayerDependencies: Readonly<Record<DomainLayer, readonly Dom
 
 type SourceClassification =
   | Readonly<{
-      kind: "app" | "providers" | "utils" | "tooling" | "legacy" | "outside-source";
+      kind: "app" | "providers" | "utils" | "tooling" | "outside-source";
     }>
-  | Readonly<{ kind: "domain-public"; domain: DomainName }>
   | Readonly<{ kind: "domain-layer"; domain: DomainName; layer: DomainLayer }>
   | Readonly<{ kind: "invalid"; reason: "domain" | "domain-layer" | "source-location" }>;
 
 export type DependencyDecision = Readonly<{
   allowed: boolean;
-  reason?: "app-internal-domain" | "cross-domain-internal" | "layer" | "top-level";
+  reason?: "cross-domain" | "layer" | "top-level";
   source: SourceClassification;
   target: SourceClassification;
 }>;
@@ -120,12 +61,10 @@ export function classifySourcePath(filePath: string): SourceClassification {
   if (!sourcePath) {
     return { kind: "outside-source" };
   }
-  const [topLevel, second, third, fourth] = sourcePath.split("/");
-  const isLegacyRootFile = !sourcePath.includes("/");
-  const usesLegacyLocation = isLegacyRootFile || isLegacySourceRoot(topLevel);
-  if (usesLegacyLocation) {
-    return { kind: "legacy" };
+  if (/(?:^|\/)index\.tsx?$/u.test(sourcePath)) {
+    return { kind: "invalid", reason: "source-location" };
   }
+  const [topLevel, second, third] = sourcePath.split("/");
   const isProductionTopLevel =
     topLevel === "app" || topLevel === "providers" || topLevel === "utils";
   if (isProductionTopLevel) {
@@ -139,15 +78,6 @@ export function classifySourcePath(filePath: string): SourceClassification {
   }
   if (!isDomainName(second)) {
     return { kind: "invalid", reason: "domain" };
-  }
-  const isDomainPublicApi = third === "index.ts" || third === "index.tsx";
-  if (isDomainPublicApi) {
-    return { kind: "domain-public", domain: second };
-  }
-  const isLayerPublicApi =
-    isDomainLayer(third) && (fourth === "index.ts" || fourth === "index.tsx");
-  if (isLayerPublicApi) {
-    return { kind: "domain-public", domain: second };
   }
   if (!isDomainLayer(third)) {
     return { kind: "invalid", reason: "domain-layer" };
@@ -174,21 +104,18 @@ export function validateDependency(sourceFile: string, targetFile: string): Depe
   if (hasInvalidLocation) {
     return { allowed: true, source, target };
   }
-  if (source.kind === "legacy") {
-    return { allowed: true, source, target };
-  }
-  if (target.kind === "legacy") {
-    return { allowed: false, reason: "top-level", source, target };
-  }
   if (source.kind === "app") {
+    const isAppDomainTarget =
+      target.kind === "domain-layer" &&
+      ["types", "service", "runtime", "ui"].includes(target.layer);
     const allowed =
       target.kind === "app" ||
       target.kind === "providers" ||
       target.kind === "utils" ||
-      target.kind === "domain-public";
+      isAppDomainTarget;
     return {
       allowed,
-      reason: target.kind === "domain-layer" ? "app-internal-domain" : "top-level",
+      reason: "top-level",
       source,
       target,
     };
@@ -202,13 +129,6 @@ export function validateDependency(sourceFile: string, targetFile: string): Depe
   }
   if (source.kind === "tooling") {
     const allowed = target.kind === "tooling" || target.kind === "utils";
-    return { allowed, reason: "top-level", source, target };
-  }
-  if (source.kind === "domain-public") {
-    const isSameDomainLayer = target.kind === "domain-layer" && target.domain === source.domain;
-    const isSameDomainPublicApi =
-      target.kind === "domain-public" && target.domain === source.domain;
-    const allowed = isSameDomainLayer || isSameDomainPublicApi;
     return { allowed, reason: "top-level", source, target };
   }
   if (source.kind !== "domain-layer") {
@@ -239,6 +159,20 @@ export function validateArchitectureModel() {
   if (cycle) {
     errors.push(`Layer dependency cycle: ${cycle.join(" -> ")}.`);
   }
+  for (const domain of domainNames) {
+    for (const dependency of allowedDomainDependencies[domain]) {
+      if (!domainNames.includes(dependency)) {
+        errors.push(`${domain} references the unknown domain ${dependency}.`);
+      }
+      if (dependency === domain) {
+        errors.push(`${domain} must not declare itself as a domain dependency.`);
+      }
+    }
+  }
+  const domainCycle = findDomainDependencyCycle(allowedDomainDependencies);
+  if (domainCycle) {
+    errors.push(`Domain dependency cycle: ${domainCycle.join(" -> ")}.`);
+  }
   return errors;
 }
 
@@ -246,13 +180,9 @@ function validateDomainLayerDependency(
   source: Extract<SourceClassification, { kind: "domain-layer" }>,
   target: Exclude<SourceClassification, { kind: "invalid" }>,
 ): DependencyDecision {
-  if (target.kind === "domain-public") {
-    const allowed = target.domain !== source.domain;
-    return { allowed, reason: "cross-domain-internal", source, target };
-  }
   const isCrossCuttingTarget = target.kind === "providers" || target.kind === "utils";
   if (isCrossCuttingTarget) {
-    const allowsProviders = ["repo", "service", "runtime", "ui"].includes(source.layer);
+    const allowsProviders = ["repo", "service", "runtime"].includes(source.layer);
     return {
       allowed: target.kind === "utils" || allowsProviders,
       reason: "layer",
@@ -264,10 +194,55 @@ function validateDomainLayerDependency(
     return { allowed: false, reason: "top-level", source, target };
   }
   if (target.domain !== source.domain) {
-    return { allowed: false, reason: "cross-domain-internal", source, target };
+    const allowsDomain = allowedDomainDependencies[source.domain].includes(target.domain);
+    const allowsTargetLayer =
+      target.layer === "types" ||
+      (target.layer === "service" && ["service", "runtime", "ui"].includes(source.layer)) ||
+      (target.layer === "runtime" && ["runtime", "ui"].includes(source.layer));
+    return {
+      allowed: allowsDomain && allowsTargetLayer,
+      reason: "cross-domain",
+      source,
+      target,
+    };
   }
   const allowed = allowedLayerDependencies[source.layer].includes(target.layer);
   return { allowed, reason: "layer", source, target };
+}
+
+export function describeSourceClassification(classification: SourceClassification) {
+  if (classification.kind === "domain-layer") {
+    return `${classification.domain}/${classification.layer}`;
+  }
+  if (classification.kind === "invalid") {
+    return `invalid ${classification.reason}`;
+  }
+  return classification.kind;
+}
+
+export function dependencyRemediation(decision: DependencyDecision) {
+  const isDomainLayerDependency =
+    decision.source.kind === "domain-layer" && decision.target.kind === "domain-layer";
+  if (isDomainLayerDependency) {
+    if (decision.source.domain !== decision.target.domain) {
+      const declared = allowedDomainDependencies[decision.source.domain];
+      const domainList = declared.length > 0 ? declared.join(", ") : "no other domains";
+      return `Route the dependency through an allowed types, service, or runtime contract at the same or an earlier layer. ${decision.source.domain} may depend on ${domainList}.`;
+    }
+    const layers = allowedLayerDependencies[decision.source.layer].join(", ");
+    return `Move the dependency behind ${decision.source.layer} or an earlier allowed layer. ${decision.source.layer} may import ${layers}.`;
+  }
+  const isDomainProviderDependency =
+    decision.source.kind === "domain-layer" && decision.target.kind === "providers";
+  if (isDomainProviderDependency) {
+    return "Inject Providers through repo, service, or runtime. UI, config, and types must use domain contracts.";
+  }
+  const isAppDomainDependency =
+    decision.source.kind === "app" && decision.target.kind === "domain-layer";
+  if (isAppDomainDependency) {
+    return "App code consumes domain types, service contracts, runtimes, and UI. Close config and repo dependencies inside exported domain Layers.";
+  }
+  return "Move the dependency to the owning domain layer or compose it in app wiring.";
 }
 
 export function findLayerDependencyCycle(
@@ -355,17 +330,8 @@ function getSourceRelativePath(filePath: string) {
   return normalized.startsWith("src/") ? normalized.slice("src/".length) : undefined;
 }
 
-function sourcePathKey(filePath: string) {
-  const relativePath = getSourceRelativePath(filePath);
-  return relativePath ? `src/${relativePath}` : normalizePath(filePath);
-}
-
 function isDomainName(value: string | undefined): value is DomainName {
   return domainNames.some((domain) => domain === value);
-}
-
-function isLegacySourceRoot(value: string | undefined) {
-  return legacySourceRoots.some((root) => root === value);
 }
 
 function isDomainLayer(value: string | undefined): value is DomainLayer {

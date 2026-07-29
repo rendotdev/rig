@@ -19,7 +19,20 @@
         "ignoreEffectErrorsInTscExitCode": false,
         "overrides": [
           {
-            "include": ["src/tools/execution/**/*.ts"],
+            "include": [
+              "src/app/**/*.ts",
+              "src/app/**/*.tsx",
+              "src/domains/**/*.ts",
+              "src/domains/**/*.tsx",
+              "src/providers/**/*.ts",
+              "src/providers/**/*.tsx"
+            ],
+            "exclude": [
+              "src/**/*.test.ts",
+              "src/**/*.test.tsx",
+              "src/app/cli/composition-root.ts",
+              "src/domains/tools/runtime/tool-sdk.ts"
+            ],
             "options": {
               "diagnosticSeverity": {
                 "floatingEffect": "error",

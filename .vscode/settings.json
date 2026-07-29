@@ -1,4 +1,10 @@
 {
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxc": "explicit"
+  },
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "file",
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.expand": false,
   "explorer.fileNesting.patterns": {
@@ -8,9 +14,28 @@
   "files.watcherExclude": {
     "**/repos/**": true
   },
-  "javascript.preferences.autoImportFileExcludePatterns": ["${workspaceFolder}/repos/**"],
+  "js/ts.preferences.autoImportFileExcludePatterns": ["${workspaceFolder}/repos/**"],
+  "npm.scriptRunner": "vp",
+  "oxc.fmt.configPath": "./vite.config.ts",
+  "oxc.lint.customization": {
+    "require-yield": {
+      "severity": "off"
+    }
+  },
+  "oxc.typeAware": true,
   "search.exclude": {
     "**/repos/**": true
   },
-  "typescript.preferences.autoImportFileExcludePatterns": ["${workspaceFolder}/repos/**"]
+  "[javascript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  }
 }

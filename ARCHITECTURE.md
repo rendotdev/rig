@@ -28,9 +28,8 @@ Each domain may contain these layers:
 types -> config -> repo -> service -> runtime -> ui
 ```
 
-Only create a layer directory when the domain has code for it. Every domain exposes a
-deliberate public API from `index.ts`. Cross-domain and app imports use that API instead of
-importing domain internals.
+Only create a layer directory when the domain has code for it. Every service and type is exported
+from the concrete module that owns it. Cross-domain and app imports name that module directly.
 
 ## Domain ownership
 
@@ -66,6 +65,23 @@ Top-level responsibilities:
 External data is parsed at `repo`, `runtime`, or `app` boundaries before it enters domain
 behavior. Keep Rig's public SDK Promise-based and Zod-based while internal architecture moves.
 
+## Domain dependency graph
+
+Domain edges are explicit and acyclic. A domain may depend only on the domains declared here:
+
+| Domain        | Allowed domain dependencies           |
+| ------------- | ------------------------------------- |
+| `collections` | none                                  |
+| `registry`    | `settings`                            |
+| `scheduling`  | `settings`, `tools`                   |
+| `settings`    | none                                  |
+| `tools`       | `collections`, `registry`, `settings` |
+| `updates`     | `settings`                            |
+
+Across an allowed domain edge, code imports only `types`, `service`, or `runtime` contracts at
+the same or an earlier layer. Config and repository implementations remain private to their
+owning domain. The architecture model rejects undeclared edges even when they would be acyclic.
+
 ## Effect v4 reliability harness
 
 Rig keeps its existing libraries and uses Effect v4 as the internal orchestration harness. Effect
@@ -74,8 +90,8 @@ retries, schedules, and tracing. Commander, Ink, Zod, Bun SQLite, and other focu
 in place behind Effect services when they already solve their responsibility well.
 
 - Model capabilities with `Context.Service`; use stable `@rendotdev/rig/...` service identities.
-- Expose the production implementation as `layer`; name alternatives `testLayer`, `bunLayer`,
-  `sqliteLayer`, or another camel-case name ending in `Layer`.
+- Export production implementations with descriptive camel-case names ending in `Layer`.
+- Name alternatives `testLayer`, `bunLayer`, `sqliteLayer`, or another role-specific `Layer` name.
 - Model recoverable operational failures with `Schema.TaggedErrorClass` and an `Error` suffix.
 - Use `Schema.Class` and branded schemas for domain entities and value objects when migrating them.
 - Use `Effect.acquireRelease`, `Layer.scoped`, or `Scope` for every owned closeable resource.
@@ -84,7 +100,8 @@ in place behind Effect services when they already solve their responsibility wel
 - Adapt existing Promise and Zod APIs at the boundary instead of forcing downstream tools to move.
 - Retry only transient, idempotent operations; cap attempts and use an explicit `Schedule` policy.
 - Preserve the final failure cause when retries are exhausted and record retry attempts in spans.
-- Keep pure transformations, React components, and Zod authoring APIs free of unnecessary Effect.
+- Keep private pure transformations as local const arrows inside their owning service `make`.
+- Keep React rendering and the public Zod SDK compatible while services own their supporting behavior.
 
 The pinned Effect source lives under `repos/effect` as a shallow, read-only git submodule. Run
 `vp run effect:reference` when it is missing from a fresh checkout. Production code imports the
@@ -95,41 +112,38 @@ installed `effect` packages, never files under `repos/effect`. Agents should rea
 
 Within a domain, a layer may import itself and the layers listed below:
 
-| Source    | Allowed targets                                                     |
-| --------- | ------------------------------------------------------------------- |
-| `types`   | `types`, `utils`                                                    |
-| `config`  | `types`, `config`, `utils`                                          |
-| `repo`    | `types`, `config`, `repo`, `providers`, `utils`                     |
-| `service` | `types`, `config`, `repo`, `service`, `providers`, `utils`          |
-| `runtime` | `types`, `config`, `service`, `runtime`, `providers`, `utils`       |
-| `ui`      | `types`, `config`, `service`, `runtime`, `ui`, `providers`, `utils` |
+| Source    | Allowed targets                                               |
+| --------- | ------------------------------------------------------------- |
+| `types`   | `types`, `utils`                                              |
+| `config`  | `types`, `config`, `utils`                                    |
+| `repo`    | `types`, `config`, `repo`, `providers`, `utils`               |
+| `service` | `types`, `config`, `repo`, `service`, `providers`, `utils`    |
+| `runtime` | `types`, `config`, `service`, `runtime`, `providers`, `utils` |
+| `ui`      | `types`, `config`, `service`, `runtime`, `ui`, `utils`        |
 
 Additional rules:
 
-- Cross-domain imports use `domains/<domain>/index.ts` or a deliberate layer `index.ts`.
-- `app` imports domain public APIs, providers, and utilities.
+- Import cross-domain symbols from the module that owns them; barrel files are forbidden.
+- `app` imports domain types, services, runtimes, UI, providers, and utilities.
+- Close config and repo dependencies inside exported domain layers before app wiring consumes them.
 - Providers import only providers, utilities, and external packages.
 - Utilities import only utilities and external packages.
 - Tooling imports only tooling, utilities, and external packages.
 - Domains and providers never import `app`.
 - Production code never imports `tooling`.
-- Migrated code cannot import a legacy source root.
-- Legacy code may import migrated public APIs while its vertical is being moved.
+- Domain `repo`, `service`, and `runtime` layers may use Providers; types, config, and UI may not.
+- Every production module must classify under this model; there is no legacy source escape hatch.
 
 `src/tooling/architecture/architecture.ts` is the executable source of truth. Custom Oxlint
 rules and structural tests consume the same model.
 
-## Migration sequence
+## Mechanical enforcement
 
-Rig currently has legacy roots listed in the shared architecture model. They are temporary,
-explicit migration allowances rather than permanent exceptions.
-
-1. Move one business capability into `domains/<domain>/<layer>`.
-2. Add the domain or layer public `index.ts`.
-3. Update outside consumers to use the public API.
-4. Use `Context.Service`, `Layer`, or plain TypeScript according to the capability.
-5. Remove the migrated legacy root or narrow its allowance.
-6. Run `vp run ci` before moving the next high-risk runtime seam.
+- `src/tooling/architecture/architecture.ts` owns the layer and domain matrices.
+- Oxlint rejects invalid source locations and dependency edges with concrete remediation.
+- Structural tests parse every production import with the TypeScript AST and validate the real graph.
+- CI runs architecture lint, structural tests, Effect diagnostics, dead-code analysis, and behavior tests.
+- Human review feedback becomes a documented invariant or a mechanical rule when it can recur.
 
 ## Taste invariants
 
@@ -137,7 +151,6 @@ explicit migration allowances rather than permanent exceptions.
 - Test files contain at most 600 meaningful lines.
 - Functions and methods contain at most 80 meaningful lines.
 - Blank and comment-only lines do not count toward these limits.
-- Existing oversized files use exact migration ceilings and cannot grow.
-- Migration ceilings shrink or disappear as each file is split.
 - Split by responsibility and layer; avoid generic helper buckets.
+- Assign compound `if` conditions to descriptive boolean constants.
 - Boundary diagnostics include concrete remediation for the next agent run.
