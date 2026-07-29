@@ -64,7 +64,7 @@ Do not implement anything yet. Ask the user which workflow they want to implemen
 
 ## Agent?
 
-<!-- Keep in sync with src/agents/instructions.ts -->
+<!-- Keep in sync with src/domains/tools/config/agent-instructions.ts -->
 
 > Are you an AI agent looking for how to use rig? Assume the following:
 

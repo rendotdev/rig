@@ -1,6 +1,8 @@
 import type { ESTree, Node, Rule } from "@oxlint/plugins";
 import { defineRule } from "@oxlint/plugins";
 import {
+  dependencyRemediation,
+  describeSourceClassification,
   resolveImportTarget,
   type DependencyDecision,
   validateDependency,
@@ -27,7 +29,15 @@ export function defineDependencyRule(definition: DependencyRuleDefinition): Rule
         }
         const decision = validateDependency(context.filename, target);
         if (definition.shouldReport(decision)) {
-          context.report({ node, messageId: "invalidDependency" });
+          context.report({
+            node,
+            messageId: "invalidDependency",
+            data: {
+              source: describeSourceClassification(decision.source),
+              target: describeSourceClassification(decision.target),
+              remediation: dependencyRemediation(decision),
+            },
+          });
         }
       }
       return {
@@ -57,8 +67,5 @@ export function defineDependencyRule(definition: DependencyRuleDefinition): Rule
 }
 
 export function isPublicApiViolation(decision: DependencyDecision) {
-  return (
-    !decision.allowed &&
-    (decision.reason === "app-internal-domain" || decision.reason === "cross-domain-internal")
-  );
+  return decision.target.kind === "invalid" && decision.target.reason === "source-location";
 }

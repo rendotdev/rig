@@ -1,101 +1,60 @@
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
-import {
-  RigError,
-  RigErrorClass,
-  RigErrorsClass,
-  RigErrorSingleton,
-  rigErrors,
-  type RigError as RigErrorInstance,
-} from "./rig-error";
+import { RigError, RigErrorNormalizationService, rigErrorNormalizationLayer } from "./rig-error";
 
-describe("RigErrorSingleton", () => {
-  it("creates Rig errors through the production singleton", () => {
-    const details = { field: "name" };
-    const productionError = RigErrorSingleton.create({
-      code: "INPUT_ERROR",
-      message: "Invalid name.",
-      details,
-    });
-    const builtError = RigErrorSingleton.create({
-      code: "CONFIG_INVALID",
-      message: "Invalid config.",
-    });
+class WrappedError extends Schema.TaggedErrorClass<WrappedError>()("WrappedError", {
+  cause: Schema.Defect(),
+}) {}
 
-    expect(productionError).toBeInstanceOf(Error);
-    expect(productionError).toBeInstanceOf(RigErrorClass);
-    expect(productionError).toMatchObject({
-      name: "RigError",
-      code: "INPUT_ERROR",
-      message: "Invalid name.",
-      details,
-    });
-    expect(builtError).toMatchObject({
-      name: "RigError",
-      code: "CONFIG_INVALID",
-      message: "Invalid config.",
-      details: undefined,
-    });
-  });
+const normalize = (cause: unknown) =>
+  RigErrorNormalizationService.use((service) => service.normalize(cause)).pipe(
+    Effect.provide(rigErrorNormalizationLayer),
+    Effect.runPromise,
+  );
 
-  it("preserves Rig error identity and normalizes other errors", () => {
-    const existing = RigErrorSingleton.create({ code: "TOOL_INVALID", message: "Invalid tool." });
-
-    expect(RigErrorSingleton.from({ error: existing })).toBe(existing);
-    expect(RigErrorSingleton.from({ error: new Error("Plain failure.") })).toMatchObject({
-      name: "RigError",
-      code: "INTERNAL_ERROR",
-      message: "Plain failure.",
-      details: undefined,
-    });
-    expect(RigErrorSingleton.from({ error: "String failure." })).toMatchObject({
-      name: "RigError",
-      code: "INTERNAL_ERROR",
-      message: "String failure.",
-      details: undefined,
-    });
-  });
-});
-
-describe("Rig error compatibility adapters", () => {
-  it("keeps RigErrorClass and RigError constructible without production classes", () => {
+describe("RigError", () => {
+  it("is a schema-backed tagged error", () => {
     const details = { command: "missing" };
-    const classError = new RigErrorClass("COMMAND_NOT_FOUND", "Missing command.", details);
-    const aliasError: RigErrorInstance = new RigError("INPUT_ERROR", "Invalid input.");
+    const error = new RigError({
+      code: "COMMAND_NOT_FOUND",
+      message: "Missing command.",
+      details: details,
+    });
 
-    expect(RigError).toBe(RigErrorClass);
-    expect(RigErrorClass.name).toBe("RigErrorClass");
-    expect(classError).toBeInstanceOf(Error);
-    expect(classError).toBeInstanceOf(RigErrorClass);
-    expect(aliasError).toBeInstanceOf(RigErrorClass);
-    expect(classError).toMatchObject({
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(RigError);
+    expect(error).toMatchObject({
+      _tag: "RigError",
       name: "RigError",
       code: "COMMAND_NOT_FOUND",
       message: "Missing command.",
       details,
     });
-    expect(aliasError.details).toBeUndefined();
-    expect(RigErrorClass.prototype.constructor).toBe(RigErrorClass);
   });
 
-  it("keeps RigErrorsClass construction, prototype behavior, and rigErrors normalization", () => {
-    const errors = new RigErrorsClass();
-    const existing = new RigErrorClass("CRON_ERROR", "Invalid schedule.");
-
-    expect(errors).toBeInstanceOf(RigErrorsClass);
-    expect(RigErrorsClass.name).toBe("RigErrorsClass");
-    expect(Object.hasOwn(RigErrorsClass.prototype, "from")).toBe(true);
-    expect(errors.from(existing)).toBe(existing);
-    expect(RigErrorsClass.prototype.from(existing)).toBe(existing);
-    expect(rigErrors.from(existing)).toBe(existing);
-    expect(rigErrors.from(new Error("Plain failure."))).toMatchObject({
-      name: "RigError",
-      code: "INTERNAL_ERROR",
-      message: "Plain failure.",
+  it("preserves a RigError nested inside typed Effect errors", async () => {
+    const expected = new RigError({
+      code: "CONFIG_INVALID",
+      message: "Config is not valid JSON.",
+      details: { path: "rig.json" },
     });
-    expect(rigErrors.from(42)).toMatchObject({
-      name: "RigError",
+
+    await expect(normalize(new WrappedError({ cause: expected }))).resolves.toBe(expected);
+  });
+
+  it("extracts a useful message from nested platform errors", async () => {
+    const error = await normalize(new WrappedError({ cause: new Error("write failed") }));
+
+    expect(error).toMatchObject({ code: "INTERNAL_ERROR", message: "write failed" });
+  });
+
+  it("uses a stable fallback for cyclic unknown errors", async () => {
+    const error: { cause?: unknown } = {};
+    error.cause = error;
+
+    await expect(normalize(error)).resolves.toMatchObject({
       code: "INTERNAL_ERROR",
-      message: "42",
+      message: "Unknown Rig failure.",
     });
   });
 });

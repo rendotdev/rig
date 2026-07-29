@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const RigCronJobSchema = z.object({
+const RigCronJobSchema = z.object({
   name: z.string().regex(/^[A-Za-z0-9_-]+$/),
   command: z.string().min(1),
   schedule: z.string().min(1),

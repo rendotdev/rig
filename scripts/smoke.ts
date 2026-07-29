@@ -1,3 +1,7 @@
-import { SmokeScriptClass } from "./lib/smoke";
+import { BunRuntime } from "@effect/platform-bun";
+import { Effect } from "effect";
+import { SmokeScriptService } from "./lib/smoke";
 
-await new SmokeScriptClass().run();
+BunRuntime.runMain(
+  SmokeScriptService.use((service) => service.run).pipe(Effect.provide(SmokeScriptService.layer)),
+);

@@ -8,7 +8,7 @@ type CronFunction = {
   remove(title: string): Promise<void>;
 };
 
-class FakeCronLogClass {
+class FakeCronLog {
   public constructor(private readonly path: string | undefined) {}
 
   public async append(params: Record<string, string>): Promise<void> {
@@ -18,7 +18,7 @@ class FakeCronLogClass {
   }
 }
 
-const log = new FakeCronLogClass(process.env.RIG_FAKE_CRON_LOG);
+const log = new FakeCronLog(process.env.RIG_FAKE_CRON_LOG);
 const cron = (async (path: string, schedule: string, title: string) => {
   await log.append({ operation: "register", path, schedule, title });
   if (schedule === process.env.RIG_FAKE_CRON_FAIL_REGISTER_SCHEDULE) {
@@ -38,11 +38,5 @@ cron.remove = async (title: string) => {
 
 const entrypoint = process.env.RIG_DISTRIBUTION_ENTRY;
 if (!entrypoint) throw new Error("RIG_DISTRIBUTION_ENTRY is required.");
-const module = (await import(pathToFileURL(entrypoint).href)) as {
-  CliApplicationClass: new () => { run(argv: string[]): Promise<void> };
-};
-await new module.CliApplicationClass().run([
-  process.execPath,
-  entrypoint,
-  ...process.argv.slice(2),
-]);
+process.argv.splice(1, 1, entrypoint);
+await import(pathToFileURL(entrypoint).href);

@@ -7,6 +7,49 @@
     "types": ["bun-types"],
     "strict": true,
     "skipLibCheck": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": true,
+        "refactors": true,
+        "quickinfo": true,
+        "completions": true,
+        "ignoreEffectSuggestionsInTscExitCode": true,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false,
+        "overrides": [
+          {
+            "include": [
+              "src/app/**/*.ts",
+              "src/app/**/*.tsx",
+              "src/domains/**/*.ts",
+              "src/domains/**/*.tsx",
+              "src/providers/**/*.ts",
+              "src/providers/**/*.tsx"
+            ],
+            "exclude": [
+              "src/**/*.test.ts",
+              "src/**/*.test.tsx",
+              "src/app/cli/composition-root.ts",
+              "src/domains/tools/runtime/tool-sdk.ts"
+            ],
+            "options": {
+              "diagnosticSeverity": {
+                "floatingEffect": "error",
+                "missingEffectContext": "error",
+                "missingEffectError": "error",
+                "missingLayerContext": "error",
+                "missingReturnYieldStar": "error",
+                "outdatedApi": "error",
+                "runEffectInsideEffect": "warning",
+                "strictEffectProvide": "warning",
+                "tryCatchInEffectGen": "warning"
+              }
+            }
+          }
+        ]
+      }
+    ],
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "forceConsistentCasingInFileNames": true

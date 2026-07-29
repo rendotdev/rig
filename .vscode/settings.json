@@ -1,8 +1,41 @@
 {
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxc": "explicit"
+  },
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "file",
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.expand": false,
   "explorer.fileNesting.patterns": {
     "*.ts": "${capture}.test.ts, ${capture}.spec.ts",
     "*.tsx": "${capture}.test.tsx, ${capture}.spec.tsx"
+  },
+  "files.watcherExclude": {
+    "**/repos/**": true
+  },
+  "js/ts.preferences.autoImportFileExcludePatterns": ["${workspaceFolder}/repos/**"],
+  "npm.scriptRunner": "vp",
+  "oxc.fmt.configPath": "./vite.config.ts",
+  "oxc.lint.customization": {
+    "require-yield": {
+      "severity": "off"
+    }
+  },
+  "oxc.typeAware": true,
+  "search.exclude": {
+    "**/repos/**": true
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
   }
 }
