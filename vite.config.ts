@@ -42,12 +42,12 @@ export default defineConfig({
         output: [],
       },
       "dead-code": {
-        command: "knip --treat-config-hints-as-errors",
+        command: "knip-bun --treat-config-hints-as-errors",
         input: [
           "src/**",
           "scripts/**",
           "test/**",
-          "knip.json",
+          "knip.ts",
           "package.json",
           "tsconfig.json",
           "vite.config.ts",
