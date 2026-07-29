@@ -117,6 +117,7 @@ describe("cli application", () => {
     expect(output).toContain("Version:");
     expect(output).toContain("Rig update available: @rendotdev/rig");
     expect(output).toContain("-> 999.0.0");
+    expect(output).toContain("Run rig update.");
   });
 
   test("prints rig home folder migration notices", async () => {

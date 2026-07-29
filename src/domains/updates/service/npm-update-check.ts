@@ -49,7 +49,7 @@ export class NpmUpdateCheckService extends Context.Service<
             packageName: config.packageName,
             currentVersion,
             latestVersion,
-            message: `Rig update available: ${config.packageName} ${currentVersion} -> ${latestVersion}. Run npm install -g ${config.packageName}.`,
+            message: `Rig update available: ${config.packageName} ${currentVersion} -> ${latestVersion}. Run rig update.`,
           };
     const check = Effect.fn("NpmUpdateCheckService.check")(function* (currentVersion: string) {
       if ((yield* platform.environmentFlag("RIG_UPDATE_CHECK")) === "0") return undefined;

@@ -96,7 +96,7 @@ describe("npm update checks", () => {
     await expect(check("1.2.3", layer)).resolves.toMatchObject({
       currentVersion: "1.2.3",
       latestVersion: "1.2.4",
-      message: "Rig update available: @scope/tool 1.2.3 -> 1.2.4. Run npm install -g @scope/tool.",
+      message: "Rig update available: @scope/tool 1.2.3 -> 1.2.4. Run rig update.",
     });
     expect(urls).toEqual(["https://registry.npmjs.org/%40scope%2Ftool/latest"]);
     const cachePath = join(home, "rig", "update-check.json");
